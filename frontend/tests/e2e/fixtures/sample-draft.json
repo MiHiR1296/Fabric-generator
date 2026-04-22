@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "sourceType": "json",
+  "shaftCount": 4,
+  "treadleCount": 4,
+  "threading": [1, 2, 3, 4, 1, 2, 3, 4],
+  "tieUp": [
+    [true, false, false, true],
+    [true, true, false, false],
+    [false, true, true, false],
+    [false, false, true, true]
+  ],
+  "treadling": [1, 2, 3, 4, 1, 2, 3, 4],
+  "drawdown": [],
+  "warpColors": ["#f3ede2"],
+  "weftColors": ["#b85e3c"],
+  "parseConfidence": 1,
+  "warnings": []
+}
