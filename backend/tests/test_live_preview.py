@@ -6,6 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from PIL import Image
+
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -16,7 +18,7 @@ from app.models import YarnAsset  # noqa: E402
 
 
 class LivePreviewTests(unittest.TestCase):
-    def test_update_project_preview_captures_camera_preview(self) -> None:
+    def test_update_project_preview_renders_camera_preview(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             live_preview_root = root / "live_preview"
@@ -31,19 +33,10 @@ class LivePreviewTests(unittest.TestCase):
                 payload = params or {}
                 commands.append((command_type, payload))
                 if command_type == "execute_code":
-                    return {"status": "success", "result": {"status": "preview_ready"}}
-                if command_type == "get_viewport_screenshot":
-                    filepath = Path(str(payload["filepath"]))
+                    filepath = live_preview_root / "Preview-Session-01" / "preview.png"
                     filepath.parent.mkdir(parents=True, exist_ok=True)
-                    filepath.write_bytes(b"png")
-                    return {
-                        "status": "success",
-                        "result": {
-                            "filepath": str(filepath),
-                            "width": 1024,
-                            "height": 768,
-                        },
-                    }
+                    Image.new("RGBA", (64, 32), (200, 100, 50, 255)).save(filepath)
+                    return {"status": "success", "result": {"status": "rendered"}}
                 raise AssertionError(f"Unexpected Blender command: {command_type}")
 
             with patch("app.live_preview.ensure_runtime_dirs", lambda: None), patch(
@@ -90,13 +83,13 @@ class LivePreviewTests(unittest.TestCase):
             self.assertEqual(preview["status"], "ready")
             self.assertEqual(preview["sessionId"], "Preview-Session-01")
             self.assertIn("/api/blender/live-preview/Preview-Session-01/image", preview["imageUrl"])
-            self.assertEqual(preview["width"], 1024)
-            self.assertEqual(preview["height"], 768)
+            self.assertEqual(preview["width"], 64)
+            self.assertEqual(preview["height"], 32)
             self.assertEqual(preview["message"], "Blender camera preview updated.")
             self.assertEqual(commands[0][0], "execute_code")
-            self.assertIn("preview_ready", commands[0][1]["code"])
-            self.assertIn("bpy.ops.view3d.view_camera()", commands[0][1]["code"])
-            self.assertEqual(commands[1][0], "get_viewport_screenshot")
+            self.assertIn("scene.render.engine = render_engine_override", commands[0][1]["code"])
+            self.assertIn("scene.cycles.samples = max(1, int(render_samples_override))", commands[0][1]["code"])
+            self.assertIn("bpy.ops.render.render(write_still=True)", commands[0][1]["code"])
             self.assertTrue((live_preview_root / "Preview-Session-01" / "preview.png").exists())
             self.assertTrue((live_preview_root / "Preview-Session-01" / "project.json").exists())
 

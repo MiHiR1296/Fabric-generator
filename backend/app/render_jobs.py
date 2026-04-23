@@ -97,6 +97,8 @@ def build_headless_render_script(
     weft_material_ids: list[int] | None = None,
     material_assets: list[dict[str, Any]] | None = None,
     preview_only: bool = False,
+    render_engine: str | None = None,
+    render_samples: int | None = None,
 ) -> str:
     drawdown = validate_drawdown_matrix(draft.get("drawdown"))
     render_path_json = json.dumps(str(Path(render_path)))
@@ -114,6 +116,8 @@ def build_headless_render_script(
         if normalized_material_assets
         else (atlas_bundle.rows if atlas_bundle is not None else None)
     )
+    render_engine_json = json.dumps(render_engine) if render_engine is not None else "None"
+    render_samples_literal = repr(render_samples)
     sync_code = build_blender_sync_code(
         {
             **draft,
@@ -208,6 +212,10 @@ def find_principled_node(material):
             return node
     return None
 
+def disconnect_socket_links(socket):
+    for link in list(socket.links):
+        socket.id_data.links.remove(link)
+
 def find_connected_image_texture(material, socket_name):
     shader = find_principled_node(material)
     if shader is None:
@@ -229,6 +237,36 @@ def find_connected_image_texture(material, socket_name):
                 queue.append(link.from_node)
     return None
 
+def find_image_texture_node(material, node_name):
+    node = material.node_tree.nodes.get(node_name)
+    if node is not None and node.bl_idname == 'ShaderNodeTexImage':
+        return node
+    return None
+
+def pick_texture_nodes(material):
+    diffuse_node = find_image_texture_node(material, 'FabricStudioDiffuseNode')
+    alpha_node = find_image_texture_node(material, 'FabricStudioAlphaNode')
+    if diffuse_node is not None and alpha_node is not None:
+        return diffuse_node, alpha_node
+
+    diffuse_node = diffuse_node or find_connected_image_texture(material, 'Base Color')
+    alpha_node = alpha_node or find_connected_image_texture(material, 'Alpha')
+
+    image_nodes = [node for node in material.node_tree.nodes if node.bl_idname == 'ShaderNodeTexImage']
+    if diffuse_node is None and image_nodes:
+        diffuse_node = image_nodes[0]
+    if alpha_node is None:
+        alpha_candidates = [node for node in image_nodes if node is not diffuse_node]
+        if alpha_candidates:
+            alpha_node = alpha_candidates[0]
+
+    if diffuse_node is not None:
+        diffuse_node.name = 'FabricStudioDiffuseNode'
+    if alpha_node is not None:
+        alpha_node.name = 'FabricStudioAlphaNode'
+
+    return diffuse_node, alpha_node
+
 def ensure_template_preview_material(template_material, asset_entry, index):
     material_name = f"FabricStudioMaterial_{index:02d}_{asset_entry['id'][:8]}"
     material = bpy.data.materials.get(material_name)
@@ -236,20 +274,61 @@ def ensure_template_preview_material(template_material, asset_entry, index):
         material = template_material.copy()
         material.name = material_name
 
-    diffuse_node = find_connected_image_texture(material, 'Base Color')
-    alpha_node = find_connected_image_texture(material, 'Alpha')
-    if diffuse_node is None or alpha_node is None:
+    shader = find_principled_node(material)
+    diffuse_node, alpha_node = pick_texture_nodes(material)
+    if shader is None or diffuse_node is None or alpha_node is None:
         raise RuntimeError(
             "The template material must have image textures connected to Principled BSDF Base Color and Alpha."
         )
 
     diffuse_node.image = ensure_image(f"{material_name}_Diffuse", asset_entry['diffusePath'], 'sRGB')
     alpha_node.image = ensure_image(f"{material_name}_Alpha", asset_entry['alphaPath'], 'Non-Color')
+    disconnect_socket_links(shader.inputs['Alpha'])
+    shader.inputs['Alpha'].default_value = 1.0
+    try:
+        material.blend_method = 'OPAQUE'
+    except Exception:
+        pass
+    if hasattr(material, 'surface_render_method'):
+        try:
+            material.surface_render_method = 'DITHERED'
+        except Exception:
+            pass
     return material
 
 def remove_socket_links(socket):
     for link in list(socket.links):
         socket.id_data.links.remove(link)
+
+def remove_output_links(socket):
+    for link in list(socket.links):
+        socket.id_data.links.remove(link)
+
+def is_dynamic_render_set_node(node):
+    return node is not None and str(node.name).startswith('Render Set Material ')
+
+def collect_render_chain_downstream_sockets(mesh_material_node):
+    sockets = []
+    seen = set()
+    chain_nodes = [mesh_material_node]
+    chain_nodes.extend(
+        node for node in mesh_material_node.id_data.nodes
+        if is_dynamic_render_set_node(node)
+    )
+    for node in chain_nodes:
+        geometry_output = node.outputs.get('Geometry')
+        if geometry_output is None:
+            continue
+        for link in list(geometry_output.links):
+            if is_dynamic_render_set_node(link.to_node):
+                continue
+            socket = link.to_socket
+            socket_id = (socket.node.name, socket.name)
+            if socket_id in seen:
+                continue
+            seen.add(socket_id)
+            sockets.append(socket)
+    return sockets
 
 def ensure_colour_material_chain(weave_group, materials):
     if not materials:
@@ -275,8 +354,15 @@ def ensure_colour_material_chain(weave_group, materials):
     colour_attr.data_type = 'INT'
     colour_attr.inputs['Name'].default_value = 'colour_id'
 
-    downstream_sockets = [link.to_socket for link in mesh_material_node.outputs['Geometry'].links]
-    remove_socket_links(mesh_material_node.outputs['Geometry'])
+    downstream_sockets = collect_render_chain_downstream_sockets(mesh_material_node)
+    remove_output_links(mesh_material_node.outputs['Geometry'])
+
+    for existing_node in weave_group.nodes:
+        if not is_dynamic_render_set_node(existing_node):
+            continue
+        remove_socket_links(existing_node.inputs['Geometry'])
+        remove_socket_links(existing_node.inputs['Selection'])
+        remove_output_links(existing_node.outputs['Geometry'])
 
     previous_node = mesh_material_node
     for material_index, material in enumerate(materials[1:], start=1):
@@ -346,14 +432,10 @@ def ensure_atlas_preview_material(name, diffuse_path, alpha_path, rows):
     nodes.clear()
 
     output = nodes.new('ShaderNodeOutputMaterial')
-    output.location = (960, 0)
-    transparent = nodes.new('ShaderNodeBsdfTransparent')
-    transparent.location = (520, 160)
+    output.location = (760, 0)
     shader = nodes.new('ShaderNodeBsdfPrincipled')
     shader.location = (520, -40)
     shader.inputs['Roughness'].default_value = 0.72
-    mix_shader = nodes.new('ShaderNodeMixShader')
-    mix_shader.location = (760, 40)
 
     uv_attr = nodes.new('ShaderNodeAttribute')
     uv_attr.location = (-980, -220)
@@ -387,8 +469,6 @@ def ensure_atlas_preview_material(name, diffuse_path, alpha_path, rows):
     alpha_tex = nodes.new('ShaderNodeTexImage')
     alpha_tex.location = (320, 100)
     alpha_tex.image = ensure_image('FabricStudioAlphaAtlas', alpha_path, 'Non-Color')
-    alpha_bw = nodes.new('ShaderNodeRGBToBW')
-    alpha_bw.location = (520, 100)
 
     links.new(uv_attr.outputs['Vector'], uv_sep.inputs['Vector'])
     links.new(uv_sep.outputs['X'], u_fract.inputs[0])
@@ -401,11 +481,7 @@ def ensure_atlas_preview_material(name, diffuse_path, alpha_path, rows):
     links.new(atlas_vector.outputs['Vector'], diffuse_tex.inputs['Vector'])
     links.new(atlas_vector.outputs['Vector'], alpha_tex.inputs['Vector'])
     links.new(diffuse_tex.outputs['Color'], shader.inputs['Base Color'])
-    links.new(alpha_tex.outputs['Color'], alpha_bw.inputs['Color'])
-    links.new(alpha_bw.outputs['Val'], mix_shader.inputs['Fac'])
-    links.new(transparent.outputs['BSDF'], mix_shader.inputs[1])
-    links.new(shader.outputs['BSDF'], mix_shader.inputs[2])
-    links.new(mix_shader.outputs['Shader'], output.inputs['Surface'])
+    links.new(shader.outputs['BSDF'], output.inputs['Surface'])
     return material
 """
     if normalized_material_assets and len(normalized_material_assets) <= 4:
@@ -432,6 +508,29 @@ scene = bpy.context.scene
 scene.render.use_file_extension = True
 scene.render.image_settings.file_format = 'PNG'
 scene.render.filepath = {render_path_json}
+render_engine_override = {render_engine_json}
+render_samples_override = {render_samples_literal}
+
+if scene.camera is None:
+    fallback_camera = bpy.data.objects.get('Camera')
+    if fallback_camera is not None and fallback_camera.type == 'CAMERA':
+        scene.camera = fallback_camera
+
+if render_engine_override:
+    try:
+        scene.render.engine = render_engine_override
+    except Exception:
+        pass
+
+if render_samples_override is not None:
+    try:
+        if scene.render.engine == 'CYCLES' and hasattr(scene, 'cycles'):
+            scene.cycles.samples = max(1, int(render_samples_override))
+        elif scene.render.engine in ('BLENDER_EEVEE', 'BLENDER_EEVEE_NEXT') and hasattr(scene, 'eevee'):
+            if hasattr(scene.eevee, 'taa_render_samples'):
+                scene.eevee.taa_render_samples = max(1, int(render_samples_override))
+    except Exception:
+        pass
 
 target_obj = bpy.data.objects.get({target_name_json})
 if target_obj is not None:

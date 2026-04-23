@@ -28,7 +28,7 @@ This is intentionally lighter than a continuous live render session.
   - resolve ready yarn assets
   - build material assignments from the processed diffuse/alpha outputs
   - push the update into the connected Blender session
-  - render a camera-framed Material Preview image
+  - render a camera-framed preview image directly from Blender's active camera
 - Expanded the Blender sync payload so the web app can drive:
   - warp/weft threads
   - spacing/amplitude/fill ratio
@@ -64,6 +64,8 @@ This is intentionally lighter than a continuous live render session.
   - fallback: `Material_01`
 - The backend duplicates that material, swaps the diffuse and alpha textures, and keeps the existing mapping logic already wired into the Blender file
 - This preserves the texture behavior already tuned in the material and geometry node setup
+- The duplicated preview materials now keep the yarn body opaque during rendering
+- The alpha texture is still loaded, but it is not used as literal material opacity in the automated preview/render path because the strand geometry already defines the silhouette and direct opacity produced an almost black fabric
 
 ## Local Testing Workflow
 
@@ -79,7 +81,7 @@ This is intentionally lighter than a continuous live render session.
 Expected result:
 
 - Blender applies the draft/material changes
-- Blender switches a 3D view to camera view in Material Preview mode
+- Blender renders the camera directly from the managed session
 - the backend writes a camera preview image
 - the browser refreshes the Step 3 preview image
 

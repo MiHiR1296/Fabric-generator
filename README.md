@@ -120,10 +120,16 @@ What happens on each update:
 
 - the frontend sends the full project snapshot plus the staged geometry settings
 - the backend syncs the draft and material assignments into the running Blender session
-- Blender switches a 3D view to `Material Preview` in camera view
-- the backend writes a camera-framed Material Preview image and returns it to the web UI
+- Blender renders the active camera directly from the managed session
+- the backend writes that camera-framed render to disk and returns it to the web UI
 
 This is intentionally not a live render loop. Controls are staged locally in the browser until the user confirms the batch of changes.
+
+Important material note:
+
+- the duplicated yarn preview materials still load both diffuse and alpha textures from the uploaded asset
+- the current preview/render path does not use the alpha map as literal shader opacity
+- the strand geometry already defines the yarn silhouette, so using the alpha map as transparency was collapsing the fabric into an overly black result
 
 By default the backend now runs Blender in `managed` session mode:
 

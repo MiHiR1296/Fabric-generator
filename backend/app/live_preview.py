@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from .blender_sync import send_blender_command, validate_drawdown_matrix
 from .fabric_project import (
     build_project_snapshot,
@@ -48,6 +50,8 @@ class BlenderPreview:
 
 _LOCK = threading.Lock()
 _PREVIEWS: dict[str, BlenderPreview] = {}
+DEFAULT_PREVIEW_RENDER_ENGINE = "CYCLES"
+DEFAULT_PREVIEW_RENDER_SAMPLES = 12
 
 
 def _utc_now() -> str:
@@ -120,29 +124,24 @@ def update_project_preview(
         warp_material_ids=warp_material_ids,
         weft_material_ids=weft_material_ids,
         material_assets=material_assets,
-        preview_only=True,
+        render_engine=DEFAULT_PREVIEW_RENDER_ENGINE,
+        render_samples=DEFAULT_PREVIEW_RENDER_SAMPLES,
     )
     response = send_blender_command("execute_code", {"code": code})
     if response.get("status") != "success":
         raise RuntimeError(response.get("message") or "Blender could not apply the live preview update.")
-
-    screenshot_response = send_blender_command(
-        "get_viewport_screenshot",
-        {
-            "filepath": str(preview_path),
-            "format": "PNG",
-            "max_size": int(max_size),
-        },
-    )
-    if screenshot_response.get("status") != "success":
-        raise RuntimeError(
-            screenshot_response.get("message") or "Blender could not capture the camera preview image."
-        )
     if not preview_path.exists():
-        raise RuntimeError("Blender reported a preview update, but no camera preview image was created.")
+        raise RuntimeError("Blender reported a preview update, but no camera render image was created.")
 
     updated_at = _utc_now()
-    screenshot_result = screenshot_response.get("result") or {}
+    width: int | None = None
+    height: int | None = None
+    try:
+        with Image.open(preview_path) as preview_image:
+            width, height = preview_image.size
+    except Exception:
+        width = None
+        height = None
     preview = BlenderPreview(
         session_id=safe_session_id,
         status="ready",
@@ -152,8 +151,8 @@ def update_project_preview(
         updated_at=updated_at,
         image_path=preview_path,
         image_url=f"/api/blender/live-preview/{safe_session_id}/image?v={updated_at}",
-        width=int(screenshot_result.get("width")) if screenshot_result.get("width") is not None else None,
-        height=int(screenshot_result.get("height")) if screenshot_result.get("height") is not None else None,
+        width=width,
+        height=height,
     )
 
     with _LOCK:

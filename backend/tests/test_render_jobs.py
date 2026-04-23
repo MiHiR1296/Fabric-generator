@@ -53,6 +53,24 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("/tmp/unit-preview.png", script)
         self.assertIn("bpy.ops.render.render(write_still=True)", script)
 
+    def test_build_headless_render_script_can_override_render_engine_and_samples(self) -> None:
+        script = build_headless_render_script(
+            {
+                "title": "Render Override Draft",
+                "drawdown": [[1]],
+                "warpColors": ["#ffffff"],
+                "weftColors": ["#111111"],
+            },
+            render_path="/tmp/unit-preview.png",
+            render_engine="CYCLES",
+            render_samples=12,
+        )
+
+        self.assertIn('render_engine_override = "CYCLES"', script)
+        self.assertIn("render_samples_override = 12", script)
+        self.assertIn("scene.render.engine = render_engine_override", script)
+        self.assertIn("scene.cycles.samples = max(1, int(render_samples_override))", script)
+
     def test_build_headless_render_script_supports_atlas_preview_material(self) -> None:
         atlas = AtlasBundle(
             diffuse_path=Path("/tmp/diffuse_atlas.png"),
