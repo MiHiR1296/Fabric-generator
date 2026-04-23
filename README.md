@@ -2,23 +2,35 @@
 
 One self-contained repo for the yarn-processing pipeline, the web-based weave draft builder, and the Blender preview scene.
 
+The current product flow is:
+
+- `Step 1` Upload yarn references and generate seamless diffuse + alpha maps
+- `Step 2` Build or import the weave draft in the web editor
+- `Step 3` Assign processed yarns to warp/weft color slots, stage geometry/material controls, and click `Update Preview` to refresh a Blender Material Preview screenshot
+
 ## Included In This Repo
 
 - `frontend/`
   - React + Vite app for:
   - `Step 1` yarn uploads and processing status
   - `Step 2` pattern building and draft import/editing
-  - `Step 3` color-to-yarn mapping and Blender preview
+  - `Step 3` color-to-yarn mapping and lazy Blender Material Preview
 - `backend/`
-  - FastAPI service for draft parsing, yarn asset processing, atlas generation, and Blender render jobs
+  - FastAPI service for draft parsing, yarn asset processing, live Blender preview sync, atlas generation, and Blender render jobs
 - `backend/vendor/yarn_pipeline/`
   - vendored yarn-processing code plus the required `big-lama` model split into repo-safe chunks
+- `scripts/`
+  - setup automation for teammate onboarding and fresh-machine checks
 - `Weave_GUIConnection.blend`
-  - Blender scene used for headless preview rendering
+  - Blender scene used for managed live preview and final render jobs
 - `docs/application-blueprint.md`
   - product and workflow reference for the pattern builder
+- `docs/system-setup.md`
+  - machine setup workflow, dependency manifests, and server notes
 - `runtime/`
-  - local storage root for generated yarn assets, render jobs, and saved project snapshots
+  - local storage root for generated yarn assets, render jobs, live preview screenshots, and saved project snapshots
+- `docs/live-preview-worklog.md`
+  - running notes for the staged Blender preview workflow and rollout path
 
 ## Important Note About Large Assets
 
@@ -28,10 +40,35 @@ The backend reconstructs `big-lama.pt` automatically on first use, so a fresh cl
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.9+
 - Node.js 20+
 - Blender
-## Quick Start
+
+## Fast Setup
+
+The recommended way to onboard a new machine is:
+
+```bash
+python3 scripts/setup_doctor.py
+python3 scripts/bootstrap.py --with-playwright
+```
+
+If Blender is missing and the machine has `brew`, `apt-get`, `dnf`, or `yum`, you can also try:
+
+```bash
+python3 scripts/bootstrap.py --install-blender
+```
+
+The doctor prints:
+
+- which required tools are present
+- which optional tools are missing
+- the exact Python and npm packages this repo will install
+- whether the backend virtualenv, frontend `node_modules`, and Playwright browser cache already exist
+
+Detailed onboarding notes live in [docs/system-setup.md](docs/system-setup.md).
+
+## Manual Quick Start
 
 1. Install backend dependencies:
 
@@ -66,6 +103,45 @@ npm run dev
 
 The frontend runs on `http://127.0.0.1:5180` by default and proxies API requests to the backend on `http://127.0.0.1:8000`.
 
+## Local Blender Material Preview
+
+The web UI now uses a lazy preview workflow instead of a continuously streaming Blender session.
+
+1. Open `Weave_GUIConnection.blend` in Blender.
+2. Start the Blender MCP / socket bridge so the backend can send update commands.
+3. Start the backend and frontend from this repo.
+4. In the web app:
+   - upload yarn images in `Step 1`
+   - build or import the draft in `Step 2`
+   - assign yarns and adjust geometry/material controls in `Step 3`
+5. Click `Update Preview` only when you are ready to refresh the camera preview.
+
+What happens on each update:
+
+- the frontend sends the full project snapshot plus the staged geometry settings
+- the backend syncs the draft and material assignments into the running Blender session
+- Blender switches a 3D view to `Material Preview` in camera view
+- the backend writes a camera-framed Material Preview image and returns it to the web UI
+
+This is intentionally not a live render loop. Controls are staged locally in the browser until the user confirms the batch of changes.
+
+By default the backend now runs Blender in `managed` session mode:
+
+- the first Blender-backed request can launch Blender automatically
+- repeated requests reuse the warm session
+- if the session stays idle for too long, the backend stops it automatically
+
+That keeps Blender available during an active editing burst without leaving it running forever.
+
+## Geometry Controls In The Web UI
+
+The Step 3 preview panel now exposes the main `Weave From Draft` controls already wired in Blender:
+
+- Draft density: `Warp Threads`, `Weft Threads`, `Spacing`, `Amplitude`, `Fill Ratio`
+- Thread structure: `Thread Radius`, `Thread Subdivisions`, `Ply Count`, `Ply Radius`, `Twist Amount`, `Ply Resolution`, `Seed`
+- Texture mapping: `Texture Scale U`, `Texture Scale V`, `Texture Offset V`, `Texture Side Flatten`
+- Micro detail: `Lump Strength`, `Lump Scale`, `Fiber Density`, `Fiber Length`, `Fiber Thickness`, `Fiber Frizz`, `Fiber Subdivs`
+
 ## Environment
 
 You can override the Blender binary and blend file path with:
@@ -76,11 +152,43 @@ export WEAVE_BLEND_FILE="/absolute/path/to/Weave_GUIConnection.blend"
 export WEAVE_RENDER_ROOT="/absolute/path/to/runtime/render_jobs"
 ```
 
+For Blender bridge connectivity, you can also override:
+
+```bash
+export BLENDER_HOST="127.0.0.1"
+export BLENDER_PORT="9875"
+export BLENDER_TIMEOUT_SECONDS="30"
+```
+
+The new lazy preview screenshots are stored under `runtime/live_preview/`.
+
+Managed-session controls:
+
+```bash
+export BLENDER_SESSION_MODE="managed"
+export BLENDER_IDLE_TIMEOUT_SECONDS="600"
+export BLENDER_STARTUP_TIMEOUT_SECONDS="120"
+export BLENDER_LAUNCH_PREFIX=""
+export BLENDER_LAUNCH_ARGS=""
+```
+
+Notes:
+
+- `BLENDER_SESSION_MODE=managed` lets the backend launch and stop Blender itself
+- `BLENDER_SESSION_MODE=attach` keeps the old behavior and only talks to an already-running Blender session
+- `BLENDER_IDLE_TIMEOUT_SECONDS=600` means the backend stops its managed Blender session after 10 idle minutes
+- `BLENDER_LAUNCH_PREFIX` lets terminal-only Linux hosts launch Blender through a wrapper such as `xvfb-run`
+
 ## Common Commands
 
 Use the root `Makefile` for the most common tasks:
 
 ```bash
+make doctor
+make doctor-strict
+make bootstrap
+make bootstrap-playwright
+make bootstrap-blender
 make backend-install
 make backend-dev
 make frontend-install
@@ -113,3 +221,29 @@ cd frontend
 npx playwright install chromium
 npm run test:e2e
 ```
+
+## Current Direction
+
+Local development uses a real Blender desktop session with the MCP/socket bridge attached to `Weave_GUIConnection.blend`.
+
+Planned server deployment is:
+
+- GPU-backed machine such as the target H100 server
+- persistent Blender GUI session with a virtual display
+- the same lazy `Update Preview` workflow for camera-framed Material Preview images
+- headless background renders kept available for higher-quality final output when needed
+
+For terminal-only Linux environments, the managed Blender launcher can now prepend a wrapper command. Example:
+
+```bash
+export BLENDER_SESSION_MODE=managed
+export BLENDER_LAUNCH_PREFIX='xvfb-run -a -s "-screen 0 1920x1080x24"'
+```
+
+The backend also exposes session lifecycle endpoints:
+
+- `GET /api/blender/session`
+- `POST /api/blender/session/restart`
+- `POST /api/blender/session/stop`
+
+Implementation notes for the current preview flow live in [docs/live-preview-worklog.md](docs/live-preview-worklog.md), and the teammate/server setup workflow lives in [docs/system-setup.md](docs/system-setup.md).

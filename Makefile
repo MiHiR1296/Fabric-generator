@@ -1,4 +1,19 @@
-.PHONY: frontend-install frontend-dev backend-install backend-dev backend-test frontend-test frontend-e2e
+.PHONY: doctor doctor-strict bootstrap bootstrap-playwright bootstrap-blender frontend-install frontend-dev backend-install backend-dev backend-test frontend-test frontend-e2e
+
+doctor:
+	python3 scripts/setup_doctor.py
+
+doctor-strict:
+	python3 scripts/setup_doctor.py --strict
+
+bootstrap:
+	python3 scripts/bootstrap.py
+
+bootstrap-playwright:
+	python3 scripts/bootstrap.py --with-playwright
+
+bootstrap-blender:
+	python3 scripts/bootstrap.py --install-blender
 
 frontend-install:
 	cd frontend && npm install

@@ -20,6 +20,13 @@ else:
 from .service import parse_file_bytes
 from .text_parser import parse_text_payload
 from .blender_sync import load_blender_socket_config, send_blender_command, sync_draft_to_blender
+from .blender_session import (
+    get_blender_session_snapshot,
+    restart_blender_session,
+    stop_blender_session,
+    stop_managed_session_on_shutdown,
+)
+from .live_preview import get_preview_image_path, get_preview_snapshot, update_project_preview
 from .render_jobs import (
     get_render_image_path,
     get_render_job,
@@ -70,6 +77,16 @@ if FastAPI is not None:
         draft_object_name: str = "WebDraft_Live"
 
 
+    class ProjectPreviewRequest(BaseModel):
+        draft: dict
+        yarnAssets: list[dict] = []
+        colorBindings: list[dict] = []
+        target_object_name: str = "ParametricWeave"
+        draft_object_name: str = "WebDraft_Live"
+        session_id: str = "default"
+        max_size: int = 1400
+
+
     @app.get("/api/parser/health")
     async def health():
         return {"status": "ok"}
@@ -79,7 +96,12 @@ if FastAPI is not None:
     async def blender_health():
         headless = load_headless_blender_config()
         config = load_blender_socket_config()
-        response = send_blender_command("get_scene_info")
+        session = get_blender_session_snapshot()
+        response = (
+            send_blender_command("get_scene_info")
+            if session.get("socketAvailable")
+            else {"status": "error", "message": "Blender socket is not currently active."}
+        )
         return {
             "status": "ok",
             "headless": {
@@ -95,9 +117,15 @@ if FastAPI is not None:
                 "timeout_seconds": config.timeout_seconds,
                 "available": response.get("status") == "success",
             },
+            "session": session,
             "scene": response.get("result", {}) if response.get("status") == "success" else None,
             "bridge_error": None if response.get("status") == "success" else response.get("message"),
         }
+
+
+    @app.on_event("shutdown")
+    async def shutdown_managed_blender_session():
+        stop_managed_session_on_shutdown()
 
 
     @app.post("/api/parser/parse-file")
@@ -165,6 +193,58 @@ if FastAPI is not None:
         if image_path is None:
             raise HTTPException(status_code=404, detail="Render image not found.")
         return FileResponse(image_path, media_type="image/png", filename=f"{job_id}.png")
+
+
+    @app.post("/api/blender/live-preview")
+    async def live_preview(request: ProjectPreviewRequest):
+        try:
+            return update_project_preview(
+                {
+                    "draft": request.draft,
+                    "yarnAssets": request.yarnAssets,
+                    "colorBindings": request.colorBindings,
+                },
+                target_object_name=request.target_object_name,
+                draft_object_name=request.draft_object_name,
+                session_id=request.session_id,
+                max_size=request.max_size,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+    @app.get("/api/blender/live-preview/{session_id}")
+    async def live_preview_status(session_id: str):
+        return get_preview_snapshot(session_id)
+
+
+    @app.get("/api/blender/live-preview/{session_id}/image")
+    async def live_preview_image(session_id: str):
+        image_path = get_preview_image_path(session_id)
+        if image_path is None:
+            raise HTTPException(status_code=404, detail="Live preview image not found.")
+        return FileResponse(image_path, media_type="image/png", filename=f"{session_id}.png")
+
+
+    @app.get("/api/blender/session")
+    async def blender_session_status():
+        return get_blender_session_snapshot()
+
+
+    @app.post("/api/blender/session/restart")
+    async def blender_session_restart():
+        try:
+            return restart_blender_session("Restarted through the backend API.")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+    @app.post("/api/blender/session/stop")
+    async def blender_session_stop():
+        try:
+            return stop_blender_session("Stopped through the backend API.")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
     @app.post("/api/parser/parse-text")

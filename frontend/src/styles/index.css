@@ -921,6 +921,20 @@ textarea {
   gap: 0.85rem;
 }
 
+.render-panel__control-groups {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.render-panel__control-group h3 {
+  margin: 0;
+}
+
+.render-panel__control-group p,
+.render-panel__lazy-note {
+  margin: 0;
+}
+
 .render-preview--panel {
   min-height: 24rem;
   display: grid;

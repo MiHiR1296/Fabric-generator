@@ -9,7 +9,24 @@ export interface DraftRenderSettings {
   weftThreads: number;
   spacing: number;
   amplitude: number;
+  threadRadius: number;
+  threadSubdivisions: number;
+  plyCount: number;
+  plyRadius: number;
+  twistAmount: number;
+  plyResolution: number;
+  textureScaleU: number;
   textureScaleV: number;
+  textureOffsetV: number;
+  textureSideFlatten: number;
+  lumpStrength: number;
+  lumpScale: number;
+  fiberDensity: number;
+  fiberLength: number;
+  fiberThickness: number;
+  fiberFrizz: number;
+  fiberSubdivs: number;
+  seed: number;
   fillRatio: number;
 }
 
@@ -115,6 +132,18 @@ export interface BlenderRenderJob {
   finishedAt?: string | null;
   imageUrl?: string | null;
   logTail: string[];
+}
+
+export interface BlenderLivePreview {
+  sessionId: string;
+  status: 'idle' | 'ready';
+  message: string;
+  targetObjectName: string;
+  draftObjectName: string;
+  updatedAt?: string | null;
+  imageUrl?: string | null;
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface YarnAsset {

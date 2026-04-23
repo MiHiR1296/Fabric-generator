@@ -1,5 +1,6 @@
 import { normalizeDraft, parseLooseTextDraft } from '../domain/draft';
 import type {
+  BlenderLivePreview,
   BlenderRenderJob,
   FabricProject,
   DraftDocument,
@@ -148,6 +149,33 @@ export async function requestProjectRender(
       colorBindings: project.colorBindings,
       target_object_name: options?.targetObjectName || 'ParametricWeave',
       draft_object_name: options?.draftObjectName || 'WebDraft_Live',
+    }),
+  });
+  return parseJson(response);
+}
+
+export async function requestLivePreview(
+  project: FabricProject,
+  options?: {
+    targetObjectName?: string;
+    draftObjectName?: string;
+    sessionId?: string;
+    maxSize?: number;
+  },
+): Promise<BlenderLivePreview> {
+  const response = await fetch('/api/blender/live-preview', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      draft: project.draft,
+      yarnAssets: project.yarnAssets,
+      colorBindings: project.colorBindings,
+      target_object_name: options?.targetObjectName || 'ParametricWeave',
+      draft_object_name: options?.draftObjectName || 'WebDraft_Live',
+      session_id: options?.sessionId || 'default',
+      max_size: options?.maxSize || 1400,
     }),
   });
   return parseJson(response);

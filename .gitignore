@@ -22,3 +22,7 @@ runtime/render_jobs/*
 !runtime/render_jobs/.gitkeep
 runtime/projects/*
 !runtime/projects/.gitkeep
+runtime/live_preview/*
+!runtime/live_preview/.gitkeep
+runtime/blender_session/*
+!runtime/blender_session/.gitkeep

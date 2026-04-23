@@ -5,10 +5,9 @@ const PNG_BUFFER = Buffer.from(
   'base64',
 );
 
-test('walks through yarn upload, color mapping, and Blender preview rendering', async ({ page }) => {
+test('walks through yarn upload, color mapping, and lazy Blender material preview', async ({ page }) => {
   let yarnAssets: Array<Record<string, unknown>> = [];
-  let renderJob: Record<string, unknown> | null = null;
-  let renderPayload: Record<string, unknown> | null = null;
+  let previewPayload: Record<string, unknown> | null = null;
 
   await page.route('**/api/parser/health', async (route) => {
     await route.fulfill({ json: { status: 'ok' } });
@@ -43,34 +42,24 @@ test('walks through yarn upload, color mapping, and Blender preview rendering', 
     await route.fulfill({ json: yarnAssets });
   });
 
-  await page.route('**/api/blender/render-project', async (route) => {
-    renderPayload = route.request().postDataJSON() as Record<string, unknown>;
-    renderJob = {
-      id: 'job-1',
-      status: 'queued',
-      message: 'Render job queued. Blender will build the draft and render a preview next.',
-      draftTitle: 'Untitled Draft',
-      targetObjectName: 'ParametricWeave',
-      draftObjectName: 'WebDraft_Live',
-      createdAt: '2026-04-22T00:00:00Z',
-      imageUrl: null,
-      logTail: [],
-    };
-    await route.fulfill({ json: renderJob });
+  await page.route('**/api/blender/live-preview', async (route) => {
+    previewPayload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      json: {
+        sessionId: 'default',
+        status: 'ready',
+        message: 'Blender camera preview updated.',
+        targetObjectName: 'ParametricWeave',
+        draftObjectName: 'WebDraft_Live',
+        updatedAt: '2026-04-22T12:00:00Z',
+        imageUrl: '/api/blender/live-preview/default/image?v=2026-04-22T12:00:00Z',
+        width: 1024,
+        height: 768,
+      },
+    });
   });
 
-  await page.route('**/api/blender/render-jobs/job-1', async (route) => {
-    renderJob = {
-      ...renderJob,
-      status: 'succeeded',
-      message: 'Preview render ready.',
-      imageUrl: '/api/blender/render-jobs/job-1/image',
-      logTail: ['render complete'],
-    };
-    await route.fulfill({ json: renderJob });
-  });
-
-  await page.route('**/api/blender/render-jobs/job-1/image', async (route) => {
+  await page.route('**/api/blender/live-preview/default/image*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'image/png',
@@ -94,7 +83,7 @@ test('walks through yarn upload, color mapping, and Blender preview rendering', 
   await expect(page.getByTestId('yarn-library-step')).toContainText('Queued 1 yarn asset');
   await expect(page.getByTestId('yarn-asset-card')).toContainText('Warp Cotton');
   await expect(page.getByTestId('binding-status-message')).toContainText(
-    '2 slots still need yarn assignments before rendering.',
+    '2 slots still need yarn assignments before previewing.',
   );
 
   const bindingSelects = page.locator('[data-testid^="binding-select-"]');
@@ -109,11 +98,11 @@ test('walks through yarn upload, color mapping, and Blender preview rendering', 
 
   await page.getByTestId('render-preview-button').click();
 
-  await expect(page.getByTestId('render-status-message')).toContainText('Render job queued');
+  await expect(page.getByTestId('render-status-message')).toContainText('Blender camera preview updated.');
   await expect(page.locator('.render-preview__image')).toBeVisible();
-  await expect(page.getByTestId('render-status-message')).toContainText('Preview render ready.');
+  await expect(page.getByTestId('render-controls-note')).toContainText('No unsent control edits right now.');
 
-  expect(Array.isArray(renderPayload?.colorBindings)).toBeTruthy();
-  expect((renderPayload?.colorBindings as Array<unknown>).length).toBe(2);
-  expect(renderPayload?.target_object_name).toBe('ParametricWeave');
+  expect(Array.isArray(previewPayload?.colorBindings)).toBeTruthy();
+  expect((previewPayload?.colorBindings as Array<unknown>).length).toBe(2);
+  expect(previewPayload?.target_object_name).toBe('ParametricWeave');
 });

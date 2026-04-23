@@ -69,7 +69,7 @@ export default function PatternBuilderStep({ draft, setDraft }: PatternBuilderSt
     if (!activeColor || ![...draft.warpColors, ...draft.weftColors].includes(activeColor)) {
       setActiveColor(nextColor);
     }
-  }, [activeColor, draft.warpColors, draft.weftColors, paletteSignature]);
+  }, [paletteSignature]);
 
   const handleCountsChange = (field: keyof DraftCounts, value: number) => {
     setDraft((current) => {

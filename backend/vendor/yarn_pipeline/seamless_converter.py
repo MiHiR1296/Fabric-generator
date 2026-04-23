@@ -39,6 +39,44 @@ from tqdm import tqdm
 # Initialize SimpleLama model once (globally, so it's not reloaded on every call)
 _simple_lama_model = None
 
+
+def fit_result_to_target_shape(image: np.ndarray, target_shape: tuple[int, ...]) -> np.ndarray:
+    """Crop or pad inpaint output so it matches the destination slice exactly."""
+    target_height, target_width = target_shape[:2]
+    target_channels = target_shape[2] if len(target_shape) > 2 else 1
+
+    fitted = np.asarray(image)
+    if fitted.ndim == 2:
+        fitted = fitted[..., np.newaxis]
+
+    if fitted.shape[2] > target_channels:
+        fitted = fitted[:, :, :target_channels]
+    elif fitted.shape[2] < target_channels:
+        last_channel = fitted[:, :, -1:]
+        fitted = np.concatenate(
+            [fitted] + [last_channel] * (target_channels - fitted.shape[2]),
+            axis=2,
+        )
+
+    if fitted.shape[:2] != (target_height, target_width):
+        print(
+            f"Adjusting inpaint result from {fitted.shape[:2]} "
+            f"to {(target_height, target_width)} for seamless paste."
+        )
+
+    fitted = fitted[:target_height, :target_width]
+    pad_height = max(0, target_height - fitted.shape[0])
+    pad_width = max(0, target_width - fitted.shape[1])
+    if pad_height or pad_width:
+        fitted = np.pad(
+            fitted,
+            ((0, pad_height), (0, pad_width), (0, 0)),
+            mode="edge",
+        )
+
+    return fitted
+
+
 def get_lama_model():
     """Lazy load SimpleLama model"""
     global _simple_lama_model
@@ -187,6 +225,8 @@ def process_image(image_path, output_dir):
 
     x0 = int(w - fal_cap / 2)
     x1 = int(w + fal_cap / 2)
+    x0_clamped = max(0, x0)
+    x1_clamped = min(tiled_img.shape[1], x1)
 
     # print('img shape:', np.shape(img))
     # print('n_blocks:', n_blocks)
@@ -210,8 +250,8 @@ def process_image(image_path, output_dir):
             target = max(640, int(np.ceil(avail / 32.0) * 32))
             y0_clamped = max(0, y1_clamped - target)
 
-        cropped_img_rest = tiled_img[y0_clamped:y1_clamped, x0:x1]
-        cropped_mask_rest = mask[y0_clamped:y1_clamped, x0:x1]
+        cropped_img_rest = tiled_img[y0_clamped:y1_clamped, x0_clamped:x1_clamped]
+        cropped_mask_rest = mask[y0_clamped:y1_clamped, x0_clamped:x1_clamped]
 
         # print(y0_clamped, y1_clamped, x0, x1)
         # For n>0, zero out the part of the mask that overlaps with the previous block,
@@ -239,17 +279,21 @@ def process_image(image_path, output_dir):
         # print('seamless out', np.max(img_np))
         # print('tiled_img', np.max(tiled_img))
 
+        target_view = tiled_img[y0_clamped:y1_clamped, x0_clamped:x1_clamped]
+        img_np = fit_result_to_target_shape(img_np, target_view.shape)
+
         if np.max(tiled_img) > 1 and np.max(img_np) > 1:
-            tiled_img[y0_clamped:y1_clamped, x0:x1] = img_np.astype(np.float32)
+            target_view[:] = img_np.astype(np.float32)
         elif np.max(tiled_img) < 1 and np.max(img_np) > 1:
-            tiled_img[y0_clamped:y1_clamped, x0:x1] = img_np.astype(np.float32) / 255.0
+            target_view[:] = img_np.astype(np.float32) / 255.0
         else:
             assert 'Not expected'
         # p(tiled_img)
 
     # imsave(f'{output_dir}/inpaint_right.png', tiled_img)
-    intersection_strip = tiled_img[:, w:int(w + fal_cap / 2)].copy()  # top part
-    tiled_img[:, :int(fal_cap / 2)] = intersection_strip
+    horizontal_overlap = max(1, min(int(fal_cap / 2), w))
+    intersection_strip = tiled_img[:, w:w + horizontal_overlap].copy()
+    tiled_img[:, :horizontal_overlap] = intersection_strip
 
     # orig_shape_fabric = tiled_img[:,:w]
     # horizontally_seamless_path = f'{output_dir}/horizontally_seamless.png'
@@ -337,10 +381,13 @@ def process_image(image_path, output_dir):
         
         # p(img_np)
 
+        target_view = tiled_img[y0_clamped:y1_clamped, x0_clamped:x1_clamped]
+        img_np = fit_result_to_target_shape(img_np, target_view.shape)
+
         if np.max(tiled_img) > 1 and np.max(img_np) > 1:
-            tiled_img[y0_clamped:y1_clamped, x0_clamped:x1_clamped] = img_np.astype(np.float32)
+            target_view[:] = img_np.astype(np.float32)
         elif np.max(tiled_img) < 1 and np.max(img_np) > 1:
-            tiled_img[y0_clamped:y1_clamped, x0_clamped:x1_clamped] = img_np.astype(np.float32) / 255.
+            target_view[:] = img_np.astype(np.float32) / 255.
         else:
             assert 'Not expected'
 
@@ -348,9 +395,9 @@ def process_image(image_path, output_dir):
 
     # imsave(f'{output_dir}/inpaint_top.png', tiled_img)
     # print('----saved', f'{output_dir}/inpaint_top.png')
-    intersection_strip = tiled_img[int(h - fal_cap / 2): h, :].copy()  # top part
-    to_replace = tiled_img[-int(fal_cap / 2):, :]
-    tiled_img[-int(fal_cap / 2):, :] = intersection_strip
+    vertical_overlap = max(1, min(int(fal_cap / 2), h))
+    intersection_strip = tiled_img[h - vertical_overlap:h, :].copy()
+    tiled_img[-vertical_overlap:, :] = intersection_strip
     orig_shape_fabric = tiled_img[h:, :]
     
     # Final save

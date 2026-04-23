@@ -81,6 +81,63 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("colour_id", script)
         self.assertIn("warp_material_ids = [0, 1]", script)
 
+    def test_build_headless_render_script_supports_template_material_preview(self) -> None:
+        script = build_headless_render_script(
+            {
+                "title": "Template Material Draft",
+                "drawdown": [[1, 0], [0, 1]],
+                "warpColors": ["#ffffff", "#111111"],
+                "weftColors": ["#aa0000", "#00aa00"],
+            },
+            render_path="/tmp/unit-preview.png",
+            warp_material_ids=[0, 1],
+            weft_material_ids=[1, 0],
+            material_assets=[
+                {
+                    "id": "asset-red",
+                    "diffuse_path": "/tmp/red.png",
+                    "alpha_path": "/tmp/red-alpha.png",
+                },
+                {
+                    "id": "asset-black",
+                    "diffuse_path": "/tmp/black.png",
+                    "alpha_path": "/tmp/black-alpha.png",
+                },
+            ],
+        )
+
+        self.assertIn("build_template_preview_materials", script)
+        self.assertIn("MAterial_01", script)
+        self.assertIn("ensure_colour_material_chain", script)
+        self.assertIn("Render Material Match", script)
+        self.assertIn("colour_id", script)
+        self.assertIn('"diffusePath": "/tmp/red.png"', script)
+
+    def test_build_headless_render_script_supports_preview_only_material_view(self) -> None:
+        script = build_headless_render_script(
+            {
+                "title": "Preview Only Draft",
+                "drawdown": [[1, 0], [0, 1]],
+                "warpColors": ["#ffffff"],
+                "weftColors": ["#111111"],
+            },
+            render_path="/tmp/live-preview.png",
+            material_assets=[
+                {
+                    "id": "asset-red",
+                    "diffuse_path": "/tmp/red.png",
+                    "alpha_path": "/tmp/red-alpha.png",
+                }
+            ],
+            preview_only=True,
+        )
+
+        self.assertIn("ensure_material_camera_view", script)
+        self.assertIn("bpy.ops.view3d.view_camera()", script)
+        self.assertIn("space.shading.type = 'MATERIAL'", script)
+        self.assertIn("'status': 'preview_ready'", script)
+        self.assertNotIn("bpy.ops.render.render(write_still=True)", script)
+
     def test_build_headless_render_command_points_to_blend_file_and_script(self) -> None:
         fake_binary = ROOT / "tests" / "fixtures" / "blender-bin"
         fake_blend = ROOT / "tests" / "fixtures" / "preview.blend"
@@ -223,9 +280,11 @@ class RenderJobTests(unittest.TestCase):
                 self.assertEqual(captured["payload"]["warpMaterialIds"], [0, 1])
                 self.assertEqual(captured["payload"]["weftMaterialIds"], [1, 0])
                 self.assertEqual(captured["payload"]["atlas"]["rows"], 2)
+                self.assertEqual(len(captured["payload"]["materialAssets"]), 2)
                 self.assertTrue((captured["job_dir"] / "project.json").exists())
                 self.assertTrue((projects_root / "jobabc123def.json").exists())
-                self.assertIn("FabricStudioAtlasMaterial", captured["script_text"])
+                self.assertIn("build_template_preview_materials", captured["script_text"])
+                self.assertIn("MAterial_01", captured["script_text"])
                 self.assertEqual(
                     captured["atlas_entries"],
                     [

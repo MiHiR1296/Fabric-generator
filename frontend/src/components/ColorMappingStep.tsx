@@ -2,27 +2,19 @@ import { useMemo } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import RenderPanel from './RenderPanel';
 import { deriveColorBindingSlots, missingColorBindings } from '../domain/project';
-import type { BlenderRenderJob, ColorBinding, DraftDocument, YarnAsset } from '../domain/types';
+import type { BlenderLivePreview, ColorBinding, DraftDocument, DraftRenderSettings, YarnAsset } from '../domain/types';
 
 interface ColorMappingStepProps {
   draft: DraftDocument;
   yarnAssets: YarnAsset[];
   colorBindings: ColorBinding[];
   setColorBindings: Dispatch<SetStateAction<ColorBinding[]>>;
-  renderJob: BlenderRenderJob | null;
-  renderBusy: boolean;
-  renderMessage: string;
-  onRenderPreview: () => void;
+  livePreview: BlenderLivePreview | null;
+  previewBusy: boolean;
+  previewMessage: string;
+  onUpdatePreview: (settings: Partial<DraftRenderSettings>) => void;
   onExportCanonical: () => void;
   onExportBlender: () => void;
-  onApplyRenderSettings: (settings: {
-    warpThreads?: number;
-    weftThreads?: number;
-    spacing?: number;
-    amplitude?: number;
-    textureScaleV?: number;
-    fillRatio?: number;
-  }) => void;
 }
 
 export default function ColorMappingStep({
@@ -30,13 +22,12 @@ export default function ColorMappingStep({
   yarnAssets,
   colorBindings,
   setColorBindings,
-  renderJob,
-  renderBusy,
-  renderMessage,
-  onRenderPreview,
+  livePreview,
+  previewBusy,
+  previewMessage,
+  onUpdatePreview,
   onExportCanonical,
   onExportBlender,
-  onApplyRenderSettings,
 }: ColorMappingStepProps) {
   const slots = useMemo(() => deriveColorBindingSlots(draft), [draft]);
   const readyAssets = useMemo(
@@ -111,7 +102,7 @@ export default function ColorMappingStep({
 
         <p className="muted" data-testid="binding-status-message">
           {missingBindingsList.length
-            ? `${missingBindingsList.length} slot${missingBindingsList.length === 1 ? '' : 's'} still need yarn assignments before rendering.`
+            ? `${missingBindingsList.length} slot${missingBindingsList.length === 1 ? '' : 's'} still need yarn assignments before previewing.`
             : 'Every visible draft color is assigned to a processed yarn asset.'}
         </p>
       </section>
@@ -119,16 +110,15 @@ export default function ColorMappingStep({
       <RenderPanel
         draft={draft}
         importMessage=""
-        renderJob={renderJob}
-        renderBusy={renderBusy}
-        onRenderPreview={onRenderPreview}
+        livePreview={livePreview}
+        previewBusy={previewBusy}
+        onUpdatePreview={onUpdatePreview}
         onExportCanonical={onExportCanonical}
         onExportBlender={onExportBlender}
-        onApplyRenderSettings={onApplyRenderSettings}
         stepLabel="Step 3"
-        title="Render Preview"
-        summaryText="Render the woven draft with the assigned yarn atlases and compare the Blender swatch against the drawdown."
-        statusMessage={renderMessage}
+        title="Blender Material Preview"
+        summaryText="Adjust the geometry-node controls locally, then click Update Preview to refresh the live Blender camera preview."
+        statusMessage={previewMessage}
         renderDisabled={!readyAssets.length || missingBindingsList.length > 0}
       />
     </section>

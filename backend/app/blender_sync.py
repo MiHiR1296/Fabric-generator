@@ -6,6 +6,14 @@ import socket
 from dataclasses import dataclass
 from typing import Any
 
+from .blender_session import (
+    begin_blender_command,
+    finish_blender_command,
+    managed_session_enabled,
+    mark_blender_transport_error,
+    restart_blender_session,
+)
+
 
 @dataclass(frozen=True)
 class BlenderSocketConfig:
@@ -22,10 +30,10 @@ def load_blender_socket_config() -> BlenderSocketConfig:
     )
 
 
-def send_blender_command(command_type: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    config = load_blender_socket_config()
-    payload = {"type": command_type, "params": params or {}}
-
+def _send_socket_command(
+    config: BlenderSocketConfig,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
     try:
         with socket.create_connection((config.host, config.port), timeout=config.timeout_seconds) as client:
             client.settimeout(config.timeout_seconds)
@@ -62,6 +70,43 @@ def send_blender_command(command_type: str, params: dict[str, Any] | None = None
         }
 
     return {"status": "error", "message": "Blender closed the connection before returning valid JSON."}
+
+
+def _is_transport_error(response: dict[str, Any]) -> bool:
+    if response.get("status") != "error":
+        return False
+    message = str(response.get("message") or "").lower()
+    return any(
+        fragment in message
+        for fragment in (
+            "timed out after",
+            "could not connect to blender",
+            "socket error",
+            "closed the connection",
+        )
+    )
+
+
+def send_blender_command(command_type: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    config = load_blender_socket_config()
+    payload = {"type": command_type, "params": params or {}}
+    begun = False
+
+    try:
+        begin_blender_command(reason=command_type)
+        begun = True
+        response = _send_socket_command(config, payload)
+        if managed_session_enabled() and _is_transport_error(response):
+            mark_blender_transport_error(str(response.get("message") or "Transport error talking to Blender."))
+            restart_blender_session(reason=f"retrying {command_type}")
+            response = _send_socket_command(config, payload)
+        return response
+    except Exception as exc:
+        mark_blender_transport_error(str(exc))
+        return {"status": "error", "message": str(exc)}
+    finally:
+        if begun:
+            finish_blender_command()
 
 
 def validate_drawdown_matrix(drawdown: Any) -> list[list[int]]:
@@ -135,7 +180,24 @@ def build_blender_sync_code(
     weft_threads_override = maybe_int("weftThreads")
     spacing_override = maybe_float("spacing")
     amplitude_override = maybe_float("amplitude")
+    thread_radius_override = maybe_float("threadRadius")
+    thread_subdivisions_override = maybe_float("threadSubdivisions")
+    ply_count_override = maybe_int("plyCount")
+    ply_radius_override = maybe_float("plyRadius")
+    twist_amount_override = maybe_float("twistAmount")
+    ply_resolution_override = maybe_int("plyResolution")
+    texture_scale_u_override = maybe_float("textureScaleU")
     texture_scale_v_override = maybe_float("textureScaleV")
+    texture_offset_v_override = maybe_float("textureOffsetV")
+    texture_side_flatten_override = maybe_float("textureSideFlatten")
+    lump_strength_override = maybe_float("lumpStrength")
+    lump_scale_override = maybe_float("lumpScale")
+    fiber_density_override = maybe_float("fiberDensity")
+    fiber_length_override = maybe_float("fiberLength")
+    fiber_thickness_override = maybe_float("fiberThickness")
+    fiber_frizz_override = maybe_float("fiberFrizz")
+    fiber_subdivs_override = maybe_int("fiberSubdivs")
+    seed_override = maybe_int("seed")
     fill_ratio_override = maybe_float("fillRatio")
 
     default_warp_threads = max(cols * 8, 96)
@@ -162,7 +224,24 @@ warp_threads_override = {repr(warp_threads_override)}
 weft_threads_override = {repr(weft_threads_override)}
 spacing_override = {repr(spacing_override)}
 amplitude_override = {repr(amplitude_override)}
+thread_radius_override = {repr(thread_radius_override)}
+thread_subdivisions_override = {repr(thread_subdivisions_override)}
+ply_count_override = {repr(ply_count_override)}
+ply_radius_override = {repr(ply_radius_override)}
+twist_amount_override = {repr(twist_amount_override)}
+ply_resolution_override = {repr(ply_resolution_override)}
+texture_scale_u_override = {repr(texture_scale_u_override)}
 texture_scale_v_override = {repr(texture_scale_v_override)}
+texture_offset_v_override = {repr(texture_offset_v_override)}
+texture_side_flatten_override = {repr(texture_side_flatten_override)}
+lump_strength_override = {repr(lump_strength_override)}
+lump_scale_override = {repr(lump_scale_override)}
+fiber_density_override = {repr(fiber_density_override)}
+fiber_length_override = {repr(fiber_length_override)}
+fiber_thickness_override = {repr(fiber_thickness_override)}
+fiber_frizz_override = {repr(fiber_frizz_override)}
+fiber_subdivs_override = {repr(fiber_subdivs_override)}
+seed_override = {repr(seed_override)}
 fill_ratio_override = {repr(fill_ratio_override)}
 default_warp_threads = {repr(default_warp_threads)}
 default_weft_threads = {repr(default_weft_threads)}
@@ -425,26 +504,26 @@ set_modifier_input(weave_mod, weave_group, 'Draft Columns', cols)
 set_modifier_input(weave_mod, weave_group, 'Draft Rows', rows)
 set_modifier_input(weave_mod, weave_group, 'Warp Threads', int(round(pick_value(warp_threads_override, preserved.get('Warp Threads'), default_warp_threads))))
 set_modifier_input(weave_mod, weave_group, 'Weft Threads', int(round(pick_value(weft_threads_override, preserved.get('Weft Threads'), default_weft_threads))))
-set_modifier_input(weave_mod, weave_group, 'Spacing', pick_value(spacing_override, preserved.get('Spacing'), 0.03))
-set_modifier_input(weave_mod, weave_group, 'Amplitude', pick_value(amplitude_override, preserved.get('Amplitude'), 0.005))
-set_modifier_input(weave_mod, weave_group, 'Thread Radius', preserved.get('Thread Radius') if preserved.get('Thread Radius') is not None else 0.028)
-set_modifier_input(weave_mod, weave_group, 'Thread Subdivisions', preserved.get('Thread Subdivisions') if preserved.get('Thread Subdivisions') is not None else 8.0)
-set_modifier_input(weave_mod, weave_group, 'Ply Count', preserved.get('Ply Count') if preserved.get('Ply Count') is not None else 3)
-set_modifier_input(weave_mod, weave_group, 'Ply Radius', preserved.get('Ply Radius') if preserved.get('Ply Radius') is not None else 0.013)
-set_modifier_input(weave_mod, weave_group, 'Twist Amount', preserved.get('Twist Amount') if preserved.get('Twist Amount') is not None else 16.0)
-set_modifier_input(weave_mod, weave_group, 'Ply Resolution', preserved.get('Ply Resolution') if preserved.get('Ply Resolution') is not None else 5)
-set_modifier_input(weave_mod, weave_group, 'Texture Scale U', preserved.get('Texture Scale U') if preserved.get('Texture Scale U') is not None else 8.0)
+set_modifier_input(weave_mod, weave_group, 'Spacing', pick_value(spacing_override, preserved.get('Spacing'), 0.05))
+set_modifier_input(weave_mod, weave_group, 'Amplitude', pick_value(amplitude_override, preserved.get('Amplitude'), 0.008))
+set_modifier_input(weave_mod, weave_group, 'Thread Radius', pick_value(thread_radius_override, preserved.get('Thread Radius'), 0.028))
+set_modifier_input(weave_mod, weave_group, 'Thread Subdivisions', pick_value(thread_subdivisions_override, preserved.get('Thread Subdivisions'), 8.0))
+set_modifier_input(weave_mod, weave_group, 'Ply Count', int(round(pick_value(ply_count_override, preserved.get('Ply Count'), 3))))
+set_modifier_input(weave_mod, weave_group, 'Ply Radius', pick_value(ply_radius_override, preserved.get('Ply Radius'), 0.013))
+set_modifier_input(weave_mod, weave_group, 'Twist Amount', pick_value(twist_amount_override, preserved.get('Twist Amount'), 16.0))
+set_modifier_input(weave_mod, weave_group, 'Ply Resolution', int(round(pick_value(ply_resolution_override, preserved.get('Ply Resolution'), 5))))
+set_modifier_input(weave_mod, weave_group, 'Texture Scale U', pick_value(texture_scale_u_override, preserved.get('Texture Scale U'), 8.0))
 set_modifier_input(weave_mod, weave_group, 'Texture Scale V', pick_value(texture_scale_v_override, preserved.get('Texture Scale V'), 0.5))
-set_modifier_input(weave_mod, weave_group, 'Texture Offset V', preserved.get('Texture Offset V') if preserved.get('Texture Offset V') is not None else 0.0)
-set_modifier_input(weave_mod, weave_group, 'Texture Side Flatten', preserved.get('Texture Side Flatten') if preserved.get('Texture Side Flatten') is not None else 0.7)
-set_modifier_input(weave_mod, weave_group, 'Lump Strength', preserved.get('Lump Strength') if preserved.get('Lump Strength') is not None else 0.0015)
-set_modifier_input(weave_mod, weave_group, 'Lump Scale', preserved.get('Lump Scale') if preserved.get('Lump Scale') is not None else 6.0)
-set_modifier_input(weave_mod, weave_group, 'Fiber Density', preserved.get('Fiber Density') if preserved.get('Fiber Density') is not None else 0.0)
-set_modifier_input(weave_mod, weave_group, 'Fiber Length', preserved.get('Fiber Length') if preserved.get('Fiber Length') is not None else 0.04)
-set_modifier_input(weave_mod, weave_group, 'Fiber Thickness', preserved.get('Fiber Thickness') if preserved.get('Fiber Thickness') is not None else 0.15)
-set_modifier_input(weave_mod, weave_group, 'Fiber Frizz', preserved.get('Fiber Frizz') if preserved.get('Fiber Frizz') is not None else 0.02)
-set_modifier_input(weave_mod, weave_group, 'Fiber Subdivs', preserved.get('Fiber Subdivs') if preserved.get('Fiber Subdivs') is not None else 4)
-set_modifier_input(weave_mod, weave_group, 'Seed', preserved.get('Seed') if preserved.get('Seed') is not None else 0)
+set_modifier_input(weave_mod, weave_group, 'Texture Offset V', pick_value(texture_offset_v_override, preserved.get('Texture Offset V'), 0.0))
+set_modifier_input(weave_mod, weave_group, 'Texture Side Flatten', pick_value(texture_side_flatten_override, preserved.get('Texture Side Flatten'), 0.7))
+set_modifier_input(weave_mod, weave_group, 'Lump Strength', pick_value(lump_strength_override, preserved.get('Lump Strength'), 0.0015))
+set_modifier_input(weave_mod, weave_group, 'Lump Scale', pick_value(lump_scale_override, preserved.get('Lump Scale'), 6.0))
+set_modifier_input(weave_mod, weave_group, 'Fiber Density', pick_value(fiber_density_override, preserved.get('Fiber Density'), 0.0))
+set_modifier_input(weave_mod, weave_group, 'Fiber Length', pick_value(fiber_length_override, preserved.get('Fiber Length'), 0.04))
+set_modifier_input(weave_mod, weave_group, 'Fiber Thickness', pick_value(fiber_thickness_override, preserved.get('Fiber Thickness'), 0.15))
+set_modifier_input(weave_mod, weave_group, 'Fiber Frizz', pick_value(fiber_frizz_override, preserved.get('Fiber Frizz'), 0.02))
+set_modifier_input(weave_mod, weave_group, 'Fiber Subdivs', int(round(pick_value(fiber_subdivs_override, preserved.get('Fiber Subdivs'), 4))))
+set_modifier_input(weave_mod, weave_group, 'Seed', int(round(pick_value(seed_override, preserved.get('Seed'), 0))))
 material_count_floor = material_count_override if material_count_override is not None else max(len(warp_colors), len(weft_colors), 2)
 material_count_value = preserved.get('Material Count')
 if material_count_value is None:

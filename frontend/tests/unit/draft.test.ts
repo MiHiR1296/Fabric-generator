@@ -114,6 +114,12 @@ test('creates a blank draft with expected defaults', () => {
   assert.equal(draft.treadleCount, 4);
   assert.equal(draft.threading.length, 24);
   assert.equal(draft.treadling.length, 24);
+  assert.equal(draft.renderSettings?.spacing, 0.05);
+  assert.equal(draft.renderSettings?.amplitude, 0.008);
+  assert.equal(draft.renderSettings?.textureScaleU, 8);
+  assert.equal(draft.renderSettings?.textureScaleV, 0.5);
+  assert.equal(draft.renderSettings?.threadRadius, 0.028);
+  assert.equal(draft.renderSettings?.textureOffsetV, 0);
 });
 
 test('applies structured pattern text edits without fighting counts', () => {

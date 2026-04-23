@@ -14,12 +14,11 @@ import {
 } from './domain/draft';
 import { buildFabricProject, deriveColorBindingSlots, syncColorBindings } from './domain/project';
 import { presets } from './domain/presets';
-import type { BlenderRenderJob, ColorBinding, DraftDocument, YarnAsset } from './domain/types';
+import type { BlenderLivePreview, ColorBinding, DraftDocument, YarnAsset } from './domain/types';
 import {
   deleteYarnAsset,
-  fetchDraftRenderJob,
   listYarnAssets,
-  requestProjectRender,
+  requestLivePreview,
   retryYarnAsset,
   uploadYarnAssets,
 } from './utils/parserApi';
@@ -32,10 +31,10 @@ export default function App() {
     'Upload yarn references first. The backend will generate seamless diffuse and alpha maps automatically.',
   );
   const [colorBindings, setColorBindings] = useState<ColorBinding[]>([]);
-  const [renderJob, setRenderJob] = useState<BlenderRenderJob | null>(null);
-  const [renderBusy, setRenderBusy] = useState(false);
-  const [renderMessage, setRenderMessage] = useState(
-    'Assign each warp and weft color slot to a processed yarn asset, then start the Blender preview.',
+  const [livePreview, setLivePreview] = useState<BlenderLivePreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewMessage, setPreviewMessage] = useState(
+    'Assign each warp and weft color slot to a processed yarn asset, adjust the geometry controls, then click Update Preview.',
   );
 
   const slots = useMemo(() => deriveColorBindingSlots(draft), [draft]);
@@ -70,24 +69,6 @@ export default function App() {
     return () => window.clearTimeout(timeoutId);
   }, [yarnAssets]);
 
-  useEffect(() => {
-    if (!renderJob || (renderJob.status !== 'queued' && renderJob.status !== 'running')) {
-      return undefined;
-    }
-
-    const timeoutId = window.setTimeout(async () => {
-      try {
-        const nextJob = await fetchDraftRenderJob(renderJob.id);
-        setRenderJob(nextJob);
-        setRenderMessage(nextJob.message);
-      } catch {
-        // keep the current render state visible if polling fails transiently
-      }
-    }, 1200);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [renderJob]);
-
   return (
     <div className="studio-shell fabric-shell" data-testid="fabric-studio-app">
       <div className="studio-shell__texture" />
@@ -104,8 +85,8 @@ export default function App() {
           <div className="status-pill status-pill--online">
             Ready Yarns: {yarnAssets.filter((asset) => asset.status === 'ready').length}
           </div>
-          <div className={`status-pill status-pill--${renderJob?.status === 'failed' ? 'offline' : 'checking'}`}>
-            Render: {renderJob?.status || 'idle'}
+          <div className={`status-pill status-pill--${previewBusy ? 'checking' : livePreview?.status === 'ready' ? 'online' : 'source'}`}>
+            Preview: {previewBusy ? 'updating' : livePreview?.status || 'idle'}
           </div>
         </div>
       </header>
@@ -157,23 +138,25 @@ export default function App() {
           yarnAssets={yarnAssets}
           colorBindings={colorBindings}
           setColorBindings={setColorBindings}
-          renderJob={renderJob}
-          renderBusy={renderBusy}
-          renderMessage={renderMessage}
-          onRenderPreview={async () => {
-            setRenderBusy(true);
+          livePreview={livePreview}
+          previewBusy={previewBusy}
+          previewMessage={previewMessage}
+          onUpdatePreview={async (settings) => {
+            const nextDraft = updateRenderSettings(draft, settings);
+            setDraft(nextDraft);
+            setPreviewBusy(true);
             try {
-              const job = await requestProjectRender(
-                buildFabricProject(normalizeDraft(draft), yarnAssets, colorBindings),
+              const preview = await requestLivePreview(
+                buildFabricProject(normalizeDraft(nextDraft), yarnAssets, colorBindings),
               );
-              setRenderJob(job);
-              setRenderMessage(job.message);
+              setLivePreview(preview);
+              setPreviewMessage(preview.message);
             } catch (error) {
-              setRenderMessage(
-                error instanceof Error ? error.message : 'Unable to start the Blender render preview.',
+              setPreviewMessage(
+                error instanceof Error ? error.message : 'Unable to update the Blender material preview.',
               );
             } finally {
-              setRenderBusy(false);
+              setPreviewBusy(false);
             }
           }}
           onExportCanonical={() => {
@@ -182,9 +165,6 @@ export default function App() {
           onExportBlender={() => {
             buildBlenderHandoff(draft);
             downloadTextFile('fabric-studio-blender-map.json', serializeBlenderHandoff(draft));
-          }}
-          onApplyRenderSettings={(settings) => {
-            setDraft((current) => updateRenderSettings(current, settings));
           }}
         />
       </main>
