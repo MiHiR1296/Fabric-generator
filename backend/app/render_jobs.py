@@ -25,6 +25,7 @@ from .yarn_assets import get_ready_yarn_assets_lookup
 DEFAULT_BLENDER_BINARY = Path("/Applications/Blender.app/Contents/MacOS/Blender")
 DEFAULT_BLEND_FILE = BLEND_FILE_PATH
 DEFAULT_RUNTIME_ROOT = RENDER_JOBS_ROOT
+MAX_DIRECT_PREVIEW_MATERIALS = 16
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,50 @@ def validate_headless_blender_config(config: HeadlessBlenderConfig) -> None:
     config.runtime_root.mkdir(parents=True, exist_ok=True)
 
 
+def _coerce_float(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed == parsed else default
+
+
+def _band_pair(meta: dict[str, Any], name: str, default_min: float, default_max: float) -> tuple[float, float]:
+    bands = meta.get("bands_v_norm") if isinstance(meta.get("bands_v_norm"), dict) else {}
+    value = bands.get(name)
+    if not isinstance(value, (list, tuple)) or len(value) < 2:
+        return default_min, default_max
+    return _coerce_float(value[0], default_min), _coerce_float(value[1], default_max)
+
+
+def build_material_asset_entry(asset: Any, diffuse_path: Path, alpha_path: Path) -> dict[str, Any]:
+    meta = getattr(asset, "bandMeta", {}) or {}
+    image_size = meta.get("image_size_px") if isinstance(meta.get("image_size_px"), (list, tuple)) else []
+    core_min, core_max = _band_pair(meta, "core", 0.0, 1.0)
+    fiber_top_min, fiber_top_max = _band_pair(meta, "fiber_top", core_max, 1.0)
+    fiber_bot_min, fiber_bot_max = _band_pair(meta, "fiber_bot", 0.0, core_min)
+    uv_remap = meta.get("blender_uv_remap") if isinstance(meta.get("blender_uv_remap"), dict) else {}
+    arc1 = uv_remap.get("arc1") if isinstance(uv_remap.get("arc1"), dict) else {}
+    arc2 = uv_remap.get("arc2_three_segment") if isinstance(uv_remap.get("arc2_three_segment"), dict) else {}
+    top_fiber = arc2.get("top_fiber") if isinstance(arc2.get("top_fiber"), dict) else {}
+    bot_fiber = arc2.get("bot_fiber") if isinstance(arc2.get("bot_fiber"), dict) else {}
+    return {
+        "id": asset.id,
+        "diffuse_path": diffuse_path,
+        "alpha_path": alpha_path,
+        "texture_scale_u": _coerce_float(meta.get("texture_scale_u", meta.get("textureScaleU")), 1.0),
+        "image_width_px": _coerce_float(image_size[0] if image_size else None, 1.0),
+        "core_v_min": _coerce_float(arc1.get("out_min"), core_min),
+        "core_v_max": _coerce_float(arc1.get("out_max"), core_max),
+        "image_fiber_top_v_min": _coerce_float(bot_fiber.get("out_min"), fiber_bot_min),
+        "image_fiber_bot_v_max": _coerce_float(top_fiber.get("out_max"), fiber_top_max),
+    }
+
+
+def _entry_value(entry: dict[str, Any], camel_key: str, snake_key: str, default: float) -> float:
+    return _coerce_float(entry.get(camel_key, entry.get(snake_key)), default)
+
+
 def build_headless_render_script(
     draft: dict[str, Any],
     *,
@@ -99,18 +144,27 @@ def build_headless_render_script(
     preview_only: bool = False,
     render_engine: str | None = None,
     render_samples: int | None = None,
+    render_size: int | None = None,
 ) -> str:
     drawdown = validate_drawdown_matrix(draft.get("drawdown"))
-    render_path_json = json.dumps(str(Path(render_path)))
-    target_name_json = json.dumps(target_object_name)
-    normalized_material_assets = [
-        {
+
+    def normalize_material_asset(entry: dict[str, Any]) -> dict[str, Any]:
+        image_width_px = max(1.0, _entry_value(entry, "imageWidthPx", "image_width_px", 1.0))
+        return {
             "id": str(entry["id"]),
             "diffusePath": str(entry["diffuse_path"]),
             "alphaPath": str(entry["alpha_path"]),
+            "imageWidthPx": image_width_px,
+            "textureScaleU": _entry_value(entry, "textureScaleU", "texture_scale_u", 1.0),
+            "coreVMin": _entry_value(entry, "coreVMin", "core_v_min", 0.0),
+            "coreVMax": _entry_value(entry, "coreVMax", "core_v_max", 1.0),
+            "imageFiberTopVMin": _entry_value(entry, "imageFiberTopVMin", "image_fiber_top_v_min", 0.0),
+            "imageFiberBotVMax": _entry_value(entry, "imageFiberBotVMax", "image_fiber_bot_v_max", 1.0),
         }
-        for entry in (material_assets or [])
-    ]
+
+    render_path_json = json.dumps(str(Path(render_path)))
+    target_name_json = json.dumps(target_object_name)
+    normalized_material_assets = [normalize_material_asset(entry) for entry in (material_assets or [])]
     material_count = (
         len(normalized_material_assets)
         if normalized_material_assets
@@ -118,6 +172,7 @@ def build_headless_render_script(
     )
     render_engine_json = json.dumps(render_engine) if render_engine is not None else "None"
     render_samples_literal = repr(render_samples)
+    render_size_literal = repr(render_size)
     sync_code = build_blender_sync_code(
         {
             **draft,
@@ -199,94 +254,19 @@ def ensure_image(name, image_path, colorspace=None):
         image.colorspace_settings.name = colorspace
     return image
 
-def find_template_material():
-    for name in ('MAterial_01', 'Material_01'):
-        material = bpy.data.materials.get(name)
-        if material is not None:
-            return material
-    return None
-
-def find_principled_node(material):
-    for node in material.node_tree.nodes:
-        if node.bl_idname == 'ShaderNodeBsdfPrincipled':
-            return node
-    return None
-
-def disconnect_socket_links(socket):
-    for link in list(socket.links):
-        socket.id_data.links.remove(link)
-
-def find_connected_image_texture(material, socket_name):
-    shader = find_principled_node(material)
-    if shader is None:
-        return None
-    socket = shader.inputs.get(socket_name)
-    if socket is None:
-        return None
-    queue = [link.from_node for link in socket.links]
-    seen = set()
-    while queue:
-        node = queue.pop(0)
-        if node.name in seen:
-            continue
-        seen.add(node.name)
-        if node.bl_idname == 'ShaderNodeTexImage':
-            return node
-        for input_socket in node.inputs:
-            for link in input_socket.links:
-                queue.append(link.from_node)
-    return None
-
-def find_image_texture_node(material, node_name):
-    node = material.node_tree.nodes.get(node_name)
-    if node is not None and node.bl_idname == 'ShaderNodeTexImage':
-        return node
-    return None
-
-def pick_texture_nodes(material):
-    diffuse_node = find_image_texture_node(material, 'FabricStudioDiffuseNode')
-    alpha_node = find_image_texture_node(material, 'FabricStudioAlphaNode')
-    if diffuse_node is not None and alpha_node is not None:
-        return diffuse_node, alpha_node
-
-    diffuse_node = diffuse_node or find_connected_image_texture(material, 'Base Color')
-    alpha_node = alpha_node or find_connected_image_texture(material, 'Alpha')
-
-    image_nodes = [node for node in material.node_tree.nodes if node.bl_idname == 'ShaderNodeTexImage']
-    if diffuse_node is None and image_nodes:
-        diffuse_node = image_nodes[0]
-    if alpha_node is None:
-        alpha_candidates = [node for node in image_nodes if node is not diffuse_node]
-        if alpha_candidates:
-            alpha_node = alpha_candidates[0]
-
-    if diffuse_node is not None:
-        diffuse_node.name = 'FabricStudioDiffuseNode'
-    if alpha_node is not None:
-        alpha_node.name = 'FabricStudioAlphaNode'
-
-    return diffuse_node, alpha_node
-
-def ensure_template_preview_material(template_material, asset_entry, index):
-    material_name = f"FabricStudioMaterial_{index:02d}_{asset_entry['id'][:8]}"
-    material = bpy.data.materials.get(material_name)
-    if material is None:
-        material = template_material.copy()
-        material.name = material_name
-
-    shader = find_principled_node(material)
-    diffuse_node, alpha_node = pick_texture_nodes(material)
-    if shader is None or diffuse_node is None or alpha_node is None:
-        raise RuntimeError(
-            "The template material must have image textures connected to Principled BSDF Base Color and Alpha."
-        )
-
-    diffuse_node.image = ensure_image(f"{material_name}_Diffuse", asset_entry['diffusePath'], 'sRGB')
-    alpha_node.image = ensure_image(f"{material_name}_Alpha", asset_entry['alphaPath'], 'Non-Color')
-    disconnect_socket_links(shader.inputs['Alpha'])
-    shader.inputs['Alpha'].default_value = 1.0
+def configure_texture_node(texture_node):
     try:
-        material.blend_method = 'OPAQUE'
+        texture_node.extension = 'REPEAT'
+    except Exception:
+        pass
+    try:
+        texture_node.interpolation = 'Closest'
+    except Exception:
+        pass
+
+def configure_cutout_material(material):
+    try:
+        material.blend_method = 'HASHED'
     except Exception:
         pass
     if hasattr(material, 'surface_render_method'):
@@ -294,6 +274,59 @@ def ensure_template_preview_material(template_material, asset_entry, index):
             material.surface_render_method = 'DITHERED'
         except Exception:
             pass
+    try:
+        material.use_screen_refraction = False
+    except Exception:
+        pass
+
+def ensure_texture_preview_material(asset_entry, index):
+    material_name = f"FabricStudioMaterial_{index:02d}_{asset_entry['id'][:8]}"
+    material = bpy.data.materials.get(material_name)
+    if material is None:
+        material = bpy.data.materials.new(name=material_name)
+
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+
+    output = nodes.new('ShaderNodeOutputMaterial')
+    output.location = (620, 0)
+    shader = nodes.new('ShaderNodeBsdfPrincipled')
+    shader.location = (380, 0)
+    shader.inputs['Roughness'].default_value = 0.72
+    shader.inputs['Alpha'].default_value = 1.0
+
+    diffuse_tex = nodes.new('ShaderNodeTexImage')
+    diffuse_tex.name = 'FabricStudioDiffuseNode'
+    diffuse_tex.location = (80, 80)
+    diffuse_tex.image = ensure_image(f"{material_name}_Diffuse", asset_entry['diffusePath'], 'sRGB')
+    configure_texture_node(diffuse_tex)
+
+    alpha_tex = nodes.new('ShaderNodeTexImage')
+    alpha_tex.name = 'FabricStudioAlphaNode'
+    alpha_tex.location = (80, -160)
+    alpha_tex.image = ensure_image(f"{material_name}_Alpha", asset_entry['alphaPath'], 'Non-Color')
+    configure_texture_node(alpha_tex)
+
+    mapping = nodes.new('ShaderNodeMapping')
+    mapping.location = (-180, 20)
+    uv_attr = nodes.new('ShaderNodeAttribute')
+    uv_attr.location = (-430, 20)
+    uv_attr.attribute_name = 'uv_scaled'
+    try:
+        uv_attr.attribute_type = 'GEOMETRY'
+    except Exception:
+        pass
+
+    links.new(uv_attr.outputs['Vector'], mapping.inputs['Vector'])
+    links.new(mapping.outputs['Vector'], diffuse_tex.inputs['Vector'])
+    links.new(mapping.outputs['Vector'], alpha_tex.inputs['Vector'])
+    links.new(diffuse_tex.outputs['Color'], shader.inputs['Base Color'])
+    links.new(alpha_tex.outputs['Color'], shader.inputs['Alpha'])
+    links.new(shader.outputs['BSDF'], output.inputs['Surface'])
+
+    configure_cutout_material(material)
     return material
 
 def remove_socket_links(socket):
@@ -304,8 +337,104 @@ def remove_output_links(socket):
     for link in list(socket.links):
         socket.id_data.links.remove(link)
 
+def get_compare_input(compare_node, name, fallback_index):
+    for socket in compare_node.inputs:
+        if socket.name == name and hasattr(socket, 'default_value'):
+            return socket
+    if fallback_index < len(compare_node.inputs):
+        return compare_node.inputs[fallback_index]
+    return None
+
+def set_compare_material_match(compare_node, material_index):
+    compare_node.data_type = 'INT'
+    compare_node.operation = 'EQUAL'
+    b_socket = get_compare_input(compare_node, 'B', 1)
+    if b_socket is not None and hasattr(b_socket, 'default_value'):
+        b_socket.default_value = material_index
+    return get_compare_input(compare_node, 'A', 0)
+
 def is_dynamic_render_set_node(node):
     return node is not None and str(node.name).startswith('Render Set Material ')
+
+def compress_material_runs(material_ids):
+    runs = []
+    for material_id in material_ids or []:
+        one_based_material_id = int(material_id) + 1
+        if runs and runs[-1][1] == one_based_material_id:
+            runs[-1][0] += 1
+        else:
+            runs.append([1, one_based_material_id])
+    return runs
+
+def apply_material_cycle_inputs(modifier, node_group, prefix, material_ids):
+    runs = compress_material_runs(material_ids)
+    if not runs:
+        return
+    set_modifier_input(modifier, node_group, f'{prefix} Offset', 0)
+    for index in range(4):
+        length_value = runs[index][0] if index < len(runs) else 0
+        material_value = runs[index][1] if index < len(runs) else min(index + 1, max(1, len(runs)))
+        try:
+            set_modifier_input(modifier, node_group, f'{prefix} Length {index + 1}', int(length_value))
+            set_modifier_input(modifier, node_group, f'{prefix} Material {index + 1}', int(material_value))
+        except Exception:
+            pass
+
+def asset_float(asset_entry, key, default):
+    try:
+        value = float(asset_entry.get(key, default))
+    except Exception:
+        return default
+    return value if value == value else default
+
+def apply_modifier_material_metadata(modifier, node_group, material_assets):
+    if modifier is None or node_group is None or not material_assets:
+        return
+
+    first_asset = material_assets[0]
+    for socket_name, key, default in (
+        ('Image Width Px', 'imageWidthPx', 1.0),
+        ('Image Core V Min', 'coreVMin', 0.0),
+        ('Image Core V Max', 'coreVMax', 1.0),
+        ('Image Fiber Top V Min', 'imageFiberTopVMin', 0.0),
+        ('Image Fiber Bot V Max', 'imageFiberBotVMax', 1.0),
+    ):
+        maybe_set_modifier_input(modifier, node_group, socket_name, asset_float(first_asset, key, default))
+
+    for index, asset_entry in enumerate(material_assets[:16], start=1):
+        for suffix, key, default in (
+            ('Image Width Px', 'imageWidthPx', 1.0),
+            ('Texture Scale U', 'textureScaleU', 1.0),
+            ('Core V Min', 'coreVMin', 0.0),
+            ('Core V Max', 'coreVMax', 1.0),
+            ('Fiber Top V Min', 'imageFiberTopVMin', 0.0),
+            ('Fiber Bot V Max', 'imageFiberBotVMax', 1.0),
+        ):
+            maybe_set_modifier_input(
+                modifier,
+                node_group,
+                f'Material {index} {suffix}',
+                asset_float(asset_entry, key, default),
+            )
+
+def apply_modifier_material_slots(modifier, node_group, materials, warp_ids, weft_ids, material_assets=None):
+    if modifier is None or node_group is None:
+        return
+    for index, material in enumerate(materials, start=1):
+        try:
+            set_modifier_input(modifier, node_group, f'Material {index}', material)
+        except Exception:
+            break
+    apply_modifier_material_metadata(modifier, node_group, material_assets or [])
+    try:
+        if node_group.name == 'Parametric Weave knotty':
+            apply_material_cycle_inputs(modifier, node_group, 'Warp', weft_ids)
+            apply_material_cycle_inputs(modifier, node_group, 'Weft', warp_ids)
+        else:
+            apply_material_cycle_inputs(modifier, node_group, 'Warp', warp_ids)
+            apply_material_cycle_inputs(modifier, node_group, 'Weft', weft_ids)
+    except Exception:
+        pass
 
 def collect_render_chain_downstream_sockets(mesh_material_node):
     sockets = []
@@ -374,9 +503,7 @@ def ensure_colour_material_chain(weave_group, materials):
             mesh_material_node.location.x + 260.0 * material_index,
             mesh_material_node.location.y - 300.0,
         )
-        compare_node.data_type = 'INT'
-        compare_node.operation = 'EQUAL'
-        compare_node.inputs[3].default_value = material_index
+        compare_input = set_compare_material_match(compare_node, material_index)
 
         set_material_node = weave_group.nodes.get(f'Render Set Material {material_index + 1}')
         if set_material_node is None:
@@ -394,23 +521,19 @@ def ensure_colour_material_chain(weave_group, materials):
         remove_socket_links(set_material_node.inputs['Selection'])
 
         weave_group.links.new(previous_node.outputs['Geometry'], set_material_node.inputs['Geometry'])
-        weave_group.links.new(colour_attr.outputs['Attribute'], compare_node.inputs[2])
+        if compare_input is not None:
+            weave_group.links.new(colour_attr.outputs['Attribute'], compare_input)
         weave_group.links.new(compare_node.outputs['Result'], set_material_node.inputs['Selection'])
         previous_node = set_material_node
 
     for socket in downstream_sockets:
         weave_group.links.new(previous_node.outputs['Geometry'], socket)
 
-def build_template_preview_materials(material_assets):
+def build_generated_preview_materials(material_assets):
     if not material_assets:
         return []
-    template_material = find_template_material()
-    if template_material is None:
-        raise RuntimeError(
-            "Blender is missing the MAterial_01 template material required for yarn preview rendering."
-        )
     return [
-        ensure_template_preview_material(template_material, asset_entry, index)
+        ensure_texture_preview_material(asset_entry, index)
         for index, asset_entry in enumerate(material_assets, start=1)
     ]
 """
@@ -466,9 +589,11 @@ def ensure_atlas_preview_material(name, diffuse_path, alpha_path, rows):
     diffuse_tex = nodes.new('ShaderNodeTexImage')
     diffuse_tex.location = (320, -120)
     diffuse_tex.image = ensure_image('FabricStudioDiffuseAtlas', diffuse_path, 'sRGB')
+    configure_texture_node(diffuse_tex)
     alpha_tex = nodes.new('ShaderNodeTexImage')
     alpha_tex.location = (320, 100)
     alpha_tex.image = ensure_image('FabricStudioAlphaAtlas', alpha_path, 'Non-Color')
+    configure_texture_node(alpha_tex)
 
     links.new(uv_attr.outputs['Vector'], uv_sep.inputs['Vector'])
     links.new(uv_sep.outputs['X'], u_fract.inputs[0])
@@ -481,12 +606,14 @@ def ensure_atlas_preview_material(name, diffuse_path, alpha_path, rows):
     links.new(atlas_vector.outputs['Vector'], diffuse_tex.inputs['Vector'])
     links.new(atlas_vector.outputs['Vector'], alpha_tex.inputs['Vector'])
     links.new(diffuse_tex.outputs['Color'], shader.inputs['Base Color'])
+    links.new(alpha_tex.outputs['Color'], shader.inputs['Alpha'])
     links.new(shader.outputs['BSDF'], output.inputs['Surface'])
+    configure_cutout_material(material)
     return material
 """
-    if normalized_material_assets and len(normalized_material_assets) <= 4:
+    if normalized_material_assets and len(normalized_material_assets) <= MAX_DIRECT_PREVIEW_MATERIALS:
         preview_setup = """
-    preview_materials = build_template_preview_materials(material_assets)
+    preview_materials = build_generated_preview_materials(material_assets)
     """
     elif atlas_bundle is not None:
         preview_setup = """
@@ -510,6 +637,16 @@ scene.render.image_settings.file_format = 'PNG'
 scene.render.filepath = {render_path_json}
 render_engine_override = {render_engine_json}
 render_samples_override = {render_samples_literal}
+render_size_override = {render_size_literal}
+
+if render_size_override is not None:
+    try:
+        preview_size = max(256, int(render_size_override))
+        scene.render.resolution_x = preview_size
+        scene.render.resolution_y = preview_size
+        scene.render.resolution_percentage = 100
+    except Exception:
+        pass
 
 if scene.camera is None:
     fallback_camera = bpy.data.objects.get('Camera')
@@ -541,18 +678,20 @@ if target_obj is not None:
         target_obj.data.materials.clear()
         for preview_material in preview_materials:
             target_obj.data.materials.append(preview_material)
-    weave_group = bpy.data.node_groups.get('Weave From Draft')
+    weave_group = weave_mod.node_group if weave_mod and getattr(weave_mod, 'node_group', None) else None
+    if weave_group is None:
+        weave_group = bpy.data.node_groups.get('Parametric Weave knotty') or bpy.data.node_groups.get('Weave From Draft')
     if weave_group is not None and preview_materials:
-        if len(preview_materials) <= 4:
+        apply_modifier_material_slots(
+            weave_mod,
+            weave_group,
+            preview_materials,
+            warp_material_ids,
+            weft_material_ids,
+            material_assets,
+        )
+        if not has_modifier_input(weave_group, 'Material 1'):
             ensure_colour_material_chain(weave_group, preview_materials)
-        else:
-            for node_name in ('Set Material', 'Set Material.001'):
-                node = weave_group.nodes.get(node_name)
-                if node is not None:
-                    try:
-                        node.inputs['Material'].default_value = preview_materials[0]
-                    except Exception:
-                        pass
 
 bpy.context.view_layer.update()
 """
@@ -838,14 +977,16 @@ def submit_project_render_job(
     atlas_entries: list[dict[str, Any]] = []
 
     for asset in ordered_assets:
-        if not asset.diffuseFilename or not asset.alphaFilename:
+        diffuse_filename = asset.renderDiffuseFilename or asset.diffuseFilename
+        alpha_filename = asset.renderAlphaFilename or asset.alphaFilename
+        if not diffuse_filename or not alpha_filename:
             raise ValueError(f"Yarn asset {asset.label} is missing processed outputs.")
         atlas_entries.append(
-            {
-                "id": asset.id,
-                "diffuse_path": YARN_ASSETS_ROOT / asset.id / asset.diffuseFilename,
-                "alpha_path": YARN_ASSETS_ROOT / asset.id / asset.alphaFilename,
-            }
+            build_material_asset_entry(
+                asset,
+                YARN_ASSETS_ROOT / asset.id / diffuse_filename,
+                YARN_ASSETS_ROOT / asset.id / alpha_filename,
+            )
         )
 
     atlas_bundle = build_yarn_atlas(atlas_entries, job_dir / "atlas")
@@ -861,7 +1002,9 @@ def submit_project_render_job(
         atlas_bundle=atlas_bundle,
         warp_material_ids=warp_material_ids,
         weft_material_ids=weft_material_ids,
-        material_assets=atlas_entries if len(atlas_entries) <= 4 else None,
+        material_assets=atlas_entries if len(atlas_entries) <= MAX_DIRECT_PREVIEW_MATERIALS else None,
+        render_engine="CYCLES",
+        render_samples=160,
     )
     payload = project_snapshot.to_dict()
     payload["atlas"] = atlas_bundle.to_dict()
@@ -870,6 +1013,9 @@ def submit_project_render_job(
             "id": str(entry["id"]),
             "diffusePath": str(entry["diffuse_path"]),
             "alphaPath": str(entry["alpha_path"]),
+            "imageWidthPx": float(entry.get("image_width_px", 1.0)),
+            "coreVMin": float(entry.get("core_v_min", 0.0)),
+            "coreVMax": float(entry.get("core_v_max", 1.0)),
         }
         for entry in atlas_entries
     ]

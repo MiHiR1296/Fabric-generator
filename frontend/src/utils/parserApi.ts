@@ -175,7 +175,7 @@ export async function requestLivePreview(
       target_object_name: options?.targetObjectName || 'ParametricWeave',
       draft_object_name: options?.draftObjectName || 'WebDraft_Live',
       session_id: options?.sessionId || 'default',
-      max_size: options?.maxSize || 1400,
+      max_size: options?.maxSize || 2400,
     }),
   });
   return parseJson(response);

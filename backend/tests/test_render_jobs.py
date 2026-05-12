@@ -96,13 +96,14 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("ensure_atlas_preview_material", script)
         self.assertIn("FabricStudioAtlasMaterial", script)
         self.assertIn("atlas_rows = 5", script)
+        self.assertIn("links.new(alpha_tex.outputs['Color'], shader.inputs['Alpha'])", script)
         self.assertIn("colour_id", script)
         self.assertIn("warp_material_ids = [0, 1]", script)
 
-    def test_build_headless_render_script_supports_template_material_preview(self) -> None:
+    def test_build_headless_render_script_supports_generated_texture_material_preview(self) -> None:
         script = build_headless_render_script(
             {
-                "title": "Template Material Draft",
+                "title": "Generated Texture Material Draft",
                 "drawdown": [[1, 0], [0, 1]],
                 "warpColors": ["#ffffff", "#111111"],
                 "weftColors": ["#aa0000", "#00aa00"],
@@ -115,21 +116,71 @@ class RenderJobTests(unittest.TestCase):
                     "id": "asset-red",
                     "diffuse_path": "/tmp/red.png",
                     "alpha_path": "/tmp/red-alpha.png",
+                    "image_width_px": 16000,
+                    "core_v_min": 0.4,
+                    "core_v_max": 0.6,
                 },
                 {
                     "id": "asset-black",
                     "diffuse_path": "/tmp/black.png",
                     "alpha_path": "/tmp/black-alpha.png",
+                    "image_width_px": 8000,
+                    "core_v_min": 0.2,
+                    "core_v_max": 0.7,
                 },
             ],
         )
 
-        self.assertIn("build_template_preview_materials", script)
-        self.assertIn("MAterial_01", script)
+        self.assertIn("build_generated_preview_materials", script)
+        self.assertIn("ensure_texture_preview_material", script)
+        self.assertIn("FabricStudioDiffuseNode", script)
+        self.assertIn("FabricStudioAlphaNode", script)
+        self.assertIn("links.new(alpha_tex.outputs['Color'], shader.inputs['Alpha'])", script)
+        self.assertIn("texture_node.interpolation = 'Closest'", script)
+        self.assertIn("material.blend_method = 'HASHED'", script)
+        self.assertIn("uv_scaled", script)
+        self.assertIn("apply_modifier_material_metadata", script)
+        self.assertIn("f'Material {index} {suffix}'", script)
+        self.assertIn('"imageWidthPx": 16000.0', script)
+        self.assertIn('"textureScaleU": 1.0', script)
+        self.assertNotIn("ensure_per_material_uv_metadata", script)
+        self.assertNotIn('"uScale":', script)
+        self.assertIn('"coreVMin": 0.4', script)
+        self.assertIn("apply_modifier_material_slots", script)
         self.assertIn("ensure_colour_material_chain", script)
         self.assertIn("Render Material Match", script)
         self.assertIn("colour_id", script)
         self.assertIn('"diffusePath": "/tmp/red.png"', script)
+
+    def test_build_headless_render_script_supports_more_than_four_direct_materials(self) -> None:
+        material_assets = [
+            {
+                "id": f"asset-{index}",
+                "diffuse_path": f"/tmp/asset-{index}.png",
+                "alpha_path": f"/tmp/asset-{index}-alpha.png",
+            }
+            for index in range(6)
+        ]
+        script = build_headless_render_script(
+            {
+                "title": "Six Material Draft",
+                "drawdown": [[1, 0, 1], [0, 1, 0]],
+                "warpColors": ["#111111", "#222222", "#333333"],
+                "weftColors": ["#444444", "#555555"],
+            },
+            render_path="/tmp/unit-preview.png",
+            warp_material_ids=[0, 1, 2],
+            weft_material_ids=[3, 4],
+            material_assets=material_assets,
+            render_size=1800,
+        )
+
+        self.assertIn("build_generated_preview_materials", script)
+        self.assertIn('"id": "asset-5"', script)
+        self.assertIn("for material_index, material in enumerate(materials[1:], start=1)", script)
+        self.assertIn("render_size_override = 1800", script)
+        self.assertIn("scene.render.resolution_x = preview_size", script)
+        self.assertNotIn("ensure_atlas_preview_material", script)
 
     def test_build_headless_render_script_supports_preview_only_material_view(self) -> None:
         script = build_headless_render_script(
@@ -301,8 +352,12 @@ class RenderJobTests(unittest.TestCase):
                 self.assertEqual(len(captured["payload"]["materialAssets"]), 2)
                 self.assertTrue((captured["job_dir"] / "project.json").exists())
                 self.assertTrue((projects_root / "jobabc123def.json").exists())
-                self.assertIn("build_template_preview_materials", captured["script_text"])
-                self.assertIn("MAterial_01", captured["script_text"])
+                self.assertIn("build_generated_preview_materials", captured["script_text"])
+                self.assertIn("ensure_texture_preview_material", captured["script_text"])
+                self.assertIn("FabricStudioDiffuseNode", captured["script_text"])
+                self.assertIn("apply_modifier_material_slots", captured["script_text"])
+                self.assertIn('render_engine_override = "CYCLES"', captured["script_text"])
+                self.assertIn("render_samples_override = 160", captured["script_text"])
                 self.assertEqual(
                     captured["atlas_entries"],
                     [
@@ -310,11 +365,23 @@ class RenderJobTests(unittest.TestCase):
                             "id": "asset-red",
                             "diffuse_path": yarn_root / "asset-red" / "processed/red.png",
                             "alpha_path": yarn_root / "asset-red" / "processed/red-alpha.png",
+                            "texture_scale_u": 1.0,
+                            "image_width_px": 1.0,
+                            "core_v_min": 0.0,
+                            "core_v_max": 1.0,
+                            "image_fiber_top_v_min": 0.0,
+                            "image_fiber_bot_v_max": 1.0,
                         },
                         {
                             "id": "asset-black",
                             "diffuse_path": yarn_root / "asset-black" / "processed/black.png",
                             "alpha_path": yarn_root / "asset-black" / "processed/black-alpha.png",
+                            "texture_scale_u": 1.0,
+                            "image_width_px": 1.0,
+                            "core_v_min": 0.0,
+                            "core_v_max": 1.0,
+                            "image_fiber_top_v_min": 0.0,
+                            "image_fiber_bot_v_max": 1.0,
                         },
                     ],
                 )

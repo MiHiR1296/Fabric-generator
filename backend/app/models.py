@@ -48,8 +48,21 @@ class YarnAsset:
     alphaUrl: str | None = None
     preprocessedFilename: str | None = None
     preprocessedUrl: str | None = None
+    renderDiffuseFilename: str | None = None
+    renderDiffuseUrl: str | None = None
+    renderAlphaFilename: str | None = None
+    renderAlphaUrl: str | None = None
+    normalFilename: str | None = None
+    normalUrl: str | None = None
+    roughnessFilename: str | None = None
+    roughnessUrl: str | None = None
+    overlayFilename: str | None = None
+    overlayUrl: str | None = None
+    bandMetaFilename: str | None = None
+    bandMetaUrl: str | None = None
     preprocessMeta: dict = field(default_factory=dict)
     alphaMeta: dict = field(default_factory=dict)
+    bandMeta: dict = field(default_factory=dict)
     error: str | None = None
     createdAt: str | None = None
     updatedAt: str | None = None

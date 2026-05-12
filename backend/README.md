@@ -4,6 +4,7 @@ FastAPI service for:
 
 - parsing weaving draft sources into one canonical document
 - processing uploaded yarn images into seamless diffuse and alpha maps
+- segmenting processed yarns into core/fiber bands with QA maps and Blender-facing metadata
 - validating color-to-yarn bindings
 - building texture atlases for Blender preview renders
 - launching headless Blender render jobs
@@ -19,6 +20,9 @@ The vendored `big-lama` weights are stored as chunk files in the repo and recons
 - `GET /api/blender/session`
 - `POST /api/blender/session/restart`
 - `POST /api/blender/session/stop`
+- `POST /api/blender/live-preview`
+- `GET /api/blender/live-preview/{session_id}`
+- `GET /api/blender/live-preview/{session_id}/image`
 - `POST /api/blender/sync-draft`
 - `POST /api/blender/render-draft`
 - `POST /api/blender/render-project`
@@ -57,7 +61,7 @@ The service listens on `http://127.0.0.1:8000`.
 - Blender binary:
   - `/Applications/Blender.app/Contents/MacOS/Blender`
 - Blend file:
-  - `../Weave_GUIConnection.blend`
+  - `../Codex_ParametricWeave.blend`
 - Runtime root:
   - `../runtime/render_jobs`
 
@@ -65,7 +69,7 @@ Optional environment overrides:
 
 ```bash
 export BLENDER_BINARY_PATH="/Applications/Blender.app/Contents/MacOS/Blender"
-export WEAVE_BLEND_FILE="/absolute/path/to/Weave_GUIConnection.blend"
+export WEAVE_BLEND_FILE="/absolute/path/to/Codex_ParametricWeave.blend"
 export WEAVE_RENDER_ROOT="/absolute/path/to/runtime/render_jobs"
 export BLENDER_SESSION_MODE="managed"
 export BLENDER_IDLE_TIMEOUT_SECONDS="600"

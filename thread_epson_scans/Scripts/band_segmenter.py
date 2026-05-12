@@ -37,7 +37,7 @@ import sys
 from typing import Optional
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 from scipy import ndimage
 
 import alpha_pipeline  # reuse luma() + row_thread_score()
@@ -234,7 +234,7 @@ def normal_from_luma(rgb_u8: np.ndarray, alpha_u8: Optional[np.ndarray] = None,
     h = alpha_pipeline.luma(rgb_u8.astype(np.float32)) / 255.0
     # mild blur to denoise scanner texture before differentiating
     pil = Image.fromarray((h * 255).astype(np.uint8)).filter(
-        __import__("PIL").ImageFilter.GaussianBlur(radius=1.2))
+        ImageFilter.GaussianBlur(radius=1.2))
     h = np.asarray(pil, dtype=np.float32) / 255.0
 
     sobel_x = ndimage.sobel(h, axis=1) * strength

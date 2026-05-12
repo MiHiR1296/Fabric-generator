@@ -16,7 +16,7 @@ from .fabric_project import (
     save_project_snapshot,
     validate_project_bindings,
 )
-from .render_jobs import build_headless_render_script
+from .render_jobs import build_headless_render_script, build_material_asset_entry
 from .runtime_paths import LIVE_PREVIEW_ROOT, YARN_ASSETS_ROOT, ensure_runtime_dirs
 from .yarn_assets import get_ready_yarn_assets_lookup
 
@@ -51,7 +51,8 @@ class BlenderPreview:
 _LOCK = threading.Lock()
 _PREVIEWS: dict[str, BlenderPreview] = {}
 DEFAULT_PREVIEW_RENDER_ENGINE = "CYCLES"
-DEFAULT_PREVIEW_RENDER_SAMPLES = 12
+DEFAULT_PREVIEW_RENDER_SAMPLES = 32
+MAX_LIVE_PREVIEW_MATERIALS = 16
 
 
 def _utc_now() -> str:
@@ -69,7 +70,7 @@ def update_project_preview(
     target_object_name: str = "ParametricWeave",
     draft_object_name: str = "WebDraft_Live",
     session_id: str = "default",
-    max_size: int = 1400,
+    max_size: int = 2400,
 ) -> dict[str, Any]:
     ensure_runtime_dirs()
     draft = project_payload.get("draft")
@@ -90,9 +91,9 @@ def update_project_preview(
     )
     if not ordered_assets:
         raise ValueError("At least one ready yarn asset must be assigned before previewing.")
-    if len(ordered_assets) > 4:
+    if len(ordered_assets) > MAX_LIVE_PREVIEW_MATERIALS:
         raise ValueError(
-            "Live Blender preview currently supports up to 4 assigned yarn assets. "
+            f"Live Blender preview currently supports up to {MAX_LIVE_PREVIEW_MATERIALS} assigned yarn assets. "
             "Reduce the distinct yarn assignments or use the headless render path for larger previews."
         )
 
@@ -103,14 +104,16 @@ def update_project_preview(
 
     material_assets: list[dict[str, Any]] = []
     for asset in ordered_assets:
-        if not asset.diffuseFilename or not asset.alphaFilename:
+        diffuse_filename = asset.renderDiffuseFilename or asset.diffuseFilename
+        alpha_filename = asset.renderAlphaFilename or asset.alphaFilename
+        if not diffuse_filename or not alpha_filename:
             raise ValueError(f"Yarn asset {asset.label} is missing processed outputs.")
         material_assets.append(
-            {
-                "id": asset.id,
-                "diffuse_path": YARN_ASSETS_ROOT / asset.id / asset.diffuseFilename,
-                "alpha_path": YARN_ASSETS_ROOT / asset.id / asset.alphaFilename,
-            }
+            build_material_asset_entry(
+                asset,
+                YARN_ASSETS_ROOT / asset.id / diffuse_filename,
+                YARN_ASSETS_ROOT / asset.id / alpha_filename,
+            )
         )
 
     project_snapshot = build_project_snapshot(normalized_draft, bindings, ordered_assets)
@@ -126,6 +129,7 @@ def update_project_preview(
         material_assets=material_assets,
         render_engine=DEFAULT_PREVIEW_RENDER_ENGINE,
         render_samples=DEFAULT_PREVIEW_RENDER_SAMPLES,
+        render_size=max_size,
     )
     response = send_blender_command("execute_code", {"code": code})
     if response.get("status") != "success":

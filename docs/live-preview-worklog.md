@@ -4,9 +4,9 @@
 
 Build a staged Blender Material Preview workflow inside the web app:
 
-- expose the key geometry/material controls from the Blender node setup
+- expose the practical preview controls needed for web review while keeping warp/weft thread counts fixed to the default
 - let the user change them in the web UI without immediately touching Blender
-- send the batch only when the user clicks `Update Preview`
+- send the batch only when the user clicks `Preview`
 - refresh the web UI with a camera-framed Material Preview image from Blender
 
 This is intentionally lighter than a continuous live render session.
@@ -29,12 +29,10 @@ This is intentionally lighter than a continuous live render session.
   - build material assignments from the processed diffuse/alpha outputs
   - push the update into the connected Blender session
   - render a camera-framed preview image directly from Blender's active camera
-- Expanded the Blender sync payload so the web app can drive:
-  - warp/weft threads
-  - spacing/amplitude/fill ratio
-  - thread and ply settings
-  - texture mapping controls
-  - lump/fiber/detail settings
+- Expanded the Blender sync payload so the backend can pass the staged preview settings into Blender:
+  - spacing, mapped from UI `0..1` to Blender `0.03..0.10`
+  - pattern noise X/Y, mapped from UI `0..1` to Blender `0.00..0.03`
+  - warp/weft threads remain fixed to at least `180`
 - Added `backend/app/blender_session.py` so Blender can be:
   - launched on demand in `managed` mode
   - reused while the user is active
@@ -49,34 +47,34 @@ This is intentionally lighter than a continuous live render session.
 
 - Step 3 now uses a lazy preview flow instead of the queued render-job flow
 - The preview panel stages control edits locally
-- Blender is updated only when the user clicks `Update Preview`
+- Blender is updated only when the user clicks `Preview`
 - The returned screenshot is shown directly in the Step 3 panel
-- The preview panel is grouped into:
-  - Draft Density
-  - Thread Structure
-  - Texture Mapping
-  - Micro Detail
+- The preview panel exposes only the current practical controls: spacing and pattern noise X/Y
+- New drafts default warp/weft counts to at least `180`, and imported/older drafts are normalized upward to that floor before preview without showing those count fields in the UI
 
 ### Material Handling
 
-- For live preview, the app uses the template material in Blender:
-  - `MAterial_01`
-  - fallback: `Material_01`
-- The backend duplicates that material, swaps the diffuse and alpha textures, and keeps the existing mapping logic already wired into the Blender file
-- This preserves the texture behavior already tuned in the material and geometry node setup
-- The duplicated preview materials now keep the yarn body opaque during rendering
-- The alpha texture is still loaded, but it is not used as literal material opacity in the automated preview/render path because the strand geometry already defines the silhouette and direct opacity produced an almost black fabric
+- For live preview and render jobs, the backend now creates clean generated yarn materials instead of copying a preset material from the Blender file
+- Each generated material loads the processed diffuse texture from the uploaded yarn asset and wires it to the shader base color
+- Each generated material also loads the processed alpha texture as non-color data for future use and traceability
+- The render script assigns generated materials through the geometry-node material path: it fills modifier `Material N` sockets when they exist, applies warp/weft material-cycle inputs when available, and falls back to the `Weave From Draft` material-id chain only for older/non-knotty node groups
+- `Codex_ParametricWeave.blend` now keeps the `Parametric Weave knotty` per-yarn material selector and UV metadata nodes permanently in the file
+- The backend fills persistent sockets such as `Material N Image Width Px`, `Material N Texture Scale U`, `Material N Core V Min/Max`, and the flipped outer fiber-band sockets from each processed yarn asset
+- The backend also pins the knotty V mapping controls to the scan defaults: `Texture Scale V = 1`, `Texture Offset V = 0`, `Texture Side Flatten = 0`, `Sub Texture Scale V = 0`, and `Sub Texture Offset V = 0`. The sub-texture values are additive deltas for Arc 2, so `Sub Texture Scale V = 1` incorrectly doubles the Arc 2 V scale.
+- The live render no longer creates temporary `Web Material UV` or `Web Material Assign` nodes
+- The generated preview materials load the alpha map into shader alpha. The geometry still defines the main yarn silhouette, while the alpha image preserves scan cutout detail where the material graph uses it.
+- This avoids the failure mode where a changed yarn upload still appears to render with the Blender file's preset material
 
 ## Local Testing Workflow
 
-1. Open `Weave_GUIConnection.blend` in Blender.
+1. Open `Codex_ParametricWeave.blend` in Blender.
 2. Start the Blender MCP/socket bridge.
 3. Run the backend from `backend/`.
 4. Run the frontend from `frontend/`.
 5. Upload yarn assets in Step 1 and wait until they are `ready`.
 6. Build or import the draft in Step 2.
-7. Assign yarns and adjust controls in Step 3.
-8. Click `Update Preview`.
+7. Assign yarns and adjust preview controls in Step 3.
+8. Click `Preview`.
 
 Expected result:
 
@@ -107,10 +105,11 @@ This split is useful because:
 
 ## Known Constraints
 
-- The staged live preview path currently supports up to 4 distinct yarn assets at once because it duplicates the template material for each assignment
+- The staged live preview path now supports up to 16 distinct yarn assets directly. This covers the expected 8x8 draft color-binding workflow while still leaving larger final renders to the atlas path.
 - The atlas-based render path still exists for larger final renders
 - This is a screenshot refresh workflow, not a continuous interactive stream
 - A real Blender GUI session is still required for the Material Preview capture path
+- The preview request now applies its `max_size` value to Blender render resolution. The current default is `2400`, which avoids stretching a low-resolution scene render in the browser.
 
 ## Server Rollout Direction
 
@@ -118,7 +117,7 @@ For the later H100 deployment, the current direction is:
 
 - run Blender in a managed GUI-capable session on the server
 - provide a virtual display instead of relying on a physical monitor
-- keep the same lazy `Update Preview` request cycle from the web UI
+- keep the same lazy `Preview` request cycle from the web UI
 - use camera-framed Material Preview images for quick feedback
 - reserve heavier background renders for final confirmation output
 

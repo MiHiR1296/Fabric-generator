@@ -24,8 +24,9 @@ interface LivePreviewRenderPanelProps extends BaseRenderPanelProps {
   livePreview: BlenderLivePreview | null;
   previewBusy: boolean;
   onUpdatePreview: (settings: Partial<DraftRenderSettings>) => void;
-  renderJob?: never;
-  renderBusy?: never;
+  renderJob: BlenderRenderJob | null;
+  renderBusy: boolean;
+  onRenderFinal: (settings: Partial<DraftRenderSettings>) => void;
   onRenderPreview?: never;
   onApplyRenderSettings?: never;
 }
@@ -38,6 +39,7 @@ interface DraftRenderPanelProps extends BaseRenderPanelProps {
   livePreview?: never;
   previewBusy?: never;
   onUpdatePreview?: never;
+  onRenderFinal?: never;
 }
 
 type RenderPanelProps = LivePreviewRenderPanelProps | DraftRenderPanelProps;
@@ -46,63 +48,30 @@ type RenderSettingsInputState = Record<RenderSettingsKey, string>;
 
 interface ControlGroup {
   title: string;
-  description: string;
+  description?: string;
   fields: Array<{
     key: RenderSettingsKey;
     label: string;
     step?: number | 'any';
+    min?: number;
+    max?: number;
   }>;
 }
 
 const CONTROL_GROUPS: ControlGroup[] = [
   {
-    title: 'Draft Density',
-    description: 'Control repeat density and overall weave relief before refreshing the camera preview.',
+    title: 'Geometry',
     fields: [
-      { key: 'warpThreads', label: 'Warp Threads', step: 1 },
-      { key: 'weftThreads', label: 'Weft Threads', step: 1 },
-      { key: 'spacing', label: 'Spacing', step: 0.001 },
-      { key: 'amplitude', label: 'Amplitude', step: 0.001 },
-      { key: 'fillRatio', label: 'Fill Ratio', step: 0.01 },
-    ],
-  },
-  {
-    title: 'Thread Structure',
-    description: 'Shape the yarn body and plying values that feed the geometry-node strand generation.',
-    fields: [
-      { key: 'threadRadius', label: 'Thread Radius', step: 0.001 },
-      { key: 'threadSubdivisions', label: 'Thread Subdivisions', step: 1 },
-      { key: 'plyCount', label: 'Ply Count', step: 1 },
-      { key: 'plyRadius', label: 'Ply Radius', step: 0.001 },
-      { key: 'twistAmount', label: 'Twist Amount', step: 0.1 },
-      { key: 'plyResolution', label: 'Ply Resolution', step: 1 },
-      { key: 'seed', label: 'Seed', step: 1 },
-    ],
-  },
-  {
-    title: 'Texture Mapping',
-    description: 'These match the material mapping controls already exposed in the Blender node setup.',
-    fields: [
-      { key: 'textureScaleU', label: 'Texture Scale U', step: 0.1 },
-      { key: 'textureScaleV', label: 'Texture Scale V', step: 0.01 },
-      { key: 'textureOffsetV', label: 'Texture Offset V', step: 0.01 },
-      { key: 'textureSideFlatten', label: 'Texture Side Flatten', step: 0.01 },
-    ],
-  },
-  {
-    title: 'Micro Detail',
-    description: 'Fine surface breakup and fiber controls for the camera-framed material preview.',
-    fields: [
-      { key: 'lumpStrength', label: 'Lump Strength', step: 0.0001 },
-      { key: 'lumpScale', label: 'Lump Scale', step: 0.1 },
-      { key: 'fiberDensity', label: 'Fiber Density', step: 0.01 },
-      { key: 'fiberLength', label: 'Fiber Length', step: 0.001 },
-      { key: 'fiberThickness', label: 'Fiber Thickness', step: 0.01 },
-      { key: 'fiberFrizz', label: 'Fiber Frizz', step: 0.01 },
-      { key: 'fiberSubdivs', label: 'Fiber Subdivs', step: 1 },
+      { key: 'spacing', label: 'Spacing', step: 0.01, min: 0, max: 1 },
+      { key: 'patternNoiseX', label: 'Pattern Noise X', step: 0.01, min: 0, max: 1 },
+      { key: 'patternNoiseY', label: 'Pattern Noise Y', step: 0.01, min: 0, max: 1 },
     ],
   },
 ];
+
+const VISIBLE_SETTING_KEYS = new Set<RenderSettingsKey>(
+  CONTROL_GROUPS.flatMap((group) => group.fields.map((field) => field.key)),
+);
 
 function toInputState(draft: DraftDocument): RenderSettingsInputState {
   const settings = draft.renderSettings;
@@ -110,6 +79,8 @@ function toInputState(draft: DraftDocument): RenderSettingsInputState {
     warpThreads: String(settings?.warpThreads ?? ''),
     weftThreads: String(settings?.weftThreads ?? ''),
     spacing: String(settings?.spacing ?? ''),
+    patternNoiseX: String(settings?.patternNoiseX ?? ''),
+    patternNoiseY: String(settings?.patternNoiseY ?? ''),
     amplitude: String(settings?.amplitude ?? ''),
     threadRadius: String(settings?.threadRadius ?? ''),
     threadSubdivisions: String(settings?.threadSubdivisions ?? ''),
@@ -135,6 +106,9 @@ function toInputState(draft: DraftDocument): RenderSettingsInputState {
 
 function parseStagedSettings(values: RenderSettingsInputState): Partial<DraftRenderSettings> {
   const entries = Object.entries(values).flatMap(([key, rawValue]) => {
+    if (!VISIBLE_SETTING_KEYS.has(key as RenderSettingsKey)) {
+      return [];
+    }
     const normalized = rawValue.trim();
     if (!normalized) {
       return [];
@@ -177,9 +151,15 @@ export default function RenderPanel(props: RenderPanelProps) {
 
   const liveMode = 'onUpdatePreview' in props;
   const previewBusy = liveMode ? props.previewBusy : props.renderBusy;
-  const previewImageUrl = liveMode ? props.livePreview?.imageUrl : props.renderJob?.imageUrl;
-  const previewStatus = liveMode ? props.livePreview?.status : props.renderJob?.status;
-  const previewTarget = liveMode ? props.livePreview?.targetObjectName : props.renderJob?.targetObjectName;
+  const renderBusy = props.renderBusy;
+  const actionBusy = previewBusy || renderBusy;
+  const previewImageUrl = liveMode
+    ? props.renderJob?.imageUrl || props.livePreview?.imageUrl
+    : props.renderJob?.imageUrl;
+  const previewStatus = liveMode ? props.renderJob?.status || props.livePreview?.status : props.renderJob?.status;
+  const previewTarget = liveMode
+    ? props.renderJob?.targetObjectName || props.livePreview?.targetObjectName
+    : props.renderJob?.targetObjectName;
   const previewResolution =
     liveMode && props.livePreview?.width && props.livePreview?.height
       ? `${props.livePreview.width} × ${props.livePreview.height}`
@@ -209,13 +189,20 @@ export default function RenderPanel(props: RenderPanelProps) {
     props.onApplyRenderSettings(parseStagedSettings(stagedSettings));
   };
 
+  const handleRenderFinalClick = () => {
+    if (liveMode) {
+      props.onRenderFinal(parseStagedSettings(stagedSettings));
+    }
+  };
+
   const buttonLabel = liveMode
     ? previewBusy
-      ? 'Updating Preview…'
-      : 'Update Preview'
+      ? 'Previewing…'
+      : 'Preview'
     : previewBusy
       ? 'Rendering Preview…'
       : 'Render Preview';
+  const renderButtonLabel = renderBusy ? 'Rendering…' : 'Render';
 
   return (
     <section className="card render-panel" data-testid="render-panel">
@@ -226,7 +213,7 @@ export default function RenderPanel(props: RenderPanelProps) {
           <p className="render-panel__summary">
             {props.summaryText ||
               props.importMessage ||
-              'Adjust the Blender controls and review the latest swatch preview here.'}
+              'Assign yarns, tune the preview controls, and review the latest swatch preview here.'}
           </p>
         </div>
 
@@ -234,11 +221,21 @@ export default function RenderPanel(props: RenderPanelProps) {
           <button
             className="button button--accent"
             onClick={handleUpdateClick}
-            disabled={previewBusy || Boolean(props.renderDisabled)}
+            disabled={actionBusy || Boolean(props.renderDisabled)}
             data-testid="render-preview-button"
           >
             {buttonLabel}
           </button>
+          {liveMode ? (
+            <button
+              className="button button--accent"
+              onClick={handleRenderFinalClick}
+              disabled={actionBusy || Boolean(props.renderDisabled)}
+              data-testid="render-final-button"
+            >
+              {renderButtonLabel}
+            </button>
+          ) : null}
           <button className="button" onClick={props.onExportCanonical} data-testid="export-canonical-button">
             Export Draft JSON
           </button>
@@ -258,10 +255,10 @@ export default function RenderPanel(props: RenderPanelProps) {
         <div className="render-panel__controls">
           <div className="board-section__heading">
             <div>
-              <h3>{liveMode ? 'Geometry Controls' : 'Blender Controls'}</h3>
+              <h3>Preview Controls</h3>
               <p>
                 {liveMode
-                  ? 'These inputs stay local until you click Update Preview, so you can batch several geometry-node adjustments together.'
+                  ? 'Spacing maps to 0.03-0.10 in Blender. Pattern noise maps to 0.00-0.03.'
                   : 'Apply the staged values before rerendering the headless Blender preview.'}
               </p>
             </div>
@@ -273,7 +270,7 @@ export default function RenderPanel(props: RenderPanelProps) {
                 <div className="section-editor__header">
                   <div>
                     <h3>{group.title}</h3>
-                    <p>{group.description}</p>
+                    {group.description ? <p>{group.description}</p> : null}
                   </div>
                 </div>
                 <div className="render-settings">
@@ -284,6 +281,8 @@ export default function RenderPanel(props: RenderPanelProps) {
                         value={stagedSettings[field.key]}
                         type="number"
                         step={field.step ?? 'any'}
+                        min={field.min}
+                        max={field.max}
                         onChange={(event) =>
                           setStagedSettings((current) => ({
                             ...current,
@@ -301,7 +300,7 @@ export default function RenderPanel(props: RenderPanelProps) {
           <div className="section-editor__row">
             {!liveMode ? (
               <button className="button" onClick={handleApplyControls} data-testid="apply-render-settings-button">
-                Apply Blender Controls
+                Apply Preview Controls
               </button>
             ) : null}
             <p className="muted render-panel__lazy-note" data-testid="render-controls-note">
@@ -327,7 +326,7 @@ export default function RenderPanel(props: RenderPanelProps) {
                 <strong>{liveMode ? 'No Blender preview yet' : 'No preview yet'}</strong>
                 <span>
                   {liveMode
-                    ? 'Assign yarns, adjust the controls, then click Update Preview to capture the next camera preview.'
+                    ? 'Assign yarns, tune the preview controls, then click Preview to capture the next camera preview.'
                     : 'The next successful Blender render will appear here.'}
                 </span>
               </div>
@@ -335,7 +334,22 @@ export default function RenderPanel(props: RenderPanelProps) {
           </div>
 
           {liveMode ? (
-            props.livePreview ? (
+            props.renderJob ? (
+              <div className="inspector__facts inspector__facts--render">
+                <div>
+                  <span>Status</span>
+                  <strong>{props.renderJob.status}</strong>
+                </div>
+                <div>
+                  <span>Target</span>
+                  <strong>{props.renderJob.targetObjectName}</strong>
+                </div>
+                <div>
+                  <span>Draft</span>
+                  <strong>{props.renderJob.draftTitle}</strong>
+                </div>
+              </div>
+            ) : props.livePreview ? (
               <div className="inspector__facts inspector__facts--render">
                 <div>
                   <span>Status</span>

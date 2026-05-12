@@ -6,6 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from PIL import Image
+
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -77,9 +79,9 @@ class YarnAssetTests(unittest.TestCase):
             seamless = processed_dir / "seamless.png"
             alpha = processed_dir / "alpha.png"
             preprocessed = processed_dir / "preprocessed.png"
-            seamless.write_bytes(b"diffuse")
-            alpha.write_bytes(b"alpha")
-            preprocessed.write_bytes(b"pre")
+            Image.new("RGB", (8, 4), (120, 80, 40)).save(seamless)
+            Image.new("L", (8, 4), 255).save(alpha)
+            Image.new("RGB", (8, 4), (160, 120, 80)).save(preprocessed)
             return {
                 "seamless": str(seamless),
                 "alpha": str(alpha),
@@ -88,10 +90,32 @@ class YarnAssetTests(unittest.TestCase):
                 "alpha_meta": {"verbose": verbose},
             }
 
+        def fake_segment_yarn_bands(rgb_path, alpha_path, output_dir, name, verbose):
+            band_dir = Path(output_dir) / name
+            band_dir.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (8, 4), (128, 128, 255)).save(band_dir / "normal.png")
+            Image.new("L", (8, 4), 180).save(band_dir / "roughness.png")
+            Image.new("RGB", (8, 4), (255, 0, 0)).save(band_dir / "overlay.png")
+            meta = {
+                "image_size_px": [8, 4],
+                "bands_v_norm": {
+                    "core": [0.4, 0.6],
+                    "fiber_top": [0.6, 0.8],
+                    "fiber_bot": [0.2, 0.4],
+                },
+                "twist": {"twist_period_px": 2.0, "confidence": 0.8},
+            }
+            (band_dir / "meta.json").write_text("{}", encoding="utf-8")
+            return meta
+
         with patch.object(yarn_assets.threading, "Thread", _ImmediateThread), patch.object(
             yarn_assets,
             "run_pipeline",
             side_effect=fake_run_pipeline,
+        ), patch.object(
+            yarn_assets,
+            "segment_yarn_bands",
+            side_effect=fake_segment_yarn_bands,
         ):
             created = yarn_assets.create_yarn_assets([("Striped Yarn.png", b"source-bytes")])
 
@@ -102,8 +126,15 @@ class YarnAssetTests(unittest.TestCase):
         self.assertEqual(asset.diffuseFilename, "processed/seamless.png")
         self.assertEqual(asset.alphaFilename, "processed/alpha.png")
         self.assertEqual(asset.preprocessedFilename, "processed/preprocessed.png")
+        self.assertEqual(asset.renderDiffuseFilename, "processed/seamless.png")
+        self.assertEqual(asset.renderAlphaFilename, "processed/alpha.png")
+        self.assertEqual(asset.normalFilename, "processed/bands/analysis/normal.png")
+        self.assertEqual(asset.roughnessFilename, "processed/bands/analysis/roughness.png")
+        self.assertEqual(asset.overlayFilename, "processed/bands/analysis/overlay.png")
+        self.assertEqual(asset.bandMetaFilename, "processed/bands/analysis/meta.json")
         self.assertEqual(asset.preprocessMeta, {"keptIntermediate": True})
         self.assertEqual(asset.alphaMeta, {"verbose": False})
+        self.assertEqual(asset.bandMeta["image_size_px"], [8, 4])
 
 
 if __name__ == "__main__":

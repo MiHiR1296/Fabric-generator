@@ -46,7 +46,16 @@ test('syncs color bindings and preserves matching assignments only', () => {
 });
 
 test('reports missing bindings and builds a project snapshot', () => {
-  const draft = createBlankDraft({ warpEnds: 2, picks: 2 });
+  const draft = normalizeDraft({
+    ...createBlankDraft({ warpEnds: 2, picks: 2 }),
+    renderSettings: {
+      ...createBlankDraft({ warpEnds: 2, picks: 2 }).renderSettings!,
+      warpThreads: 140,
+      weftThreads: 120,
+      spacing: 0.18,
+      amplitude: 0.04,
+    },
+  });
   const slots = deriveColorBindingSlots(draft);
   const bindings = syncColorBindings(slots, [
     { scope: 'warp', colorHex: slots[0].colorHex, yarnAssetId: 'asset-1' },
@@ -59,4 +68,8 @@ test('reports missing bindings and builds a project snapshot', () => {
   assert.equal(project.version, 1);
   assert.equal(project.colorBindings.length, 2);
   assert.equal(project.yarnAssets[0]?.label, 'Cotton');
+  assert.equal(project.draft.renderSettings?.warpThreads, 180);
+  assert.equal(project.draft.renderSettings?.weftThreads, 180);
+  assert.equal(project.draft.renderSettings?.spacing, 0.18);
+  assert.equal(project.draft.renderSettings?.amplitude, 0.04);
 });

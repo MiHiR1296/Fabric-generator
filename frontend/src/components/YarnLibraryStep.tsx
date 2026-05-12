@@ -24,6 +24,71 @@ function assetStatusLabel(status: YarnAsset['status']) {
   return 'Queued';
 }
 
+function formatNumber(value: unknown, digits = 2) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 'Pending';
+  }
+  return value.toFixed(digits).replace(/\.?0+$/, '');
+}
+
+function formatImageSize(asset: YarnAsset) {
+  const size = asset.bandMeta?.image_size_px;
+  if (!size || size.length < 2) {
+    return 'Pending';
+  }
+  return `${Math.round(size[0])} x ${Math.round(size[1])} px`;
+}
+
+function formatBandRange(range?: number[]) {
+  if (!range || range.length < 2) {
+    return 'Pending';
+  }
+  return `${formatNumber(range[0], 4)} to ${formatNumber(range[1], 4)}`;
+}
+
+function formatPixelMetric(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 'Pending';
+  }
+  return `${formatNumber(value)} px`;
+}
+
+function PipelineMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+function YarnPipelineSummary({ asset }: { asset: YarnAsset }) {
+  const meta = asset.bandMeta;
+  const renderWasResized =
+    Boolean(asset.renderDiffuseUrl && asset.diffuseUrl && asset.renderDiffuseUrl !== asset.diffuseUrl) ||
+    Boolean(asset.renderAlphaUrl && asset.alphaUrl && asset.renderAlphaUrl !== asset.alphaUrl);
+
+  if (asset.status !== 'ready') {
+    return null;
+  }
+
+  return (
+    <div className="yarn-asset-card__pipeline" data-testid="yarn-pipeline-summary">
+      <dl className="yarn-asset-card__metrics">
+        <PipelineMetric label="Image" value={formatImageSize(asset)} />
+        <PipelineMetric label="Core V" value={formatBandRange(meta?.bands_v_norm?.core)} />
+        <PipelineMetric label="Fiber Top V" value={formatBandRange(meta?.bands_v_norm?.fiber_top)} />
+        <PipelineMetric label="Fiber Bot V" value={formatBandRange(meta?.bands_v_norm?.fiber_bot)} />
+        <PipelineMetric label="Twist Period" value={formatPixelMetric(meta?.twist?.twist_period_px)} />
+        <PipelineMetric label="Twist Confidence" value={formatNumber(meta?.twist?.confidence, 3)} />
+      </dl>
+      {renderWasResized ? (
+        <p className="yarn-asset-card__note">Cycles-safe render textures were generated for this asset.</p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function YarnLibraryStep({
   assets,
   busy,
@@ -43,7 +108,7 @@ export default function YarnLibraryStep({
           <p className="eyebrow">Step 1</p>
           <h2>Yarn Library</h2>
           <p className="fabric-step-card__summary">
-            Upload yarn images and let the backend generate seamless diffuse and alpha maps in the background.
+            Upload yarn images and let the backend generate seamless diffuse maps, alpha mattes, band metadata, and QA maps in the background.
           </p>
         </div>
         <div className="fabric-step-card__actions">
@@ -112,6 +177,14 @@ export default function YarnLibraryStep({
                   <img src={asset.sourceUrl} alt={`${asset.label} source`} />
                 </figure>
                 <figure>
+                  <span>Preprocessed</span>
+                  {asset.preprocessedUrl ? (
+                    <img src={asset.preprocessedUrl} alt={`${asset.label} preprocessed yarn`} />
+                  ) : (
+                    <div className="yarn-asset-card__placeholder">Waiting</div>
+                  )}
+                </figure>
+                <figure>
                   <span>Diffuse</span>
                   {asset.diffuseUrl ? (
                     <img src={asset.diffuseUrl} alt={`${asset.label} seamless diffuse`} />
@@ -127,7 +200,33 @@ export default function YarnLibraryStep({
                     <div className="yarn-asset-card__placeholder">Waiting</div>
                   )}
                 </figure>
+                <figure>
+                  <span>Bands</span>
+                  {asset.overlayUrl ? (
+                    <img src={asset.overlayUrl} alt={`${asset.label} detected yarn bands`} />
+                  ) : (
+                    <div className="yarn-asset-card__placeholder">Waiting</div>
+                  )}
+                </figure>
+                <figure>
+                  <span>Normal</span>
+                  {asset.normalUrl ? (
+                    <img src={asset.normalUrl} alt={`${asset.label} generated normal map`} />
+                  ) : (
+                    <div className="yarn-asset-card__placeholder">Waiting</div>
+                  )}
+                </figure>
+                <figure>
+                  <span>Roughness</span>
+                  {asset.roughnessUrl ? (
+                    <img src={asset.roughnessUrl} alt={`${asset.label} generated roughness map`} />
+                  ) : (
+                    <div className="yarn-asset-card__placeholder">Waiting</div>
+                  )}
+                </figure>
               </div>
+
+              <YarnPipelineSummary asset={asset} />
 
               {asset.error ? <p className="yarn-asset-card__error">{asset.error}</p> : null}
             </article>

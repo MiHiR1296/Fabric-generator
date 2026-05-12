@@ -17,6 +17,35 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function numberOrFallback(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function integerOrFallback(value: unknown, fallback: number) {
+  return Math.round(numberOrFallback(value, fallback));
+}
+
+function normalizeUnitControl(value: unknown, fallback: number) {
+  return clamp(numberOrFallback(value, fallback), 0, 1);
+}
+
+function normalizeSpacingControl(
+  raw: Partial<DraftRenderSettings>,
+  fallback: DraftRenderSettings,
+) {
+  const value = numberOrFallback(raw.spacing, fallback.spacing);
+  const hasUnitControls =
+    Object.prototype.hasOwnProperty.call(raw, 'patternNoiseX') ||
+    Object.prototype.hasOwnProperty.call(raw, 'patternNoiseY');
+
+  if (!hasUnitControls && Number.isFinite(value) && value >= 0.005 && value <= 0.2) {
+    return Math.round(clamp((value - 0.03) / (0.1 - 0.03), 0, 1) * 100) / 100;
+  }
+
+  return clamp(value, 0, 1);
+}
+
 function cycleValues(length: number, maxValue: number) {
   return Array.from({ length }, (_, index) => (index % maxValue) + 1);
 }
@@ -71,9 +100,11 @@ function normalizeColorSequence(colors: unknown, fallback: string, length: numbe
 
 function buildDefaultRenderSettings(warpEnds: number, picks: number): DraftRenderSettings {
   return {
-    warpThreads: Math.max(warpEnds * 8, 96),
-    weftThreads: Math.max(picks * 8, 96),
-    spacing: 0.05,
+    warpThreads: Math.max(warpEnds, 180),
+    weftThreads: Math.max(picks, 180),
+    spacing: 0.29,
+    patternNoiseX: 0,
+    patternNoiseY: 0,
     amplitude: 0.008,
     threadRadius: 0.028,
     threadSubdivisions: 8,
@@ -106,45 +137,39 @@ function normalizeRenderSettings(
   const raw = typeof settings === 'object' && settings !== null ? settings as Partial<DraftRenderSettings> : {};
 
   return {
-    warpThreads: clamp(
-      Math.round(Number(raw.warpThreads) || fallback.warpThreads),
-      warpEnds,
-      512,
-    ),
-    weftThreads: clamp(
-      Math.round(Number(raw.weftThreads) || fallback.weftThreads),
-      picks,
-      512,
-    ),
-    spacing: clamp(Number(raw.spacing) || fallback.spacing, 0.005, 0.2),
-    amplitude: clamp(Number(raw.amplitude) || fallback.amplitude, 0.001, 0.1),
-    threadRadius: clamp(Number(raw.threadRadius) || fallback.threadRadius, 0.001, 0.2),
+    warpThreads: clamp(integerOrFallback(raw.warpThreads, fallback.warpThreads), Math.max(warpEnds, 180), 512),
+    weftThreads: clamp(integerOrFallback(raw.weftThreads, fallback.weftThreads), Math.max(picks, 180), 512),
+    spacing: normalizeSpacingControl(raw, fallback),
+    patternNoiseX: normalizeUnitControl(raw.patternNoiseX, fallback.patternNoiseX),
+    patternNoiseY: normalizeUnitControl(raw.patternNoiseY, fallback.patternNoiseY),
+    amplitude: clamp(numberOrFallback(raw.amplitude, fallback.amplitude), 0.001, 0.1),
+    threadRadius: clamp(numberOrFallback(raw.threadRadius, fallback.threadRadius), 0.001, 0.2),
     threadSubdivisions: clamp(
-      Number(raw.threadSubdivisions) || fallback.threadSubdivisions,
+      numberOrFallback(raw.threadSubdivisions, fallback.threadSubdivisions),
       3,
       64,
     ),
-    plyCount: clamp(Math.round(Number(raw.plyCount) || fallback.plyCount), 1, 16),
-    plyRadius: clamp(Number(raw.plyRadius) || fallback.plyRadius, 0.001, 0.1),
-    twistAmount: clamp(Number(raw.twistAmount) || fallback.twistAmount, 0, 128),
-    plyResolution: clamp(Math.round(Number(raw.plyResolution) || fallback.plyResolution), 2, 24),
-    textureScaleU: clamp(Number(raw.textureScaleU) || fallback.textureScaleU, 0.1, 64),
-    textureScaleV: clamp(Number(raw.textureScaleV) || fallback.textureScaleV, 0.05, 5),
-    textureOffsetV: clamp(Number(raw.textureOffsetV) || fallback.textureOffsetV, -2, 2),
+    plyCount: clamp(integerOrFallback(raw.plyCount, fallback.plyCount), 1, 16),
+    plyRadius: clamp(numberOrFallback(raw.plyRadius, fallback.plyRadius), 0.001, 0.1),
+    twistAmount: clamp(numberOrFallback(raw.twistAmount, fallback.twistAmount), 0, 128),
+    plyResolution: clamp(integerOrFallback(raw.plyResolution, fallback.plyResolution), 2, 24),
+    textureScaleU: clamp(numberOrFallback(raw.textureScaleU, fallback.textureScaleU), 0.1, 64),
+    textureScaleV: clamp(numberOrFallback(raw.textureScaleV, fallback.textureScaleV), 0.05, 5),
+    textureOffsetV: clamp(numberOrFallback(raw.textureOffsetV, fallback.textureOffsetV), -2, 2),
     textureSideFlatten: clamp(
-      Number(raw.textureSideFlatten) || fallback.textureSideFlatten,
+      numberOrFallback(raw.textureSideFlatten, fallback.textureSideFlatten),
       0,
       1,
     ),
-    lumpStrength: clamp(Number(raw.lumpStrength) || fallback.lumpStrength, 0, 0.1),
-    lumpScale: clamp(Number(raw.lumpScale) || fallback.lumpScale, 0.1, 50),
-    fiberDensity: clamp(Number(raw.fiberDensity) || fallback.fiberDensity, 0, 5),
-    fiberLength: clamp(Number(raw.fiberLength) || fallback.fiberLength, 0, 1),
-    fiberThickness: clamp(Number(raw.fiberThickness) || fallback.fiberThickness, 0, 1),
-    fiberFrizz: clamp(Number(raw.fiberFrizz) || fallback.fiberFrizz, 0, 1),
-    fiberSubdivs: clamp(Math.round(Number(raw.fiberSubdivs) || fallback.fiberSubdivs), 0, 24),
-    seed: clamp(Math.round(Number(raw.seed) || fallback.seed), 0, 1000000),
-    fillRatio: clamp(Number(raw.fillRatio) || fallback.fillRatio, 0.6, 1),
+    lumpStrength: clamp(numberOrFallback(raw.lumpStrength, fallback.lumpStrength), 0, 0.1),
+    lumpScale: clamp(numberOrFallback(raw.lumpScale, fallback.lumpScale), 0.1, 50),
+    fiberDensity: clamp(numberOrFallback(raw.fiberDensity, fallback.fiberDensity), 0, 5),
+    fiberLength: clamp(numberOrFallback(raw.fiberLength, fallback.fiberLength), 0, 1),
+    fiberThickness: clamp(numberOrFallback(raw.fiberThickness, fallback.fiberThickness), 0, 1),
+    fiberFrizz: clamp(numberOrFallback(raw.fiberFrizz, fallback.fiberFrizz), 0, 1),
+    fiberSubdivs: clamp(integerOrFallback(raw.fiberSubdivs, fallback.fiberSubdivs), 0, 24),
+    seed: clamp(integerOrFallback(raw.seed, fallback.seed), 0, 1000000),
+    fillRatio: clamp(numberOrFallback(raw.fillRatio, fallback.fillRatio), 0.6, 1),
   };
 }
 
@@ -625,6 +650,10 @@ export function updateRenderSettings(
       draft.treadling.length,
     ),
   };
+}
+
+export function buildPreviewRenderSettings(draft: DraftDocument): DraftRenderSettings {
+  return normalizeRenderSettings(draft.renderSettings, draft.threading.length, draft.treadling.length);
 }
 
 export function getDraftPalette(draft: DraftDocument) {

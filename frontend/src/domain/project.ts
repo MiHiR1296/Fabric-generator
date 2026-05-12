@@ -1,4 +1,5 @@
 import type { ColorBinding, ColorBindingSlot, DraftDocument, FabricProject, YarnAsset } from './types';
+import { buildPreviewRenderSettings } from './draft.ts';
 
 export function normalizeHexColor(value: string) {
   const raw = value.trim().toLowerCase();
@@ -68,9 +69,14 @@ export function buildFabricProject(
   yarnAssets: YarnAsset[],
   colorBindings: ColorBinding[],
 ): FabricProject {
+  const previewDraft: DraftDocument = {
+    ...draft,
+    renderSettings: buildPreviewRenderSettings(draft),
+  };
+
   return {
     version: 1,
-    draft,
+    draft: previewDraft,
     yarnAssets,
     colorBindings,
   };

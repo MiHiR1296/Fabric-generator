@@ -8,6 +8,8 @@ export interface DraftRenderSettings {
   warpThreads: number;
   weftThreads: number;
   spacing: number;
+  patternNoiseX: number;
+  patternNoiseY: number;
   amplitude: number;
   threadRadius: number;
   threadSubdivisions: number;
@@ -146,6 +148,26 @@ export interface BlenderLivePreview {
   height?: number | null;
 }
 
+export interface YarnBandMeta {
+  image_size_px?: number[];
+  bands_v_norm?: {
+    core?: number[];
+    fiber_top?: number[];
+    fiber_bot?: number[];
+  };
+  thickness_px?: {
+    core_height?: number;
+    fiber_top_height?: number;
+    fiber_bot_height?: number;
+  };
+  twist?: {
+    twist_period_px?: number | null;
+    twists_in_image_width?: number | null;
+    confidence?: number | null;
+  };
+  params?: Record<string, unknown>;
+}
+
 export interface YarnAsset {
   id: string;
   label: string;
@@ -154,8 +176,15 @@ export interface YarnAsset {
   diffuseUrl?: string | null;
   alphaUrl?: string | null;
   preprocessedUrl?: string | null;
+  renderDiffuseUrl?: string | null;
+  renderAlphaUrl?: string | null;
+  normalUrl?: string | null;
+  roughnessUrl?: string | null;
+  overlayUrl?: string | null;
+  bandMetaUrl?: string | null;
   preprocessMeta?: Record<string, unknown>;
   alphaMeta?: Record<string, unknown>;
+  bandMeta?: YarnBandMeta;
   error?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;

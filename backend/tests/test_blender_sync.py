@@ -29,7 +29,9 @@ class BlenderSyncTests(unittest.TestCase):
                 "renderSettings": {
                     "warpThreads": 120,
                     "weftThreads": 96,
-                    "spacing": 0.05,
+                    "spacing": 0.5,
+                    "patternNoiseX": 0.5,
+                    "patternNoiseY": 1,
                     "amplitude": 0.008,
                     "threadRadius": 0.028,
                     "textureScaleU": 8,
@@ -44,9 +46,11 @@ class BlenderSyncTests(unittest.TestCase):
         self.assertIn("ensure_web_draft_material", code)
         self.assertIn("'Warp Threads'", code)
         self.assertIn("'Weft Threads'", code)
-        self.assertIn("warp_threads_override = 120", code)
-        self.assertIn("weft_threads_override = 96", code)
-        self.assertIn("spacing_override = 0.05", code)
+        self.assertIn("warp_threads_override = 180", code)
+        self.assertIn("weft_threads_override = 180", code)
+        self.assertIn("spacing_override = 0.065", code)
+        self.assertIn("pattern_noise_x_override = 0.015", code)
+        self.assertIn("pattern_noise_y_override = 0.03", code)
         self.assertIn("amplitude_override = 0.008", code)
         self.assertIn("thread_radius_override = 0.028", code)
         self.assertIn("texture_scale_u_override = 8.0", code)
@@ -55,6 +59,16 @@ class BlenderSyncTests(unittest.TestCase):
         self.assertIn("fiber_density_override = 0.3", code)
         self.assertIn("Texture Scale U", code)
         self.assertIn("Texture Scale V", code)
+        self.assertIn("'Sub Texture Scale V', 0.0", code)
+        self.assertIn("'Sub Texture Offset V', 0.0", code)
+        self.assertIn("Pattern Noise X", code)
+        self.assertIn("Pattern Noise Y", code)
+        self.assertIn("ensure_scan_knotty_draft_sampling", code)
+        self.assertIn("PW Draft Warp Sample", code)
+        self.assertIn("PW Draft Weft Sample", code)
+        self.assertIn("warp_sample_sign.inputs[1].default_value = -2.0", code)
+        self.assertIn("weft_sample_sign.inputs[1].default_value = 2.0", code)
+        self.assertIn("uses_scan_knotty_group", code)
 
     def test_build_sync_code_embeds_draft_material_sampling_when_assignments_are_present(self) -> None:
         code = build_blender_sync_code(

@@ -84,7 +84,7 @@ if FastAPI is not None:
         target_object_name: str = "ParametricWeave"
         draft_object_name: str = "WebDraft_Live"
         session_id: str = "default"
-        max_size: int = 1400
+        max_size: int = 2400
 
 
     @app.get("/api/parser/health")

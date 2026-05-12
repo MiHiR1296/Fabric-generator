@@ -2,7 +2,14 @@ import { useMemo } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import RenderPanel from './RenderPanel';
 import { deriveColorBindingSlots, missingColorBindings } from '../domain/project';
-import type { BlenderLivePreview, ColorBinding, DraftDocument, DraftRenderSettings, YarnAsset } from '../domain/types';
+import type {
+  BlenderLivePreview,
+  BlenderRenderJob,
+  ColorBinding,
+  DraftDocument,
+  DraftRenderSettings,
+  YarnAsset,
+} from '../domain/types';
 
 interface ColorMappingStepProps {
   draft: DraftDocument;
@@ -10,9 +17,12 @@ interface ColorMappingStepProps {
   colorBindings: ColorBinding[];
   setColorBindings: Dispatch<SetStateAction<ColorBinding[]>>;
   livePreview: BlenderLivePreview | null;
+  renderJob: BlenderRenderJob | null;
   previewBusy: boolean;
+  renderBusy: boolean;
   previewMessage: string;
   onUpdatePreview: (settings: Partial<DraftRenderSettings>) => void;
+  onRenderFinal: (settings: Partial<DraftRenderSettings>) => void;
   onExportCanonical: () => void;
   onExportBlender: () => void;
 }
@@ -23,9 +33,12 @@ export default function ColorMappingStep({
   colorBindings,
   setColorBindings,
   livePreview,
+  renderJob,
   previewBusy,
+  renderBusy,
   previewMessage,
   onUpdatePreview,
+  onRenderFinal,
   onExportCanonical,
   onExportBlender,
 }: ColorMappingStepProps) {
@@ -111,13 +124,16 @@ export default function ColorMappingStep({
         draft={draft}
         importMessage=""
         livePreview={livePreview}
+        renderJob={renderJob}
         previewBusy={previewBusy}
+        renderBusy={renderBusy}
         onUpdatePreview={onUpdatePreview}
+        onRenderFinal={onRenderFinal}
         onExportCanonical={onExportCanonical}
         onExportBlender={onExportBlender}
         stepLabel="Step 3"
         title="Blender Material Preview"
-        summaryText="Adjust the geometry-node controls locally, then click Update Preview to refresh the live Blender camera preview."
+        summaryText="Assign yarns, tune preview controls, then click Preview to refresh the live Blender camera preview."
         statusMessage={previewMessage}
         renderDisabled={!readyAssets.length || missingBindingsList.length > 0}
       />

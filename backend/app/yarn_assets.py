@@ -10,6 +10,8 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from PIL import Image
+
 from .models import YarnAsset
 from .runtime_paths import YARN_ASSETS_ROOT, ensure_runtime_dirs
 
@@ -18,11 +20,15 @@ VENDOR_ROOT = Path(__file__).resolve().parents[1] / "vendor" / "yarn_pipeline"
 if str(VENDOR_ROOT) not in sys.path:
     sys.path.insert(0, str(VENDOR_ROOT))
 
+Image.MAX_IMAGE_PIXELS = None
+
+from band_segmenter import process as segment_yarn_bands  # type: ignore  # noqa: E402
 from yarn_pipeline import run_pipeline  # type: ignore  # noqa: E402
 
 
 _LOCK = threading.Lock()
 _ASSETS: dict[str, YarnAsset] = {}
+MAX_CYCLES_TEXTURE_DIMENSION = 16384
 
 
 def _utc_now() -> str:
@@ -48,6 +54,33 @@ def _build_file_url(asset_id: str, filename: str | None) -> str | None:
     return f"/api/yarn/assets/{asset_id}/files/{filename}"
 
 
+def _relative_asset_path(asset_id: str, path: str | Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return str(Path(path).resolve().relative_to(_asset_dir(asset_id).resolve()))
+    except ValueError:
+        return str(path)
+
+
+def _ensure_cycles_safe_texture(src_path: Path, output_dir: Path) -> Path:
+    with Image.open(src_path) as image:
+        width, height = image.size
+        if max(width, height) <= MAX_CYCLES_TEXTURE_DIMENSION:
+            return src_path
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        scale = MAX_CYCLES_TEXTURE_DIMENSION / max(width, height)
+        resized_size = (
+            max(1, int(round(width * scale))),
+            max(1, int(round(height * scale))),
+        )
+        output_path = output_dir / f"{src_path.stem}_max{MAX_CYCLES_TEXTURE_DIMENSION}{src_path.suffix}"
+        if not output_path.exists():
+            image.resize(resized_size, Image.LANCZOS).save(output_path)
+        return output_path
+
+
 def _persist_asset(asset: YarnAsset) -> None:
     destination = _meta_path(asset.id)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +97,12 @@ def _refresh_asset_urls(asset: YarnAsset) -> YarnAsset:
     asset.diffuseUrl = _build_file_url(asset.id, asset.diffuseFilename)
     asset.alphaUrl = _build_file_url(asset.id, asset.alphaFilename)
     asset.preprocessedUrl = _build_file_url(asset.id, asset.preprocessedFilename)
+    asset.renderDiffuseUrl = _build_file_url(asset.id, asset.renderDiffuseFilename)
+    asset.renderAlphaUrl = _build_file_url(asset.id, asset.renderAlphaFilename)
+    asset.normalUrl = _build_file_url(asset.id, asset.normalFilename)
+    asset.roughnessUrl = _build_file_url(asset.id, asset.roughnessFilename)
+    asset.overlayUrl = _build_file_url(asset.id, asset.overlayFilename)
+    asset.bandMetaUrl = _build_file_url(asset.id, asset.bandMetaFilename)
     return asset
 
 
@@ -135,18 +174,37 @@ def _process_asset(asset_id: str) -> None:
             keep_intermediate=True,
             verbose=False,
         )
+        diffuse_path = Path(result["seamless"])
+        alpha_path = Path(result["alpha"])
+        preprocessed_path = Path(result["preprocessed"]) if result.get("preprocessed") else None
+        band_root = processed_dir / "bands"
+        band_name = "analysis"
+        band_meta = segment_yarn_bands(
+            str(diffuse_path),
+            str(alpha_path),
+            str(band_root),
+            name=band_name,
+            verbose=False,
+        )
+        band_output_dir = band_root / band_name
+        render_diffuse_path = _ensure_cycles_safe_texture(diffuse_path, processed_dir / "cycles_safe")
+        render_alpha_path = _ensure_cycles_safe_texture(alpha_path, processed_dir / "cycles_safe")
+
         _update_asset(
             asset_id,
             status="ready",
-            diffuseFilename=str(Path(result["seamless"]).relative_to(_asset_dir(asset_id))),
-            alphaFilename=str(Path(result["alpha"]).relative_to(_asset_dir(asset_id))),
-            preprocessedFilename=(
-                str(Path(result["preprocessed"]).relative_to(_asset_dir(asset_id)))
-                if result.get("preprocessed")
-                else None
-            ),
+            diffuseFilename=_relative_asset_path(asset_id, diffuse_path),
+            alphaFilename=_relative_asset_path(asset_id, alpha_path),
+            preprocessedFilename=_relative_asset_path(asset_id, preprocessed_path),
+            renderDiffuseFilename=_relative_asset_path(asset_id, render_diffuse_path),
+            renderAlphaFilename=_relative_asset_path(asset_id, render_alpha_path),
+            normalFilename=_relative_asset_path(asset_id, band_output_dir / "normal.png"),
+            roughnessFilename=_relative_asset_path(asset_id, band_output_dir / "roughness.png"),
+            overlayFilename=_relative_asset_path(asset_id, band_output_dir / "overlay.png"),
+            bandMetaFilename=_relative_asset_path(asset_id, band_output_dir / "meta.json"),
             preprocessMeta=result.get("preprocess_meta") or {},
             alphaMeta=result.get("alpha_meta") or {},
+            bandMeta=band_meta,
             error=None,
         )
     except Exception as exc:

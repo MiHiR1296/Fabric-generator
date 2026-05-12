@@ -43,7 +43,7 @@ Current deliverables:
 - Headless Blender preview flow:
   - draft sent to service
   - service creates render job
-  - Blender runs headlessly against `Weave_GUIConnection.blend`
+  - Blender runs headlessly against `Codex_ParametricWeave.blend` by default
   - preview PNG is returned to the browser
 - Test coverage for domain logic and parser / render bridge
 
@@ -173,7 +173,7 @@ File: `src/components/RenderPanel.tsx`
 
 Purpose:
 
-- step-two area for rendering and exporting after drafting is done
+- step-three area for assigning yarns, staging preview controls, and refreshing Blender preview output
 
 Contains:
 
@@ -181,19 +181,18 @@ Contains:
 - `Export Draft JSON`
 - `Export Blender Map`
 - Blender controls:
-  - warp threads
-  - weft threads
-  - spacing
-  - amplitude
-  - texture scale V
-  - fill ratio
+  - spacing, amplitude, fill ratio
+  - thread and ply shape
+  - texture mapping
+  - lump and fiber detail
 - preview image
 - render status facts
 - recent Blender logs
 
 Design rule:
 
-- this belongs below drafting, not in the toolbar
+- this belongs after drafting, not in the toolbar
+- keep warp/weft thread counts fixed to the `180` default instead of exposing them as web controls
 
 ## 5. Draft Workspace Layout Rules
 
@@ -285,8 +284,8 @@ File: `src/domain/types.ts`
   "title": "Example Draft",
   "sourceLabel": "Preset: Example",
   "renderSettings": {
-    "warpThreads": 96,
-    "weftThreads": 96,
+    "warpThreads": 180,
+    "weftThreads": 180,
     "spacing": 0.03,
     "amplitude": 0.005,
     "textureScaleV": 0.5,
@@ -473,29 +472,37 @@ The sync code sets these inputs:
 - `Draft Rows`
 - `Warp Threads`
 - `Weft Threads`
-- `Spacing`
-- `Amplitude`
-- `Texture Scale V`
-- many preserved thread / fiber controls
+- spacing, amplitude, texture mapping, ply, twist, lump, and fiber settings
+- material-count and material-id inputs/attributes used by generated yarn material assignment
 
 Important behavior already implemented:
 
 - existing modifier values are preserved where possible
-- only targeted settings are overridden
-- default dense repeat counts are used so the swatch is not stretched to only one coarse repeat
+- preview settings are staged in the web UI and applied only on `Preview` or `Render`
+- default dense repeat counts are at least `180` so the swatch is not stretched to only one coarse repeat
+- warp/weft thread counts are not visible controls; the backend applies the `180` floor even when the Blender modifier preserved an older value
 
 ### 11.4 Material Hook
 
-The sync code creates and assigns:
+The preview/render code creates and assigns generated yarn materials from processed uploads:
 
-- `WebDraftMaterial`
+- diffuse texture: loaded from the seamless yarn output and wired to shader base color
+- alpha texture: loaded as non-color data and wired to shader alpha
+- per-yarn image width and band metadata: copied from each processed upload into the generated material payload
 
-It also rewires `Weave From Draft` internal `Set Material` nodes so the node tree uses that material instead of old hardcoded materials.
+It also drives geometry-node material selection in two layers:
 
-Current limitation:
+- when modifier sockets such as `Material 1`, `Warp Length 1`, or `Warp Material 1` exist, they are filled from the web UI material assignments
+- for `Weave From Draft`, the script samples per-warp/per-weft material IDs from the generated draft object and patches the `Set Material` chain so arbitrary UI color bindings can select the generated material
 
-- Blender currently uses the first warp color and first weft color as base material colors
-- full per-end / per-pick color sequence rendering is not finished yet
+Important material behavior:
+
+- the automated preview path no longer copies the preset Blender material graph for yarn assignments
+- this makes uploaded yarn images visible in the render instead of falling back to a preset material look
+- direct generated materials read the geometry node group's `uv_scaled` attribute with the yarn-specific texture image
+- `Codex_ParametricWeave.blend` stores the `Parametric Weave knotty` per-material UV selectors permanently, and the backend fills the `Material N Image Width Px`, `Material N Texture Scale U`, and band-V sockets from each selected yarn asset instead of patching temporary nodes at render time
+- for the knotty graph, web-generated `warp_material_id` and `weft_material_id` draft attributes override the old four-run material cycle and feed the graph's `material_id` attribute directly
+- direct generated materials are used for up to 16 assigned yarn assets; larger final renders can still use the atlas path
 
 ### 11.5 Headless Render Jobs
 
@@ -508,7 +515,7 @@ Flow:
 1. frontend posts the draft to `/api/blender/render-draft`
 2. service writes job files under `services/draft-parser/runtime/render-jobs/<job_id>/`
 3. service writes a Blender Python script for that draft
-4. Blender runs headlessly against `Weave_GUIConnection.blend`
+4. Blender runs headlessly against `Codex_ParametricWeave.blend` by default
 5. service exposes job state and preview image URL
 6. frontend polls until the render succeeds or fails
 
@@ -540,7 +547,7 @@ Visual principles already established:
 - the drafting area should feel like one loom document, not many cards
 - explanations should be hidden behind `?` hints where possible
 - the inspector is secondary
-- render controls belong in a separate second step
+- preview controls belong in the post-draft mapping step
 - the draft frame should stay compact and legible on desktop
 - mobile can stack, but desktop should preserve the draft reading order
 
@@ -645,7 +652,7 @@ Before calling the subsystem fully integrated into the main application, confirm
 - orientation still starts from the tie-up corner
 - drag editing works for structure and color strips
 - the inspector stays secondary
-- render controls stay in step two
+- preview controls stay in the post-draft mapping step
 - parser fallback still works when the service is offline
 - headless Blender render jobs still accept the same draft shape
 - `Weave From Draft` still exists in the blend file and exposes the expected sockets

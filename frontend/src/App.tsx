@@ -14,27 +14,40 @@ import {
 } from './domain/draft';
 import { buildFabricProject, deriveColorBindingSlots, syncColorBindings } from './domain/project';
 import { presets } from './domain/presets';
-import type { BlenderLivePreview, ColorBinding, DraftDocument, YarnAsset } from './domain/types';
+import type { BlenderLivePreview, BlenderRenderJob, ColorBinding, DraftDocument, YarnAsset } from './domain/types';
 import {
   deleteYarnAsset,
+  fetchDraftRenderJob,
   listYarnAssets,
   requestLivePreview,
+  requestProjectRender,
   retryYarnAsset,
   uploadYarnAssets,
 } from './utils/parserApi';
+
+const RENDER_POLL_INTERVAL_MS = 2000;
+const RENDER_POLL_LIMIT = 180;
+
+function waitForRenderPoll(): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, RENDER_POLL_INTERVAL_MS);
+  });
+}
 
 export default function App() {
   const [draft, setDraft] = useState<DraftDocument>(loadDraftFromStorage() || presets[0].document);
   const [yarnAssets, setYarnAssets] = useState<YarnAsset[]>([]);
   const [assetBusy, setAssetBusy] = useState(false);
   const [assetMessage, setAssetMessage] = useState(
-    'Upload yarn references first. The backend will generate seamless diffuse and alpha maps automatically.',
+    'Upload yarn references first. The backend will generate seamless diffuse, alpha, band, and QA maps automatically.',
   );
   const [colorBindings, setColorBindings] = useState<ColorBinding[]>([]);
   const [livePreview, setLivePreview] = useState<BlenderLivePreview | null>(null);
+  const [renderJob, setRenderJob] = useState<BlenderRenderJob | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [renderBusy, setRenderBusy] = useState(false);
   const [previewMessage, setPreviewMessage] = useState(
-    'Assign each warp and weft color slot to a processed yarn asset, adjust the geometry controls, then click Update Preview.',
+    'Assign each warp and weft color slot to a processed yarn asset, tune preview controls, then click Preview.',
   );
 
   const slots = useMemo(() => deriveColorBindingSlots(draft), [draft]);
@@ -101,7 +114,7 @@ export default function App() {
             try {
               const created = await uploadYarnAssets(files);
               setAssetMessage(
-                `Queued ${created.length} yarn asset${created.length === 1 ? '' : 's'} for seamless + alpha processing.`,
+                `Queued ${created.length} yarn asset${created.length === 1 ? '' : 's'} for seamless, alpha, and band processing.`,
               );
               await refreshAssets();
             } catch (error) {
@@ -139,11 +152,14 @@ export default function App() {
           colorBindings={colorBindings}
           setColorBindings={setColorBindings}
           livePreview={livePreview}
+          renderJob={renderJob}
           previewBusy={previewBusy}
+          renderBusy={renderBusy}
           previewMessage={previewMessage}
           onUpdatePreview={async (settings) => {
             const nextDraft = updateRenderSettings(draft, settings);
             setDraft(nextDraft);
+            setRenderJob(null);
             setPreviewBusy(true);
             try {
               const preview = await requestLivePreview(
@@ -157,6 +173,35 @@ export default function App() {
               );
             } finally {
               setPreviewBusy(false);
+            }
+          }}
+          onRenderFinal={async (settings) => {
+            const nextDraft = updateRenderSettings(draft, settings);
+            setDraft(nextDraft);
+            setRenderBusy(true);
+            try {
+              const job = await requestProjectRender(
+                buildFabricProject(normalizeDraft(nextDraft), yarnAssets, colorBindings),
+              );
+              setRenderJob(job);
+              setPreviewMessage(job.message);
+
+              let latestJob = job;
+              for (let attempt = 0; attempt < RENDER_POLL_LIMIT; attempt += 1) {
+                if (latestJob.status === 'succeeded' || latestJob.status === 'failed') {
+                  break;
+                }
+                await waitForRenderPoll();
+                latestJob = await fetchDraftRenderJob(job.id);
+                setRenderJob(latestJob);
+                setPreviewMessage(latestJob.message);
+              }
+            } catch (error) {
+              setPreviewMessage(
+                error instanceof Error ? error.message : 'Unable to start the Cycles render.',
+              );
+            } finally {
+              setRenderBusy(false);
             }
           }}
           onExportCanonical={() => {

@@ -5,6 +5,7 @@ import {
   applyColorSequenceEdit,
   applyStructuredPatternEdit,
   buildBlenderHandoff,
+  buildPreviewRenderSettings,
   computeDrawdown,
   createBlankDraft,
   getThreadingIndexFromDrawdownColumn,
@@ -114,12 +115,40 @@ test('creates a blank draft with expected defaults', () => {
   assert.equal(draft.treadleCount, 4);
   assert.equal(draft.threading.length, 24);
   assert.equal(draft.treadling.length, 24);
-  assert.equal(draft.renderSettings?.spacing, 0.05);
+  assert.equal(draft.renderSettings?.warpThreads, 180);
+  assert.equal(draft.renderSettings?.weftThreads, 180);
+  assert.equal(draft.renderSettings?.spacing, 0.29);
+  assert.equal(draft.renderSettings?.patternNoiseX, 0);
+  assert.equal(draft.renderSettings?.patternNoiseY, 0);
   assert.equal(draft.renderSettings?.amplitude, 0.008);
   assert.equal(draft.renderSettings?.textureScaleU, 8);
   assert.equal(draft.renderSettings?.textureScaleV, 0.5);
   assert.equal(draft.renderSettings?.threadRadius, 0.028);
   assert.equal(draft.renderSettings?.textureOffsetV, 0);
+});
+
+test('builds preview render settings with fixed minimum thread counts', () => {
+  const draft = normalizeDraft({
+    ...createBlankDraft(),
+    renderSettings: {
+      ...createBlankDraft().renderSettings!,
+      warpThreads: 120,
+      weftThreads: 96,
+      spacing: 0.19,
+      amplitude: 0.07,
+      textureScaleU: 42,
+      fiberDensity: 0.8,
+    },
+  });
+
+  const settings = buildPreviewRenderSettings(draft);
+
+  assert.equal(settings.warpThreads, 180);
+  assert.equal(settings.weftThreads, 180);
+  assert.equal(settings.spacing, 0.19);
+  assert.equal(settings.amplitude, 0.07);
+  assert.equal(settings.textureScaleU, 42);
+  assert.equal(settings.fiberDensity, 0.8);
 });
 
 test('applies structured pattern text edits without fighting counts', () => {

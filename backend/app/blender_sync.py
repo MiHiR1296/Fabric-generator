@@ -176,9 +176,18 @@ def build_blender_sync_code(
         except (TypeError, ValueError):
             return None
 
+    def map_unit_setting(key: str, minimum: float, maximum: float) -> float | None:
+        value = maybe_float(key)
+        if value is None:
+            return None
+        unit_value = min(1.0, max(0.0, value))
+        return minimum + (maximum - minimum) * unit_value
+
     warp_threads_override = maybe_int("warpThreads")
     weft_threads_override = maybe_int("weftThreads")
-    spacing_override = maybe_float("spacing")
+    spacing_override = map_unit_setting("spacing", 0.03, 0.1)
+    pattern_noise_x_override = map_unit_setting("patternNoiseX", 0.0, 0.03)
+    pattern_noise_y_override = map_unit_setting("patternNoiseY", 0.0, 0.03)
     amplitude_override = maybe_float("amplitude")
     thread_radius_override = maybe_float("threadRadius")
     thread_subdivisions_override = maybe_float("threadSubdivisions")
@@ -200,8 +209,12 @@ def build_blender_sync_code(
     seed_override = maybe_int("seed")
     fill_ratio_override = maybe_float("fillRatio")
 
-    default_warp_threads = max(cols * 8, 96)
-    default_weft_threads = max(rows * 8, 96)
+    default_warp_threads = max(cols, 180)
+    default_weft_threads = max(rows, 180)
+    if warp_threads_override is not None:
+        warp_threads_override = max(warp_threads_override, default_warp_threads)
+    if weft_threads_override is not None:
+        weft_threads_override = max(weft_threads_override, default_weft_threads)
     if material_count is None and normalized_warp_material_ids is not None and normalized_weft_material_ids is not None:
         material_count = max(normalized_warp_material_ids + normalized_weft_material_ids) + 1
 
@@ -223,6 +236,8 @@ fit_target_name = {json.dumps(fit_target_name)}
 warp_threads_override = {repr(warp_threads_override)}
 weft_threads_override = {repr(weft_threads_override)}
 spacing_override = {repr(spacing_override)}
+pattern_noise_x_override = {repr(pattern_noise_x_override)}
+pattern_noise_y_override = {repr(pattern_noise_y_override)}
 amplitude_override = {repr(amplitude_override)}
 thread_radius_override = {repr(thread_radius_override)}
 thread_subdivisions_override = {repr(thread_subdivisions_override)}
@@ -266,6 +281,20 @@ def set_modifier_input(modifier, node_group, name, value):
     socket = ensure_socket(node_group, name)
     modifier[socket.identifier] = value
 
+def has_modifier_input(node_group, name):
+    try:
+        ensure_socket(node_group, name)
+        return True
+    except KeyError:
+        return False
+
+def maybe_set_modifier_input(modifier, node_group, name, value):
+    try:
+        set_modifier_input(modifier, node_group, name, value)
+        return True
+    except KeyError:
+        return False
+
 def get_modifier_input(modifier, node_group, name, default=None):
     try:
         socket = ensure_socket(node_group, name)
@@ -282,6 +311,16 @@ def pick_value(override, preserved_value, default):
     if preserved_value is not None:
         return preserved_value
     return default
+
+def suppress_default_override(value, default):
+    if value is None:
+        return None
+    try:
+        if abs(float(value) - float(default)) <= 0.000001:
+            return None
+    except Exception:
+        pass
+    return value
 
 def hex_to_rgba(value):
     raw = str(value or '').strip().lstrip('#')
@@ -448,8 +487,144 @@ def ensure_draft_colour_id_sampling(group):
     links.new(weft_index_math.outputs['Value'], weft_sample.inputs['Index'])
     links.new(weft_sample.outputs['Value'], store_weft_colour_id.inputs['Value'])
 
-draft_collection = ensure_collection(draft_collection_name)
-draft_obj = create_or_update_pattern_object(draft_object_name, matrix, draft_collection)
+def ensure_interface_socket(group, name, socket_type, default=None):
+    for item in group.interface.items_tree:
+        if getattr(item, 'item_type', None) == 'SOCKET' and getattr(item, 'in_out', None) == 'INPUT' and item.name == name:
+            return item
+    socket = group.interface.new_socket(name=name, in_out='INPUT', socket_type=socket_type)
+    if default is not None and hasattr(socket, 'default_value'):
+        try:
+            socket.default_value = default
+        except Exception:
+            pass
+    return socket
+
+def ensure_node(group, name, node_type, location):
+    node = group.nodes.get(name)
+    if node is None:
+        node = group.nodes.new(node_type)
+        node.name = name
+    node.location = location
+    return node
+
+def output_socket(node, name):
+    socket = node.outputs.get(name)
+    if socket is None:
+        raise RuntimeError(f"Node {{node.name}} is missing output {{name}}.")
+    return socket
+
+def input_socket(node, name):
+    socket = node.inputs.get(name)
+    if socket is None:
+        raise RuntimeError(f"Node {{node.name}} is missing input {{name}}.")
+    return socket
+
+def link_once(group, from_socket, to_socket):
+    clear_input_links(group.links, to_socket)
+    group.links.new(from_socket, to_socket)
+
+def configure_math_node(node, operation):
+    node.operation = operation
+    return node
+
+def configure_sample_index_node(node):
+    node.data_type = 'INT'
+    node.domain = 'FACE'
+    return node
+
+def ensure_scan_knotty_draft_sampling(group):
+    ensure_interface_socket(group, 'Draft Object', 'NodeSocketObject')
+    ensure_interface_socket(group, 'Draft Columns', 'NodeSocketInt', cols)
+    ensure_interface_socket(group, 'Draft Rows', 'NodeSocketInt', rows)
+
+    pattern_input = ensure_node(group, 'PW Draft Input', 'NodeGroupInput', (1370, -760))
+    draft_object_info = ensure_node(group, 'PW Draft Object Info', 'GeometryNodeObjectInfo', (1600, -760))
+    draft_attr = ensure_node(group, 'PW Draft Cell Code', 'GeometryNodeInputNamedAttribute', (1600, -940))
+    draft_attr.data_type = 'INT'
+    input_socket(draft_attr, 'Name').default_value = 'cell_code'
+
+    warp_curve = group.nodes.get('Curve of Point')
+    weft_curve = group.nodes.get('Curve of Point.001')
+    warp_z_sign = group.nodes.get('Math.005')
+    weft_z_sign = group.nodes.get('Math.011')
+    if not all((warp_curve, weft_curve, warp_z_sign, weft_z_sign)):
+        raise RuntimeError("Parametric Weave knotty is missing the curve-index or Z offset nodes needed for draft sampling.")
+
+    link_once(group, output_socket(pattern_input, 'Draft Object'), input_socket(draft_object_info, 'Object'))
+
+    warp_col_mod = configure_math_node(ensure_node(group, 'PW Draft Warp Col Mod', 'ShaderNodeMath', (1860, -720)), 'MODULO')
+    warp_row_mod = configure_math_node(ensure_node(group, 'PW Draft Warp Row Mod', 'ShaderNodeMath', (1860, -900)), 'MODULO')
+    warp_row_offset = configure_math_node(ensure_node(group, 'PW Draft Warp Row Offset', 'ShaderNodeMath', (2080, -900)), 'MULTIPLY')
+    warp_face_index = configure_math_node(ensure_node(group, 'PW Draft Warp Face Index', 'ShaderNodeMath', (2300, -820)), 'ADD')
+    warp_sample = configure_sample_index_node(ensure_node(group, 'PW Draft Warp Sample', 'GeometryNodeSampleIndex', (2520, -820)))
+    warp_sample_sign = configure_math_node(ensure_node(group, 'PW Draft Warp Sign', 'ShaderNodeMath', (2740, -820)), 'MULTIPLY_ADD')
+    input_socket(warp_sample_sign, 'Value').default_value = 0.5
+    warp_sample_sign.inputs[1].default_value = -2.0
+    warp_sample_sign.inputs[2].default_value = 1.0
+
+    link_once(group, output_socket(warp_curve, 'Index in Curve'), warp_col_mod.inputs[0])
+    link_once(group, output_socket(pattern_input, 'Draft Columns'), warp_col_mod.inputs[1])
+    link_once(group, output_socket(warp_curve, 'Curve Index'), warp_row_mod.inputs[0])
+    link_once(group, output_socket(pattern_input, 'Draft Rows'), warp_row_mod.inputs[1])
+    link_once(group, warp_row_mod.outputs['Value'], warp_row_offset.inputs[0])
+    link_once(group, output_socket(pattern_input, 'Draft Columns'), warp_row_offset.inputs[1])
+    link_once(group, warp_row_offset.outputs['Value'], warp_face_index.inputs[0])
+    link_once(group, warp_col_mod.outputs['Value'], warp_face_index.inputs[1])
+    link_once(group, output_socket(draft_object_info, 'Geometry'), input_socket(warp_sample, 'Geometry'))
+    link_once(group, output_socket(draft_attr, 'Attribute'), input_socket(warp_sample, 'Value'))
+    link_once(group, warp_face_index.outputs['Value'], input_socket(warp_sample, 'Index'))
+    link_once(group, warp_sample.outputs['Value'], warp_sample_sign.inputs[0])
+    link_once(group, warp_sample_sign.outputs['Value'], warp_z_sign.inputs[0])
+
+    if warp_material_ids is not None and weft_material_ids is not None:
+        warp_material_store = group.nodes.get('PW Warp Material Id')
+        if warp_material_store is not None:
+            warp_material_attr = ensure_named_attribute_node(group, 'PW Draft Warp Material Id', 'warp_material_id', (2520, -560))
+            warp_material_sample = configure_sample_index_node(ensure_node(group, 'PW Draft Warp Material Sample', 'GeometryNodeSampleIndex', (2740, -560)))
+            warp_material_one_based = configure_math_node(ensure_node(group, 'PW Draft Warp Material One Based', 'ShaderNodeMath', (2960, -560)), 'ADD')
+            warp_material_one_based.inputs[1].default_value = 1.0
+            link_once(group, output_socket(draft_object_info, 'Geometry'), input_socket(warp_material_sample, 'Geometry'))
+            link_once(group, output_socket(warp_material_attr, 'Attribute'), input_socket(warp_material_sample, 'Value'))
+            link_once(group, warp_face_index.outputs['Value'], input_socket(warp_material_sample, 'Index'))
+            link_once(group, warp_material_sample.outputs['Value'], warp_material_one_based.inputs[0])
+            link_once(group, warp_material_one_based.outputs['Value'], input_socket(warp_material_store, 'Value'))
+
+    weft_row_mod = configure_math_node(ensure_node(group, 'PW Draft Weft Row Mod', 'ShaderNodeMath', (1860, -1160)), 'MODULO')
+    weft_col_mod = configure_math_node(ensure_node(group, 'PW Draft Weft Col Mod', 'ShaderNodeMath', (1860, -1340)), 'MODULO')
+    weft_row_offset = configure_math_node(ensure_node(group, 'PW Draft Weft Row Offset', 'ShaderNodeMath', (2080, -1160)), 'MULTIPLY')
+    weft_face_index = configure_math_node(ensure_node(group, 'PW Draft Weft Face Index', 'ShaderNodeMath', (2300, -1240)), 'ADD')
+    weft_sample = configure_sample_index_node(ensure_node(group, 'PW Draft Weft Sample', 'GeometryNodeSampleIndex', (2520, -1240)))
+    weft_sample_sign = configure_math_node(ensure_node(group, 'PW Draft Weft Sign', 'ShaderNodeMath', (2740, -1240)), 'MULTIPLY_ADD')
+    input_socket(weft_sample_sign, 'Value').default_value = 0.5
+    weft_sample_sign.inputs[1].default_value = 2.0
+    weft_sample_sign.inputs[2].default_value = -1.0
+
+    link_once(group, output_socket(weft_curve, 'Index in Curve'), weft_row_mod.inputs[0])
+    link_once(group, output_socket(pattern_input, 'Draft Rows'), weft_row_mod.inputs[1])
+    link_once(group, output_socket(weft_curve, 'Curve Index'), weft_col_mod.inputs[0])
+    link_once(group, output_socket(pattern_input, 'Draft Columns'), weft_col_mod.inputs[1])
+    link_once(group, weft_row_mod.outputs['Value'], weft_row_offset.inputs[0])
+    link_once(group, output_socket(pattern_input, 'Draft Columns'), weft_row_offset.inputs[1])
+    link_once(group, weft_row_offset.outputs['Value'], weft_face_index.inputs[0])
+    link_once(group, weft_col_mod.outputs['Value'], weft_face_index.inputs[1])
+    link_once(group, output_socket(draft_object_info, 'Geometry'), input_socket(weft_sample, 'Geometry'))
+    link_once(group, output_socket(draft_attr, 'Attribute'), input_socket(weft_sample, 'Value'))
+    link_once(group, weft_face_index.outputs['Value'], input_socket(weft_sample, 'Index'))
+    link_once(group, weft_sample.outputs['Value'], weft_sample_sign.inputs[0])
+    link_once(group, weft_sample_sign.outputs['Value'], weft_z_sign.inputs[0])
+
+    if warp_material_ids is not None and weft_material_ids is not None:
+        weft_material_store = group.nodes.get('PW Weft Material Id')
+        if weft_material_store is not None:
+            weft_material_attr = ensure_named_attribute_node(group, 'PW Draft Weft Material Id', 'weft_material_id', (2520, -1500))
+            weft_material_sample = configure_sample_index_node(ensure_node(group, 'PW Draft Weft Material Sample', 'GeometryNodeSampleIndex', (2740, -1500)))
+            weft_material_one_based = configure_math_node(ensure_node(group, 'PW Draft Weft Material One Based', 'ShaderNodeMath', (2960, -1500)), 'ADD')
+            weft_material_one_based.inputs[1].default_value = 1.0
+            link_once(group, output_socket(draft_object_info, 'Geometry'), input_socket(weft_material_sample, 'Geometry'))
+            link_once(group, output_socket(weft_material_attr, 'Attribute'), input_socket(weft_material_sample, 'Value'))
+            link_once(group, weft_face_index.outputs['Value'], input_socket(weft_material_sample, 'Index'))
+            link_once(group, weft_material_sample.outputs['Value'], weft_material_one_based.inputs[0])
+            link_once(group, weft_material_one_based.outputs['Value'], input_socket(weft_material_store, 'Value'))
 
 target_obj = bpy.data.objects.get(target_object_name)
 if target_obj is None:
@@ -459,13 +634,41 @@ if target_obj is None:
     target_obj = bpy.data.objects.new(target_object_name, mesh)
     bpy.context.scene.collection.objects.link(target_obj)
 
-weave_group = bpy.data.node_groups.get('Weave From Draft')
+weave_mod = target_obj.modifiers.get('Weave')
+existing_group = weave_mod.node_group if weave_mod and weave_mod.type == 'NODES' else None
+weave_group = None
+if existing_group is not None and existing_group.name == 'Parametric Weave knotty':
+    weave_group = existing_group
 if weave_group is None:
-    raise RuntimeError("Blender is missing the 'Weave From Draft' geometry-node group.")
-if warp_material_ids is not None and weft_material_ids is not None:
+    weave_group = bpy.data.node_groups.get('Parametric Weave knotty')
+if weave_group is None:
+    weave_group = bpy.data.node_groups.get('Weave From Draft')
+if weave_group is None:
+    raise RuntimeError("Blender is missing the 'Parametric Weave knotty' or 'Weave From Draft' geometry-node group.")
+
+uses_scan_knotty_group = weave_group.name == 'Parametric Weave knotty'
+if uses_scan_knotty_group:
+    ensure_scan_knotty_draft_sampling(weave_group)
+
+uses_draft_object = has_modifier_input(weave_group, 'Draft Object')
+draft_obj = None
+if uses_draft_object:
+    draft_collection = ensure_collection(draft_collection_name)
+    draft_obj = create_or_update_pattern_object(draft_object_name, matrix, draft_collection)
+
+if uses_draft_object and not uses_scan_knotty_group and warp_material_ids is not None and weft_material_ids is not None:
     ensure_draft_colour_id_sampling(weave_group)
 
-weave_mod = target_obj.modifiers.get('Weave')
+if uses_scan_knotty_group:
+    amplitude_override = suppress_default_override(amplitude_override, 0.008)
+    thread_radius_override = suppress_default_override(thread_radius_override, 0.028)
+    thread_subdivisions_override = suppress_default_override(thread_subdivisions_override, 8.0)
+    texture_scale_u_override = suppress_default_override(texture_scale_u_override, 8.0)
+    texture_scale_v_override = suppress_default_override(texture_scale_v_override, 0.5)
+    texture_offset_v_override = suppress_default_override(texture_offset_v_override, 0.0)
+    texture_side_flatten_override = suppress_default_override(texture_side_flatten_override, 0.7)
+    seed_override = suppress_default_override(seed_override, 0)
+
 preserved = {{}}
 if weave_mod and weave_mod.type == 'NODES' and weave_mod.node_group:
     old_group = weave_mod.node_group
@@ -473,8 +676,11 @@ if weave_mod and weave_mod.type == 'NODES' and weave_mod.node_group:
         'Warp Threads',
         'Weft Threads',
         'Spacing',
+        'Pattern Noise X',
+        'Pattern Noise Y',
         'Amplitude',
         'Thread Radius',
+        'Main Strand Radius',
         'Thread Subdivisions',
         'Ply Count',
         'Ply Radius',
@@ -499,38 +705,53 @@ else:
     weave_mod = target_obj.modifiers.new(name='Weave', type='NODES')
 
 weave_mod.node_group = weave_group
-set_modifier_input(weave_mod, weave_group, 'Draft Object', draft_obj)
-set_modifier_input(weave_mod, weave_group, 'Draft Columns', cols)
-set_modifier_input(weave_mod, weave_group, 'Draft Rows', rows)
-set_modifier_input(weave_mod, weave_group, 'Warp Threads', int(round(pick_value(warp_threads_override, preserved.get('Warp Threads'), default_warp_threads))))
-set_modifier_input(weave_mod, weave_group, 'Weft Threads', int(round(pick_value(weft_threads_override, preserved.get('Weft Threads'), default_weft_threads))))
-set_modifier_input(weave_mod, weave_group, 'Spacing', pick_value(spacing_override, preserved.get('Spacing'), 0.05))
-set_modifier_input(weave_mod, weave_group, 'Amplitude', pick_value(amplitude_override, preserved.get('Amplitude'), 0.008))
-set_modifier_input(weave_mod, weave_group, 'Thread Radius', pick_value(thread_radius_override, preserved.get('Thread Radius'), 0.028))
-set_modifier_input(weave_mod, weave_group, 'Thread Subdivisions', pick_value(thread_subdivisions_override, preserved.get('Thread Subdivisions'), 8.0))
-set_modifier_input(weave_mod, weave_group, 'Ply Count', int(round(pick_value(ply_count_override, preserved.get('Ply Count'), 3))))
-set_modifier_input(weave_mod, weave_group, 'Ply Radius', pick_value(ply_radius_override, preserved.get('Ply Radius'), 0.013))
-set_modifier_input(weave_mod, weave_group, 'Twist Amount', pick_value(twist_amount_override, preserved.get('Twist Amount'), 16.0))
-set_modifier_input(weave_mod, weave_group, 'Ply Resolution', int(round(pick_value(ply_resolution_override, preserved.get('Ply Resolution'), 5))))
-set_modifier_input(weave_mod, weave_group, 'Texture Scale U', pick_value(texture_scale_u_override, preserved.get('Texture Scale U'), 8.0))
-set_modifier_input(weave_mod, weave_group, 'Texture Scale V', pick_value(texture_scale_v_override, preserved.get('Texture Scale V'), 0.5))
-set_modifier_input(weave_mod, weave_group, 'Texture Offset V', pick_value(texture_offset_v_override, preserved.get('Texture Offset V'), 0.0))
-set_modifier_input(weave_mod, weave_group, 'Texture Side Flatten', pick_value(texture_side_flatten_override, preserved.get('Texture Side Flatten'), 0.7))
-set_modifier_input(weave_mod, weave_group, 'Lump Strength', pick_value(lump_strength_override, preserved.get('Lump Strength'), 0.0015))
-set_modifier_input(weave_mod, weave_group, 'Lump Scale', pick_value(lump_scale_override, preserved.get('Lump Scale'), 6.0))
-set_modifier_input(weave_mod, weave_group, 'Fiber Density', pick_value(fiber_density_override, preserved.get('Fiber Density'), 0.0))
-set_modifier_input(weave_mod, weave_group, 'Fiber Length', pick_value(fiber_length_override, preserved.get('Fiber Length'), 0.04))
-set_modifier_input(weave_mod, weave_group, 'Fiber Thickness', pick_value(fiber_thickness_override, preserved.get('Fiber Thickness'), 0.15))
-set_modifier_input(weave_mod, weave_group, 'Fiber Frizz', pick_value(fiber_frizz_override, preserved.get('Fiber Frizz'), 0.02))
-set_modifier_input(weave_mod, weave_group, 'Fiber Subdivs', int(round(pick_value(fiber_subdivs_override, preserved.get('Fiber Subdivs'), 4))))
-set_modifier_input(weave_mod, weave_group, 'Seed', int(round(pick_value(seed_override, preserved.get('Seed'), 0))))
+if uses_draft_object:
+    set_modifier_input(weave_mod, weave_group, 'Draft Object', draft_obj)
+    set_modifier_input(weave_mod, weave_group, 'Draft Columns', cols)
+    set_modifier_input(weave_mod, weave_group, 'Draft Rows', rows)
+maybe_set_modifier_input(weave_mod, weave_group, 'Warp Threads', int(round(pick_value(warp_threads_override, None, default_warp_threads))))
+maybe_set_modifier_input(weave_mod, weave_group, 'Weft Threads', int(round(pick_value(weft_threads_override, None, default_weft_threads))))
+maybe_set_modifier_input(weave_mod, weave_group, 'Spacing', pick_value(spacing_override, preserved.get('Spacing'), 0.05))
+maybe_set_modifier_input(weave_mod, weave_group, 'Pattern Noise X', pick_value(pattern_noise_x_override, preserved.get('Pattern Noise X'), 0.0))
+maybe_set_modifier_input(weave_mod, weave_group, 'Pattern Noise Y', pick_value(pattern_noise_y_override, preserved.get('Pattern Noise Y'), 0.0))
+maybe_set_modifier_input(weave_mod, weave_group, 'Amplitude', pick_value(amplitude_override, preserved.get('Amplitude'), 0.008))
+thread_radius_preserved = preserved.get('Thread Radius')
+if thread_radius_preserved is None:
+    thread_radius_preserved = preserved.get('Main Strand Radius')
+thread_radius_value = pick_value(thread_radius_override, thread_radius_preserved, 0.028)
+if not maybe_set_modifier_input(weave_mod, weave_group, 'Thread Radius', thread_radius_value):
+    maybe_set_modifier_input(weave_mod, weave_group, 'Main Strand Radius', thread_radius_value)
+maybe_set_modifier_input(weave_mod, weave_group, 'Thread Subdivisions', pick_value(thread_subdivisions_override, preserved.get('Thread Subdivisions'), 8.0))
+maybe_set_modifier_input(weave_mod, weave_group, 'Ply Count', int(round(pick_value(ply_count_override, preserved.get('Ply Count'), 3))))
+maybe_set_modifier_input(weave_mod, weave_group, 'Ply Radius', pick_value(ply_radius_override, preserved.get('Ply Radius'), 0.013))
+maybe_set_modifier_input(weave_mod, weave_group, 'Twist Amount', pick_value(twist_amount_override, preserved.get('Twist Amount'), 16.0))
+maybe_set_modifier_input(weave_mod, weave_group, 'Ply Resolution', int(round(pick_value(ply_resolution_override, preserved.get('Ply Resolution'), 5))))
+maybe_set_modifier_input(weave_mod, weave_group, 'Texture Scale U', pick_value(texture_scale_u_override, preserved.get('Texture Scale U'), 8.0))
+if uses_scan_knotty_group:
+    maybe_set_modifier_input(weave_mod, weave_group, 'Texture Scale V', 1.0)
+    maybe_set_modifier_input(weave_mod, weave_group, 'Texture Offset V', 0.0)
+    maybe_set_modifier_input(weave_mod, weave_group, 'Texture Side Flatten', 0.0)
+    maybe_set_modifier_input(weave_mod, weave_group, 'Sub Texture Scale V', 0.0)
+    maybe_set_modifier_input(weave_mod, weave_group, 'Sub Texture Offset V', 0.0)
+else:
+    maybe_set_modifier_input(weave_mod, weave_group, 'Texture Scale V', pick_value(texture_scale_v_override, preserved.get('Texture Scale V'), 0.5))
+    maybe_set_modifier_input(weave_mod, weave_group, 'Texture Offset V', pick_value(texture_offset_v_override, preserved.get('Texture Offset V'), 0.0))
+    maybe_set_modifier_input(weave_mod, weave_group, 'Texture Side Flatten', pick_value(texture_side_flatten_override, preserved.get('Texture Side Flatten'), 0.7))
+maybe_set_modifier_input(weave_mod, weave_group, 'Lump Strength', pick_value(lump_strength_override, preserved.get('Lump Strength'), 0.0015))
+maybe_set_modifier_input(weave_mod, weave_group, 'Lump Scale', pick_value(lump_scale_override, preserved.get('Lump Scale'), 6.0))
+maybe_set_modifier_input(weave_mod, weave_group, 'Fiber Density', pick_value(fiber_density_override, preserved.get('Fiber Density'), 0.0))
+maybe_set_modifier_input(weave_mod, weave_group, 'Fiber Length', pick_value(fiber_length_override, preserved.get('Fiber Length'), 0.04))
+maybe_set_modifier_input(weave_mod, weave_group, 'Fiber Thickness', pick_value(fiber_thickness_override, preserved.get('Fiber Thickness'), 0.15))
+maybe_set_modifier_input(weave_mod, weave_group, 'Fiber Frizz', pick_value(fiber_frizz_override, preserved.get('Fiber Frizz'), 0.02))
+maybe_set_modifier_input(weave_mod, weave_group, 'Fiber Subdivs', int(round(pick_value(fiber_subdivs_override, preserved.get('Fiber Subdivs'), 4))))
+maybe_set_modifier_input(weave_mod, weave_group, 'Seed', int(round(pick_value(seed_override, preserved.get('Seed'), 0))))
 material_count_floor = material_count_override if material_count_override is not None else max(len(warp_colors), len(weft_colors), 2)
 material_count_value = preserved.get('Material Count')
 if material_count_value is None:
     material_count_value = material_count_floor
 else:
     material_count_value = max(int(material_count_value), material_count_floor)
-set_modifier_input(weave_mod, weave_group, 'Material Count', material_count_value)
+maybe_set_modifier_input(weave_mod, weave_group, 'Material Count', material_count_value)
 
 fit_mod = target_obj.modifiers.get('Fit To Space') or target_obj.modifiers.get('Swatch Fit')
 if fit_mod and fit_mod.type == 'NODES' and fit_mod.node_group:
@@ -546,7 +767,7 @@ if fit_mod and fit_mod.type == 'NODES' and fit_mod.node_group:
     except Exception:
         pass
 
-if target_obj.data is not None and hasattr(target_obj.data, 'materials'):
+if target_obj.data is not None and hasattr(target_obj.data, 'materials') and not has_modifier_input(weave_group, 'Material 1'):
     material = ensure_web_draft_material(
         'WebDraftMaterial',
         warp_colors[0] if warp_colors else '#f3ede2',
@@ -567,7 +788,7 @@ target_obj['source_label'] = source_label
 
 print({{
     'status': 'ok',
-    'draft_object': draft_obj.name,
+    'draft_object': draft_obj.name if draft_obj is not None else None,
     'target_object': target_obj.name,
     'rows': rows,
     'cols': cols,

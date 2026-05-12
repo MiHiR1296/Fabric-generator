@@ -4,9 +4,9 @@ One self-contained repo for the yarn-processing pipeline, the web-based weave dr
 
 The current product flow is:
 
-- `Step 1` Upload yarn references and generate seamless diffuse + alpha maps
+- `Step 1` Upload yarn references and generate seamless diffuse maps, alpha mattes, band metadata, and QA maps
 - `Step 2` Build or import the weave draft in the web editor
-- `Step 3` Assign processed yarns to warp/weft color slots, stage geometry/material controls, and click `Update Preview` to refresh a Blender Material Preview screenshot
+- `Step 3` Assign processed yarns to warp/weft color slots, stage preview controls, and click `Preview` to refresh a Blender Material Preview screenshot
 
 ## Included In This Repo
 
@@ -18,11 +18,13 @@ The current product flow is:
 - `backend/`
   - FastAPI service for draft parsing, yarn asset processing, live Blender preview sync, atlas generation, and Blender render jobs
 - `backend/vendor/yarn_pipeline/`
-  - vendored yarn-processing code plus the required `big-lama` model split into repo-safe chunks
+  - vendored yarn-processing code plus band segmentation metadata generation and the required `big-lama` model split into repo-safe chunks
 - `scripts/`
   - setup automation for teammate onboarding and fresh-machine checks
+- `Codex_ParametricWeave.blend`
+  - updated Blender scene used by default for managed live preview and final render jobs
 - `Weave_GUIConnection.blend`
-  - Blender scene used for managed live preview and final render jobs
+  - previous Blender scene kept in the repository as a reference/fallback
 - `docs/application-blueprint.md`
   - product and workflow reference for the pattern builder
 - `docs/system-setup.md`
@@ -107,18 +109,18 @@ The frontend runs on `http://127.0.0.1:5180` by default and proxies API requests
 
 The web UI now uses a lazy preview workflow instead of a continuously streaming Blender session.
 
-1. Open `Weave_GUIConnection.blend` in Blender.
+1. Open `Codex_ParametricWeave.blend` in Blender.
 2. Start the Blender MCP / socket bridge so the backend can send update commands.
 3. Start the backend and frontend from this repo.
 4. In the web app:
    - upload yarn images in `Step 1`
    - build or import the draft in `Step 2`
-   - assign yarns and adjust geometry/material controls in `Step 3`
-5. Click `Update Preview` only when you are ready to refresh the camera preview.
+   - assign yarns and adjust preview controls in `Step 3`
+5. Click `Preview` only when you are ready to refresh the camera preview.
 
 What happens on each update:
 
-- the frontend sends the full project snapshot plus the staged geometry settings
+- the frontend sends the full project snapshot plus the staged preview settings
 - the backend syncs the draft and material assignments into the running Blender session
 - Blender renders the active camera directly from the managed session
 - the backend writes that camera-framed render to disk and returns it to the web UI
@@ -127,9 +129,10 @@ This is intentionally not a live render loop. Controls are staged locally in the
 
 Important material note:
 
-- the duplicated yarn preview materials still load both diffuse and alpha textures from the uploaded asset
-- the current preview/render path does not use the alpha map as literal shader opacity
-- the strand geometry already defines the yarn silhouette, so using the alpha map as transparency was collapsing the fabric into an overly black result
+- the generated yarn preview materials load diffuse and alpha textures directly from the uploaded/processed asset, instead of inheriting the preset material graph from the Blender file
+- the diffuse texture is wired into base color and the alpha texture is wired into shader alpha
+- `Codex_ParametricWeave.blend` exposes persistent per-material sockets on `Parametric Weave knotty`, so `uv_scaled` is computed from each selected yarn asset's image-width and band metadata instead of one global modifier calibration
+- web-generated warp/weft material IDs feed the knotty graph's `material_id` attribute directly, so the web assignment pattern is the source of truth
 
 By default the backend now runs Blender in `managed` session mode:
 
@@ -139,14 +142,15 @@ By default the backend now runs Blender in `managed` session mode:
 
 That keeps Blender available during an active editing burst without leaving it running forever.
 
-## Geometry Controls In The Web UI
+## Preview Controls In The Web UI
 
-The Step 3 preview panel now exposes the main `Weave From Draft` controls already wired in Blender:
+The Step 3 preview panel exposes only the practical material-preview controls while keeping the dense repeat counts fixed:
 
-- Draft density: `Warp Threads`, `Weft Threads`, `Spacing`, `Amplitude`, `Fill Ratio`
-- Thread structure: `Thread Radius`, `Thread Subdivisions`, `Ply Count`, `Ply Radius`, `Twist Amount`, `Ply Resolution`, `Seed`
-- Texture mapping: `Texture Scale U`, `Texture Scale V`, `Texture Offset V`, `Texture Side Flatten`
-- Micro detail: `Lump Strength`, `Lump Scale`, `Fiber Density`, `Fiber Length`, `Fiber Thickness`, `Fiber Frizz`, `Fiber Subdivs`
+- `Spacing`, normalized from `0..1` in the UI to `0.03..0.10` in Blender
+- `Pattern Noise X`, normalized from `0..1` in the UI to `0.00..0.03` in Blender
+- `Pattern Noise Y`, normalized from `0..1` in the UI to `0.00..0.03` in Blender
+
+`Warp Threads` and `Weft Threads` are intentionally not exposed in the web UI. New and imported drafts normalize both to at least `180`, and the backend applies that floor even if the Blender file still has an older lower value preserved in the modifier.
 
 ## Environment
 
@@ -154,7 +158,7 @@ You can override the Blender binary and blend file path with:
 
 ```bash
 export BLENDER_BINARY_PATH="/Applications/Blender.app/Contents/MacOS/Blender"
-export WEAVE_BLEND_FILE="/absolute/path/to/Weave_GUIConnection.blend"
+export WEAVE_BLEND_FILE="/absolute/path/to/Codex_ParametricWeave.blend"
 export WEAVE_RENDER_ROOT="/absolute/path/to/runtime/render_jobs"
 ```
 
@@ -230,13 +234,13 @@ npm run test:e2e
 
 ## Current Direction
 
-Local development uses a real Blender desktop session with the MCP/socket bridge attached to `Weave_GUIConnection.blend`.
+Local development uses a real Blender desktop session with the MCP/socket bridge attached to `Codex_ParametricWeave.blend`.
 
 Planned server deployment is:
 
 - GPU-backed machine such as the target H100 server
 - persistent Blender GUI session with a virtual display
-- the same lazy `Update Preview` workflow for camera-framed Material Preview images
+- the same lazy `Preview` workflow for camera-framed Material Preview images
 - headless background renders kept available for higher-quality final output when needed
 
 For terminal-only Linux environments, the managed Blender launcher can now prepend a wrapper command. Example:

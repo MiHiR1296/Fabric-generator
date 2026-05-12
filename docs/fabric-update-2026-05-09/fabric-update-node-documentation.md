@@ -6,7 +6,7 @@ This document is the handoff map for the current Fabric Studio update. It connec
 
 - Web app source bundle: `/Users/mihirbotle/Desktop/Impetus/3D Fabric/apps/fabric-studio`
 - Epson yarn-scan bundle: `/Users/mihirbotle/Desktop/Impetus/3D Fabric/thread_epson_scans`
-- Updated Blender file: `/Users/mihirbotle/Desktop/Impetus/3D Fabric/Codex_2.5D_001.blend`
+- Updated Blender file: `/Users/mihirbotle/Desktop/Impetus/3D Fabric/Codex_ParametricWeave.blend`
 - GitHub repository checkout: `/Users/mihirbotle/Desktop/Impetus/Fabric-generator`
 - GitHub repository: `MiHiR1296/Fabric-generator`
 - Transfer branch created locally: `codex/fabric-update-transfer-2026-05-09`
@@ -26,13 +26,17 @@ This document is the handoff map for the current Fabric Studio update. It connec
 
 ## How The Pieces Relate
 
-The current system has two related but not fully merged yarn-to-weave paths.
+The web app and Epson scan path are now joined around the scan-band material contract.
 
-1. The web-app path starts in the browser. Users upload yarn images, build/import a draft, bind each draft color to a ready yarn asset, stage render controls, and click `Update Preview`. The backend processes uploads with the vendored yarn pipeline, saves runtime yarn assets, creates or updates a draft mesh object in Blender, swaps the target object to the `Weave From Draft` geometry node group, duplicates a template material for up to four yarn assets, and renders a camera preview.
+1. The web-app path starts in the browser. Users upload yarn images, build/import a draft, bind each draft color to a ready yarn asset, stage preview controls, and click `Preview`. The backend processes uploads with the vendored yarn pipeline, runs band segmentation, saves runtime yarn assets with diffuse/alpha/band metadata, creates or updates a draft mesh object in Blender, and drives the active `ParametricWeave` object through `Parametric Weave knotty`.
 
-2. The Epson scan path starts with high-DPI TIFF scans in `thread_epson_scans`. It creates preprocessed diffuse strips, alpha mattes, band metadata, optional Cycles-safe downscales, and a batch index. Its Blender scripts target `ParametricWeave.001` with the `Parametric Weave knotty` node group. That group exposes scanned-yarn sockets such as `Image Width Px`, `Image Core V Min/Max`, and the flipped outer fiber-band sockets. Its shader reads a geometry attribute named `uv_scaled`.
+2. The Epson scan path starts with high-DPI TIFF scans in `thread_epson_scans`. It creates preprocessed diffuse strips, alpha mattes, band metadata, optional Cycles-safe downscales, and a batch index. The web runtime now uses the same core data: true image width, core V range, flipped outer fiber V range, and generated materials that read the `uv_scaled` geometry attribute.
 
-My practical observation: the two paths are complementary, but they are not the same integration yet. The web app is productionizing the draft/color/material workflow around `Weave From Draft`; the Epson path is a deeper material/UV experiment around `Parametric Weave knotty`. A clean future merge would either add band metadata to web-app yarn assets or teach `Weave From Draft` to consume the same `uv_scaled` plus scan-band contract.
+3. `Codex_ParametricWeave.blend` now contains the durable Blender-side part of this contract. `Parametric Weave knotty` exposes persistent `Material 1..16` sockets plus per-material metadata sockets such as `Material N Image Width Px`, `Material N Texture Scale U`, `Material N Core V Min/Max`, `Material N Fiber Top V Min`, and `Material N Fiber Bot V Max`. The backend fills those sockets from the user's selected yarn assignments. It does not create temporary `Web Material UV` or `Web Material Assign` nodes at render time.
+
+My practical observation: this is the right direction because the Blender file now owns the geometry-node logic, while the backend only supplies data. The web UI remains free to assign many warp/weft yarns, and Blender can pick each strand's material, physical image width, and V-band mapping from the strand's `material_id`.
+
+Arc 2 note: `Sub Texture Scale V` and `Sub Texture Offset V` are additive deltas applied only when `is_sub_strand = 1`. They should stay at `0` for the scan-band workflow. Setting `Sub Texture Scale V` to `1` makes Arc 2 use `Texture Scale V + 1`, which stretches the secondary strand's V mapping and makes the fiber band look misaligned.
 
 ## Web App Architecture
 
@@ -42,11 +46,11 @@ The current repository app is a three-step React/FastAPI workflow.
 |---|---|---|---|
 | Step 1: Yarn Library | `frontend/src/App.tsx`, `frontend/src/components/YarnLibraryStep.tsx`, `backend/app/yarn_assets.py` | Uploads one or more yarn image files, queues background processing, and displays source/diffuse/alpha previews. | Runtime assets are stored under `runtime/yarn_assets`. Processing is asynchronous and re-polled by the frontend. |
 | Step 2: Pattern Builder | `PatternBuilderStep.tsx`, `DraftBoard.tsx`, `domain/draft.ts`, parsers in `backend/app` | Builds/imports a canonical draft with threading, tie-up, treadling, drawdown, and color sequences. | The canonical draft object is the stable contract between UI and Blender. This is a good boundary. |
-| Step 3: Color Mapping And Preview | `ColorMappingStep.tsx`, `RenderPanel.tsx`, `domain/project.ts`, `backend/app/live_preview.py`, `backend/app/render_jobs.py` | Maps unique warp/weft color slots to processed yarn assets, stages geometry controls, and renders a Blender preview. | Live preview supports up to four distinct yarn assets because it duplicates template materials. Larger material counts fall back toward atlas/final render logic. |
+| Step 3: Color Mapping And Preview | `ColorMappingStep.tsx`, `RenderPanel.tsx`, `domain/project.ts`, `backend/app/live_preview.py`, `backend/app/render_jobs.py` | Maps unique warp/weft color slots to processed yarn assets, stages preview controls, and renders a Blender preview. | Live preview now supports up to 16 distinct yarn assets directly. The material path builds generated `uv_scaled` image materials from processed yarn outputs, fills the persistent `Parametric Weave knotty` material and metadata sockets, and keeps the draft's material IDs as the source of truth for strand assignment. |
 | Blender Sync | `backend/app/blender_sync.py` | Builds Python code sent to Blender over the socket. It creates the draft mesh, sets modifier inputs, and injects material-id sampling nodes when needed. | This code intentionally preserves existing modifier values unless the web draft supplies an override. Good for iterative tuning, but it means stale Blender values can survive between previews. |
 | Managed Blender Session | `backend/app/blender_session.py`, `backend/app/blender_session_startup.py` | Can launch Blender, start the MCP socket, retry after transport failures, and stop after idle timeout. | This is the repo-local update that is newer than the source app bundle. Keep it. |
 
-The most important web-app design choice is that edits are staged in the browser and Blender updates only when `Update Preview` is clicked. That keeps the UI predictable and avoids turning Blender into a constantly mutating shared state while the user is typing.
+The most important web-app design choice is that edits are staged in the browser and Blender updates only when `Preview` is clicked. That keeps the UI predictable and avoids turning Blender into a constantly mutating shared state while the user is typing.
 
 ## Epson Scan Pipeline
 
@@ -57,7 +61,7 @@ The scan pipeline converts a single-yarn Epson scan into image files and metadat
 | `alpha_pipeline.py` | Preprocesses the raw scan and creates alpha mattes. | TIFF/PNG/JPEG yarn image. | `_preproc.png`, `_alpha.png`, metadata dictionaries. | Handles orientation detection, white/black background classification, leveling, cropping, foreground masks, hysteresis cleanup, and speckle removal. This is the image-quality foundation. |
 | `seamless_converter.py` | Uses LaMa inpainting to hide the U-direction seam. | Preprocessed horizontal yarn strip. | `_seamless.png`. | The scan-bundle version expects `big-lama.pt` directly beside the script. The repo version reconstructs the model from chunks, which is better for Git. |
 | `yarn_pipeline.py` | Orchestrates preprocess -> seamless -> alpha. | Raw yarn image and output directory. | JSON-like result with `seamless`, `alpha`, optional `preprocessed`, and per-stage metadata. | This is already vendored in the repo and called by `backend/app/yarn_assets.py`. |
-| `band_segmenter.py` | Converts alpha/diffuse pair into Blender band metadata. | RGB yarn image plus alpha matte. | `meta.json`, `normal.png`, `roughness.png`, `overlay.png`. | It finds core/fiber V bands from alpha density and detects twist period through FFT. This is not yet integrated into web-app runtime assets. |
+| `band_segmenter.py` | Converts alpha/diffuse pair into Blender band metadata. | RGB yarn image plus alpha matte. | `meta.json`, `normal.png`, `roughness.png`, `overlay.png`. | It finds core/fiber V bands from alpha density and detects twist period through FFT. The web-app runtime now calls the vendored version during yarn processing. |
 | `resize_for_cycles.py` | Creates downscaled copies for textures above Cycles limits. | Existing scan outputs. | `_max16384` copies under `bands_out/_resized`. | Important because Cycles caps single texture dimensions around 16384 px. The metadata keeps the original physical width. |
 | `build_batch_index.py` | Collapses per-yarn `meta.json` files into one Blender-facing index. | `bands_out/*/meta.json`. | `bands_out/_batch_index.json`. | It applies the fiber-band socket swap so Blender scripts do not need to reason about Arc 2 direction every time. |
 | `blender_apply_yarn.py` | Applies one scan yarn to `ParametricWeave.001`. | `_batch_index.json`, RGB/alpha files. | Blender material plus modifier socket updates. | Material must read `uv_scaled`, not `UVMap`. This is a critical debugging note. |
@@ -123,12 +127,12 @@ My strongest Blender-side observation: there are three weave families in the fil
 - Keep the transfer branch separate from `main`, as requested. The branch exists locally as `codex/fabric-update-transfer-2026-05-09`.
 - Copy this documentation folder into the repository docs area before committing. I generated it in both the requested source docs path and the repo docs path for that reason.
 - When transferring scripts, add the missing scan-side scripts deliberately instead of overwriting the repo vendor folder wholesale.
-- When transferring the Blender file, decide whether `Codex_2.5D_001.blend` should replace `Weave_GUIConnection.blend` or live beside it. The backend defaults currently point at `Weave_GUIConnection.blend`, so a rename/replacement has runtime consequences.
+- The web UI integration branch now points backend defaults at `Codex_ParametricWeave.blend` while leaving `Weave_GUIConnection.blend` in the repository as a reference/fallback file.
 - Before pushing for a colleague, run at least `python3 scripts/setup_doctor.py`, backend unit tests, and ideally one Blender load/sync smoke test. The docs can be transferred without this, but the Blender file should not be called integrated until the app opens and previews against it.
 
 ## Complete Blender Node Group Inventory
 
-This section lists every node in every node group inside `Codex_2.5D_001.blend`. The row fields are intentionally audit-oriented: type, parent frame, non-linked defaults, incoming links, outgoing links, and my observed role. Long link lists are shortened in-place, but no node is omitted.
+This section lists every node in every node group inside `Codex_ParametricWeave.blend`. The row fields are intentionally audit-oriented: type, parent frame, non-linked defaults, incoming links, outgoing links, and my observed role. Long link lists are shortened in-place, but no node is omitted.
 
 ### Node Group: `.axis_alignment_switch`
 
@@ -1925,7 +1929,7 @@ Node inventory:
 
 ## Complete Material Shader Node Inventory
 
-This section lists every node in every material node tree in the updated Blender file. The web-app render code expects a reusable image-texture template material, while the Epson scan scripts create a compact `uv_scaled` material. Both patterns are visible here.
+This section lists every node in every material node tree in the updated Blender file. Earlier web-app render code expected a reusable image-texture template material; the current integration creates generated `uv_scaled` image materials from the uploaded yarn asset so the preview does not keep falling back to a preset Blender material. The Epson scan scripts use the same compact `uv_scaled` material idea.
 
 ### Material: `china_grey_matte20260422_15445317`
 
@@ -2301,7 +2305,6 @@ Sample/reference yarn material retained in the blend for visual experiments and 
 ## Final Notes And Open Questions
 
 - The repository is ahead of the supplied app bundle in several places. Treat the app bundle as source context, not as an authoritative replacement of the checkout.
-- The scan pipeline is more advanced than the web-app upload pipeline because it produces band metadata and twist estimates. The web app currently stores diffuse/alpha/preprocessed outputs but not band metadata. Adding `band_segmenter.py` to runtime processing would be the next integration step if scanned yarn fidelity is the goal.
-- The updated Blender file contains demo knit/hook groups as well as weave groups. They are valuable references, but the colleague receiving this branch should know which ones are production-facing for this update.
-- I would fix the Blender warning about geometry input ordering on `ParametricWeave.001` before treating the file as clean. It may not break rendering today, but it is exactly the kind of small Blender-node issue that becomes confusing for someone opening the branch cold.
-
+- The web-app upload pipeline now stores diffuse, alpha, preprocessed output, band metadata, and QA maps for each ready yarn asset. Twist estimates are present in the band metadata and remain useful for future UI/debugging, but the current Blender contract only consumes image width and V-band ranges.
+- The cleaned handoff file is `Codex_ParametricWeave.blend`. The production-facing preview object is `ParametricWeave` using `Parametric Weave knotty`; older demo knit/hook groups and the old `ParametricWeave.001` discussion above are historical context from the broader source file audit.
+- I would keep the persistent per-material sockets in the Blender file as the source of truth. If the node graph changes again, update the file and this document together rather than recreating node chains dynamically from the backend.
