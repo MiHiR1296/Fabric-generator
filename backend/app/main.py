@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 try:
-    from fastapi import FastAPI, File, HTTPException, UploadFile
+    from fastapi import FastAPI, File, Form, HTTPException, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse
     from pydantic import BaseModel
@@ -11,6 +11,7 @@ except ImportError as exc:  # pragma: no cover - exercised through setup docs in
     FastAPI = None
     UploadFile = None
     File = None
+    Form = None
     HTTPException = RuntimeError
     BaseModel = object
     IMPORT_ERROR = exc
@@ -182,14 +183,19 @@ if FastAPI is not None:
 
 
     @app.post("/api/yarn/assets")
-    async def upload_yarn_assets(files: list[UploadFile] = File(...)):
+    async def upload_yarn_assets(
+        files: list[UploadFile] = File(...),
+        orientation: str = Form("auto"),
+    ):
         if not files:
             raise HTTPException(status_code=400, detail="Upload at least one yarn image.")
+        if orientation not in ("auto", "horizontal", "vertical"):
+            raise HTTPException(status_code=400, detail="Invalid orientation.")
         try:
             payload = []
             for file in files:
                 payload.append((file.filename or "upload.png", await file.read()))
-            return create_yarn_assets(payload)
+            return create_yarn_assets(payload, orientation=orientation)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -219,9 +225,11 @@ if FastAPI is not None:
 
 
     @app.post("/api/yarn/assets/{asset_id}/retry")
-    async def retry_asset(asset_id: str):
+    async def retry_asset(asset_id: str, orientation: str = Form("auto")):
+        if orientation not in ("auto", "horizontal", "vertical"):
+            raise HTTPException(status_code=400, detail="Invalid orientation.")
         try:
-            return retry_yarn_asset(asset_id)
+            return retry_yarn_asset(asset_id, orientation=orientation)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Yarn asset not found.") from exc
         except Exception as exc:

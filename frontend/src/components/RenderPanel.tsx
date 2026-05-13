@@ -59,6 +59,41 @@ export default function RenderPanel({
     renderBusy || renderJob?.status === 'queued' || renderJob?.status === 'running';
   const renderActive = renderRunning || renderDisabled;
 
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!renderRunning) {
+      setElapsed(0);
+      return undefined;
+    }
+    const start = renderJob?.createdAt ? new Date(renderJob.createdAt).getTime() : Date.now();
+    const tick = () => setElapsed(Math.max(0, (Date.now() - start) / 1000));
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [renderRunning, renderJob?.createdAt]);
+
+  // Blender doesn't emit a real progress %, so estimate one. The curve
+  // climbs quickly at first, then asymptotes to 95% so the bar never
+  // hits 100% before Blender actually finishes — at which point we
+  // snap it to 100%.
+  const RENDER_TIME_CONSTANT = 35;
+  const completedStatus = renderJob?.status === 'completed' || Boolean(renderJob?.imageUrl);
+  const failedStatus = renderJob?.status === 'failed';
+  const progress = completedStatus
+    ? 100
+    : failedStatus
+      ? 0
+      : renderRunning
+        ? Math.min(95, (1 - Math.exp(-elapsed / RENDER_TIME_CONSTANT)) * 95)
+        : 0;
+
+  function formatElapsed(seconds: number) {
+    const total = Math.floor(seconds);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
   return (
     <section className="card render-panel" data-testid="render-panel">
       <div className="render-panel__header">
@@ -87,12 +122,6 @@ export default function RenderPanel({
           </button>
         </div>
       </div>
-
-      {statusMessage ? (
-        <p className="muted" data-testid="render-status-message">
-          {statusMessage}
-        </p>
-      ) : null}
 
       <div className="render-panel__body">
         <div className="render-panel__controls">
@@ -155,6 +184,12 @@ export default function RenderPanel({
         </div>
 
         <div className="render-panel__preview">
+          {statusMessage ? (
+            <p className="muted render-panel__status" data-testid="render-status-message">
+              {statusMessage}
+            </p>
+          ) : null}
+
           <div className="render-preview render-preview--panel">
             {renderJob?.imageUrl ? (
               <img
@@ -164,10 +199,43 @@ export default function RenderPanel({
               />
             ) : (
               <div className="render-preview__placeholder">
-                <strong>No preview yet</strong>
-                <span>The next successful headless render will appear here.</span>
+                <strong>{renderRunning ? 'Working…' : 'No preview yet'}</strong>
+                <span>
+                  {renderRunning
+                    ? 'The image will appear automatically as soon as Blender finishes.'
+                    : 'The next successful headless render will appear here.'}
+                </span>
               </div>
             )}
+
+            {renderRunning ? (
+              <div
+                className="render-progress render-progress--overlay"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(progress)}
+                aria-valuetext={`Rendering ${Math.round(progress)}%`}
+                data-testid="render-progress"
+              >
+                <div className="render-progress__label">
+                  <span>
+                    {renderJob?.status === 'queued'
+                      ? 'Queued for Blender…'
+                      : 'Blender is generating your preview…'}
+                  </span>
+                  <span className="render-progress__elapsed">
+                    {Math.round(progress)}% · {formatElapsed(elapsed)}
+                  </span>
+                </div>
+                <div className="render-progress__track">
+                  <div
+                    className="render-progress__bar"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {renderJob ? (

@@ -119,7 +119,7 @@ def _update_asset(asset_id: str, **changes: object) -> None:
         _persist_asset(asset)
 
 
-def _process_asset(asset_id: str) -> None:
+def _process_asset(asset_id: str, orientation: str = "auto") -> None:
     asset = get_yarn_asset(asset_id)
     if asset is None:
         return
@@ -132,6 +132,7 @@ def _process_asset(asset_id: str) -> None:
         result = run_pipeline(
             input_path=str(source_path),
             output_dir=str(processed_dir),
+            orientation=orientation,
             keep_intermediate=True,
             verbose=False,
         )
@@ -153,7 +154,10 @@ def _process_asset(asset_id: str) -> None:
         _update_asset(asset_id, status="failed", error=str(exc))
 
 
-def create_yarn_assets(files: list[tuple[str, bytes]]) -> list[dict]:
+def create_yarn_assets(
+    files: list[tuple[str, bytes]],
+    orientation: str = "auto",
+) -> list[dict]:
     ensure_runtime_dirs()
     load_yarn_assets()
     created: list[YarnAsset] = []
@@ -183,7 +187,7 @@ def create_yarn_assets(files: list[tuple[str, bytes]]) -> list[dict]:
 
         thread = threading.Thread(
             target=_process_asset,
-            args=(asset_id,),
+            args=(asset_id, orientation),
             daemon=True,
             name=f"yarn-asset-{asset_id}",
         )
@@ -192,13 +196,13 @@ def create_yarn_assets(files: list[tuple[str, bytes]]) -> list[dict]:
     return [asset.to_dict() for asset in created]
 
 
-def retry_yarn_asset(asset_id: str) -> dict:
+def retry_yarn_asset(asset_id: str, orientation: str = "auto") -> dict:
     asset = get_yarn_asset(asset_id)
     if asset is None:
         raise FileNotFoundError(asset_id)
     thread = threading.Thread(
         target=_process_asset,
-        args=(asset_id,),
+        args=(asset_id, orientation),
         daemon=True,
         name=f"yarn-asset-retry-{asset_id}",
     )

@@ -1,15 +1,440 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0"
-    />
-    <title>Weaving Draft Studio</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>infiknit — Digitising Fabrics, Connecting You with Vendors</title>
+    <link rel="stylesheet" href="/landing.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@600;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+
+    <!-- Interactive Thread Background -->
+    <canvas id="threadCanvas"></canvas>
+
+    <div class="thread-tooltip" id="threadTooltip">
+        <div class="tooltip-preview" id="tooltipPreview"></div>
+        <div class="tooltip-body">
+            <h4 id="tooltipName"></h4>
+            <p class="tooltip-mfg" id="tooltipMfg"></p>
+            <p class="tooltip-material" id="tooltipMaterial"></p>
+            <div class="tooltip-colors" id="tooltipColors"></div>
+        </div>
+    </div>
+
+    <!-- Yarn picker modal -->
+    <div class="yarn-picker" id="yarnPicker" hidden>
+        <div class="yarn-picker__backdrop" data-yarn-picker-close></div>
+        <div class="yarn-picker__dialog" role="dialog" aria-modal="true" aria-labelledby="yarnPickerTitle">
+            <button class="yarn-picker__close" type="button" data-yarn-picker-close aria-label="Close">×</button>
+            <div class="yarn-picker__preview-wrap">
+                <img id="yarnPickerImage" alt="Selected yarn preview" />
+                <span class="yarn-picker__swatch" id="yarnPickerSwatch"></span>
+            </div>
+            <div class="yarn-picker__body">
+                <p class="yarn-picker__eyebrow">Selected Yarn</p>
+                <h3 id="yarnPickerTitle">Yarn</h3>
+                <p class="yarn-picker__meta" id="yarnPickerMeta"></p>
+                <p class="yarn-picker__status" id="yarnPickerStatus"></p>
+                <div class="yarn-picker__actions">
+                    <button type="button" class="btn btn-outline-dark btn-sm" data-yarn-picker-close>Cancel</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="yarnPickerConfirm">
+                        Add to Library &amp; Process
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="container header-inner">
+            <span class="header-tagline">Explore the world of <span class="accent">Fabrics</span></span>
+            <nav class="nav">
+                <a href="#about">About Us</a>
+                <a href="#contact">Contact Us</a>
+                <a href="#join" class="btn btn-sm">Join Beta</a>
+            </nav>
+            <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Hero / Search -->
+    <section class="hero">
+        <div class="container">
+            <div class="glass-banner hero-banner" id="heroBanner">
+                <p class="hero-label">Digitising Fabrics &middot; Connecting Vendors</p>
+                <h1 id="heroTitle" class="brand-title">infi<span class="accent">knit</span></h1>
+                <p class="hero-sub">At infiknit, we digitise every thread &mdash; and bring every vendor a click closer.</p>
+                <div class="hero-actions">
+                    <button type="button" class="btn btn-primary btn-lg btn-create" id="createBtn">
+                        <span class="btn-plus">+</span> <span class="btn-create-label">Create Fabric</span>
+                    </button>
+                </div>
+                <div class="library-search" id="librarySearch" role="button" tabindex="0" aria-label="Search the library">
+                    <svg class="library-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="7"></circle>
+                        <line x1="21" y1="21" x2="16.5" y2="16.5"></line>
+                    </svg>
+                    <input class="library-search-input" id="librarySearchInput" type="text" placeholder="Open the Fabric Generator…" aria-label="Open Fabric Generator" readonly />
+                </div>
+                <p class="library-guide">&larr; Click the search icon, or any floating thread, to launch the Fabric Generator &rarr;</p>
+            </div>
+            <div class="hero-stats glass-pill">
+                <div class="hero-stat"><strong>200+</strong> Verified Vendors</div>
+                <div class="hero-stat-sep"></div>
+                <div class="hero-stat"><strong>45</strong> Countries</div>
+                <div class="hero-stat-sep"></div>
+                <div class="hero-stat"><strong>12</strong> Fabric Categories</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Categories -->
+    <section class="section categories" id="categories">
+        <div class="container">
+            <div class="section-header glass-banner">
+                <p class="section-label">Browse by Fabric</p>
+                <h2>Digitised Fabric <span class="accent">Categories</span></h2>
+            </div>
+            <div class="cat-grid">
+                <a href="#listings" class="cat-card" data-filter="cotton">
+                    <div class="cat-icon" style="--hue: 35">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="12" cy="12" r="3" />
+                            <path
+                                d="M12 5a4 4 0 0 0-4 4c0 2 2 3 2 3s-3 0-3 3a4 4 0 0 0 4 4c2 0 3-2 3-2s0 3 3 3a4 4 0 0 0 4-4c0-2-3-3-3-3s2 0 2-3a4 4 0 0 0-4-4c-2 0-3 2-3 2" />
+                        </svg>
+                    </div>
+                    <h3>Cotton Fabric</h3>
+                    <p>48 vendors</p>
+                </a>
+                <a href="#listings" class="cat-card" data-filter="polyester">
+                    <div class="cat-icon" style="--hue: 210">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M4 4l16 16M4 20L20 4M12 2v20M2 12h20" />
+                        </svg>
+                    </div>
+                    <h3>Polyester Fabric</h3>
+                    <p>62 vendors</p>
+                </a>
+                <a href="#listings" class="cat-card" data-filter="silk">
+                    <div class="cat-icon" style="--hue: 320">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M3 17c3-3 5-10 9-10s6 7 9 10" />
+                            <path d="M3 12c3-2 5-7 9-7s6 5 9 7" />
+                            <path d="M3 7c3-1 5-4 9-4s6 3 9 4" />
+                        </svg>
+                    </div>
+                    <h3>Silk Fabric</h3>
+                    <p>24 vendors</p>
+                </a>
+                <a href="#listings" class="cat-card" data-filter="nylon">
+                    <div class="cat-icon" style="--hue: 160">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 2L2 7l10 5 10-5-10-5Z" />
+                            <path d="M2 17l10 5 10-5" />
+                            <path d="M2 12l10 5 10-5" />
+                        </svg>
+                    </div>
+                    <h3>Nylon Fabric</h3>
+                    <p>31 vendors</p>
+                </a>
+                <a href="#listings" class="cat-card" data-filter="specialty">
+                    <div class="cat-icon" style="--hue: 270">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <polygon points="12,2 15,9 22,9 16,14 18,21 12,17 6,21 8,14 2,9 9,9" />
+                        </svg>
+                    </div>
+                    <h3>Specialty Weaves</h3>
+                    <p>18 vendors</p>
+                </a>
+                <a href="#listings" class="cat-card" data-filter="industrial">
+                    <div class="cat-icon" style="--hue: 45">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                            <path
+                                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+                        </svg>
+                    </div>
+                    <h3>Industrial Fabric</h3>
+                    <p>29 vendors</p>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Featured Listings -->
+    <section class="section featured" id="featured">
+        <div class="container">
+            <div class="section-header glass-banner">
+                <p class="section-label">Top Picks</p>
+                <h2>Featured <span class="accent">Vendors</span></h2>
+            </div>
+            <div class="featured-grid">
+                <div class="listing-card featured-card">
+                    <div class="listing-badge">Featured</div>
+                    <div class="listing-header">
+                        <div class="listing-avatar" style="--bg: #1a5276">SP</div>
+                        <div>
+                            <h3>Suraj Polycot Industries</h3>
+                            <p class="listing-location">Mumbai, India</p>
+                        </div>
+                    </div>
+                    <p class="listing-desc">Leading manufacturer of polyester and cotton sewing threads with 30+ years
+                        of expertise. Supplies to garment factories across 25 countries.</p>
+                    <div class="listing-tags">
+                        <span class="tag">Polyester</span>
+                        <span class="tag">Cotton</span>
+                        <span class="tag">Sewing Thread</span>
+                    </div>
+                    <div class="listing-meta">
+                        <span class="meta-item">Est. 1992</span>
+                        <span class="meta-item">ISO 9001</span>
+                        <span class="meta-item">OEKO-TEX</span>
+                    </div>
+                    <div class="listing-footer">
+                        <a href="#" class="btn btn-outline-dark btn-sm">View Profile</a>
+                        <a href="#" class="btn btn-primary btn-sm">Contact</a>
+                    </div>
+                </div>
+
+                <div class="listing-card featured-card">
+                    <div class="listing-badge">Featured</div>
+                    <div class="listing-header">
+                        <div class="listing-avatar" style="--bg: #7d3c98">GT</div>
+                        <div>
+                            <h3>Guttermann Textil GmbH</h3>
+                            <p class="listing-location">Hamburg, Germany</p>
+                        </div>
+                    </div>
+                    <p class="listing-desc">Premium European thread manufacturer specializing in high-tenacity
+                        industrial sewing threads and embroidery threads for fashion and automotive.</p>
+                    <div class="listing-tags">
+                        <span class="tag">Industrial</span>
+                        <span class="tag">Embroidery</span>
+                        <span class="tag">Automotive</span>
+                    </div>
+                    <div class="listing-meta">
+                        <span class="meta-item">Est. 1965</span>
+                        <span class="meta-item">ISO 14001</span>
+                        <span class="meta-item">REACH</span>
+                    </div>
+                    <div class="listing-footer">
+                        <a href="#" class="btn btn-outline-dark btn-sm">View Profile</a>
+                        <a href="#" class="btn btn-primary btn-sm">Contact</a>
+                    </div>
+                </div>
+
+                <div class="listing-card featured-card">
+                    <div class="listing-badge">Featured</div>
+                    <div class="listing-header">
+                        <div class="listing-avatar" style="--bg: #c0392b">XS</div>
+                        <div>
+                            <h3>Xinhua Silk Thread Co.</h3>
+                            <p class="listing-location">Hangzhou, China</p>
+                        </div>
+                    </div>
+                    <p class="listing-desc">Silk thread specialists with vertically integrated sericulture operations.
+                        Supplies raw and dyed silk threads for luxury fashion and traditional textiles.</p>
+                    <div class="listing-tags">
+                        <span class="tag">Silk</span>
+                        <span class="tag">Luxury</span>
+                        <span class="tag">Dyed Thread</span>
+                    </div>
+                    <div class="listing-meta">
+                        <span class="meta-item">Est. 1988</span>
+                        <span class="meta-item">ISO 9001</span>
+                        <span class="meta-item">GOTS</span>
+                    </div>
+                    <div class="listing-footer">
+                        <a href="#" class="btn btn-outline-dark btn-sm">View Profile</a>
+                        <a href="#" class="btn btn-primary btn-sm">Contact</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Search Directory (right above the full listings) -->
+    <section class="section search-section" id="search">
+        <div class="container">
+            <div class="section-header glass-banner centered">
+                <p class="section-label">Find What You Need</p>
+                <h2>Search the <span class="accent">Directory</span></h2>
+            </div>
+            <div class="search-box" id="searchBox">
+                <div class="search-row">
+                    <div class="search-field search-field-main">
+                        <label for="searchInput">Search</label>
+                        <input type="text" id="searchInput" placeholder="Company name, material, or keyword...">
+                    </div>
+                    <div class="search-field">
+                        <label for="searchCategory">Category</label>
+                        <select id="searchCategory">
+                            <option value="">All Fabrics</option>
+                            <option value="cotton">Cotton Fabric</option>
+                            <option value="polyester">Polyester Fabric</option>
+                            <option value="silk">Silk Fabric</option>
+                            <option value="nylon">Nylon Fabric</option>
+                            <option value="specialty">Specialty Weaves</option>
+                            <option value="industrial">Industrial Fabric</option>
+                        </select>
+                    </div>
+                    <div class="search-field">
+                        <label for="searchRegion">Region</label>
+                        <select id="searchRegion">
+                            <option value="">All Regions</option>
+                            <option value="asia">Asia</option>
+                            <option value="europe">Europe</option>
+                            <option value="north-america">North America</option>
+                            <option value="south-america">South America</option>
+                            <option value="africa">Africa</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-search" id="searchBtn">Search</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- All Listings -->
+    <section class="section listings-section" id="listings">
+        <div class="container">
+            <div class="section-header glass-banner">
+                <p class="section-label">Full Directory</p>
+                <h2>All <span class="accent">Vendors</span></h2>
+            </div>
+            <div class="listings-toolbar">
+                <div class="toolbar-left">
+                    <span class="results-count" id="resultsCount">Showing 12 vendors</span>
+                </div>
+                <div class="toolbar-right">
+                    <select id="sortBy" class="toolbar-select">
+                        <option value="name">Sort by Name</option>
+                        <option value="established">Sort by Established</option>
+                        <option value="rating">Sort by Rating</option>
+                    </select>
+                </div>
+            </div>
+            <div class="listings-grid" id="listingsGrid">
+                <!-- Listings rendered by JS -->
+            </div>
+            <div class="pagination" id="pagination">
+                <button class="page-btn active">1</button>
+                <button class="page-btn">2</button>
+                <button class="page-btn">3</button>
+                <button class="page-btn">Next &rarr;</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA / Submit -->
+    <section class="section cta" id="submit">
+        <div class="container">
+            <div class="cta-box">
+                <div class="cta-text">
+                    <h2>Are You a Fabric Vendor?</h2>
+                    <p>Get your fabrics digitised on infiknit and reach buyers, brands, and textile companies around the
+                        world. Free basic listing, premium options available.</p>
+                    <div class="cta-features">
+                        <div class="cta-feat">&#10003; Verified business profile</div>
+                        <div class="cta-feat">&#10003; Direct inquiry from buyers</div>
+                        <div class="cta-feat">&#10003; SEO-optimized listing</div>
+                        <div class="cta-feat">&#10003; Analytics dashboard</div>
+                    </div>
+                </div>
+                <form class="cta-form" id="submitForm">
+                    <h3>Submit Your Listing</h3>
+                    <div class="form-group">
+                        <label for="bizName">Business Name</label>
+                        <input type="text" id="bizName" placeholder="Your company name" required>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="bizEmail">Email</label>
+                            <input type="email" id="bizEmail" placeholder="you@company.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="bizPhone">Phone</label>
+                            <input type="tel" id="bizPhone" placeholder="+1 234 567 8900">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="bizCategory">Primary Category</label>
+                        <select id="bizCategory">
+                            <option value="">Select category</option>
+                            <option>Cotton Fabric</option>
+                            <option>Polyester Fabric</option>
+                            <option>Silk Fabric</option>
+                            <option>Nylon Fabric</option>
+                            <option>Specialty Weaves</option>
+                            <option>Industrial Fabric</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="bizLocation">Location</label>
+                        <input type="text" id="bizLocation" placeholder="City, Country">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Submit for Review</button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <a href="#" class="logo">
+                        <span class="logo-icon">&#x2756;</span><span class="logo-text">infi<span class="logo-accent">knit</span></span>
+                    </a>
+                    <p>Digitising fabrics of every kind &mdash; cotton, silk, linen, synthetics and specialty weaves
+                        &mdash; and connecting you directly with the vendor who makes them.</p>
+                </div>
+                <div class="footer-links">
+                    <h4>Platform</h4>
+                    <ul>
+                        <li><a href="#categories">Fabrics</a></li>
+                        <li><a href="#featured">Featured</a></li>
+                        <li><a href="#listings">All Vendors</a></li>
+                        <li><a href="#submit">Get Listed</a></li>
+                    </ul>
+                </div>
+                <div class="footer-links">
+                    <h4>Fabrics</h4>
+                    <ul>
+                        <li><a href="#">Cotton Fabric</a></li>
+                        <li><a href="#">Polyester Fabric</a></li>
+                        <li><a href="#">Silk Fabric</a></li>
+                        <li><a href="#">Industrial Fabric</a></li>
+                    </ul>
+                </div>
+                <div class="footer-links">
+                    <h4>Company</h4>
+                    <ul>
+                        <li><a href="#">About Us</a></li>
+                        <li><a href="#">Advertise</a></li>
+                        <li><a href="#">Privacy Policy</a></li>
+                        <li><a href="#">Contact</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 infiknit. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="/landing.js"></script>
+</body>
+
 </html>

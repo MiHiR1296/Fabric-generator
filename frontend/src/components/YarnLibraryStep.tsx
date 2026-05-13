@@ -1,12 +1,13 @@
-import { useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { YarnAsset } from '../domain/types';
+import type { YarnOrientation } from '../utils/parserApi';
 
 interface YarnLibraryStepProps {
   assets: YarnAsset[];
   busy: boolean;
   message: string;
-  onUpload: (files: File[]) => void;
-  onRetry: (assetId: string) => void;
+  onUpload: (files: File[], orientation: YarnOrientation) => void;
+  onRetry: (assetId: string, orientation: YarnOrientation) => void;
   onDelete: (assetId: string) => void;
   onRefresh: () => void;
 }
@@ -34,7 +35,15 @@ export default function YarnLibraryStep({
   onRefresh,
 }: YarnLibraryStepProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [orientation, setOrientation] = useState<YarnOrientation>('auto');
+  const [search, setSearch] = useState('');
+
   const readyCount = assets.filter((asset) => asset.status === 'ready').length;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return assets;
+    return assets.filter((asset) => asset.label.toLowerCase().includes(q));
+  }, [assets, search]);
 
   return (
     <section className="card fabric-step-card yarn-library" data-testid="yarn-library-step">
@@ -43,10 +52,31 @@ export default function YarnLibraryStep({
           <p className="eyebrow">Step 1</p>
           <h2>Yarn Library</h2>
           <p className="fabric-step-card__summary">
-            Upload yarn images and let the backend generate seamless diffuse and alpha maps in the background.
+            Upload yarns or pick a floating yarn — seamless textures are generated automatically.
           </p>
         </div>
         <div className="fabric-step-card__actions">
+          <input
+            type="search"
+            className="yarn-library__search"
+            placeholder="Search your yarn library…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            data-testid="yarn-search-input"
+          />
+          <label className="orientation-select">
+            <span>Orientation</span>
+            <select
+              value={orientation}
+              onChange={(event) => setOrientation(event.target.value as YarnOrientation)}
+              disabled={busy}
+              data-testid="yarn-orientation-select"
+            >
+              <option value="auto">Auto-detect</option>
+              <option value="horizontal">Horizontal</option>
+              <option value="vertical">Vertical</option>
+            </select>
+          </label>
           <button
             className="button button--accent"
             onClick={() => fileInputRef.current?.click()}
@@ -71,21 +101,21 @@ export default function YarnLibraryStep({
         onChange={(event) => {
           const files = Array.from(event.target.files || []);
           if (files.length) {
-            onUpload(files);
+            onUpload(files, orientation);
           }
           event.target.value = '';
         }}
       />
 
-      <div className="fabric-step-card__meta">
+      <div className="fabric-step-card__meta yarn-library__meta">
         <div className="status-pill status-pill--source">Assets: {assets.length}</div>
         <div className="status-pill status-pill--online">Ready: {readyCount}</div>
         <p className="muted">{message}</p>
       </div>
 
-      {assets.length ? (
+      {filtered.length ? (
         <div className="yarn-asset-grid">
-          {assets.map((asset) => (
+          {filtered.map((asset) => (
             <article className="yarn-asset-card" key={asset.id} data-testid="yarn-asset-card">
               <div className="yarn-asset-card__header">
                 <div>
@@ -96,7 +126,7 @@ export default function YarnLibraryStep({
                 </div>
                 <div className="yarn-asset-card__actions">
                   {asset.status === 'failed' ? (
-                    <button className="button button--tiny" onClick={() => onRetry(asset.id)}>
+                    <button className="button button--tiny" onClick={() => onRetry(asset.id, orientation)}>
                       Retry
                     </button>
                   ) : null}
@@ -135,8 +165,12 @@ export default function YarnLibraryStep({
         </div>
       ) : (
         <div className="fabric-empty-state" data-testid="yarn-empty-state">
-          <strong>No yarn assets yet</strong>
-          <span>Upload one or more yarn photos to start building the material library for this project.</span>
+          <strong>{search ? 'No yarns match your search' : 'No yarn assets yet'}</strong>
+          <span>
+            {search
+              ? 'Try a different keyword, or clear the search to see your full library.'
+              : 'Upload one or more yarn photos, or pick a floating yarn from the infiknit landing page.'}
+          </span>
         </div>
       )}
     </section>

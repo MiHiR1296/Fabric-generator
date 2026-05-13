@@ -604,8 +604,7 @@ export function getFocusSummary(draft: DraftDocument, focus: FocusedDrawdownCell
   if (!focus) {
     return {
       title: 'Hover the drawdown',
-      body:
-        'Move across the drawdown to trace one cloth cell back through threading, tie-up, and treadling.',
+      body: 'Trace any cloth cell through threading, tie-up, and treadling.',
       warpOver: null as boolean | null,
       shaft: null as number | null,
       treadle: null as number | null,

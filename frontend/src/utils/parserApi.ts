@@ -9,9 +9,25 @@ import type {
 } from '../domain/types';
 
 async function parseJson(response: Response) {
-  const data = await response.json();
+  const text = await response.text();
+  let data: any = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (!response.ok) {
+        throw new Error(
+          `Request failed (${response.status} ${response.statusText}). ${text.slice(0, 200)}`,
+        );
+      }
+      throw new Error('Server returned an unexpected non-JSON response.');
+    }
+  }
   if (!response.ok) {
-    throw new Error(data.detail || data.error || 'Parser request failed.');
+    const detail = data && (data.detail || data.error);
+    throw new Error(
+      detail || `Request failed (${response.status} ${response.statusText || 'no body'}).`,
+    );
   }
   return data;
 }
@@ -163,9 +179,15 @@ export async function listYarnAssets(): Promise<YarnAsset[]> {
   return parseJson(response);
 }
 
-export async function uploadYarnAssets(files: File[]): Promise<YarnAsset[]> {
+export type YarnOrientation = 'auto' | 'horizontal' | 'vertical';
+
+export async function uploadYarnAssets(
+  files: File[],
+  orientation: YarnOrientation = 'auto',
+): Promise<YarnAsset[]> {
   const formData = new FormData();
   files.forEach((file) => formData.append('files', file));
+  formData.append('orientation', orientation);
   const response = await fetch('/api/yarn/assets', {
     method: 'POST',
     body: formData,
@@ -173,9 +195,15 @@ export async function uploadYarnAssets(files: File[]): Promise<YarnAsset[]> {
   return parseJson(response);
 }
 
-export async function retryYarnAsset(assetId: string): Promise<YarnAsset> {
+export async function retryYarnAsset(
+  assetId: string,
+  orientation: YarnOrientation = 'auto',
+): Promise<YarnAsset> {
+  const formData = new FormData();
+  formData.append('orientation', orientation);
   const response = await fetch(`/api/yarn/assets/${assetId}/retry`, {
     method: 'POST',
+    body: formData,
   });
   return parseJson(response);
 }
