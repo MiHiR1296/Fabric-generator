@@ -8,9 +8,35 @@ export interface DraftRenderSettings {
   warpThreads: number;
   weftThreads: number;
   spacing: number;
+  patternNoiseX: number;
+  patternNoiseY: number;
   amplitude: number;
+  threadRadius: number;
+  threadSubdivisions: number;
+  plyCount: number;
+  plyRadius: number;
+  twistAmount: number;
+  plyResolution: number;
+  textureScaleU: number;
+  textureUCalibration: number;
   textureScaleV: number;
+  textureOffsetV: number;
+  textureSideFlatten: number;
+  arc1VPadding: number;
+  lumpStrength: number;
+  lumpScale: number;
+  fiberDensity: number;
+  fiberLength: number;
+  fiberThickness: number;
+  fiberFrizz: number;
+  fiberSubdivs: number;
+  seed: number;
   fillRatio: number;
+  // Per-strand U-offset randomization. 0 disables; 1 (default) is the baseline
+  // shift; up to 20 produces strong staggering so the same texture repeat
+  // doesn't appear identically across the swatch. Pushed to the global
+  // 'UV Random U' modifier socket.
+  uvRandomU: number;
 }
 
 export interface ReviewCell {

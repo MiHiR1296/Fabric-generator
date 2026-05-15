@@ -3,11 +3,23 @@
 import os
 import shutil
 from pathlib import Path
+from typing import Optional
 
 MODULE_DIR = Path(__file__).resolve().parent
 DEFAULT_MODEL_PATH = MODULE_DIR / "big-lama.pt"
 MODEL_CHUNK_DIR = MODULE_DIR / "model_chunks"
 MODEL_CHUNK_PREFIX = "big-lama.pt.part-"
+
+
+def resolve_configured_model_path() -> Optional[str]:
+    for env_name in ("BIG_LAMA_MODEL_PATH", "LAMA_MODEL"):
+        env_path = os.environ.get(env_name)
+        if not env_path:
+            continue
+        candidate = Path(env_path).expanduser().resolve()
+        if candidate.exists() and candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def ensure_bundled_model_path() -> str:
@@ -27,7 +39,7 @@ def ensure_bundled_model_path() -> str:
 
 
 # Use bundled weights file if no LAMA_MODEL env var is set
-os.environ.setdefault("LAMA_MODEL", ensure_bundled_model_path())
+os.environ.setdefault("LAMA_MODEL", resolve_configured_model_path() or ensure_bundled_model_path())
 
 import argparse
 import numpy as np

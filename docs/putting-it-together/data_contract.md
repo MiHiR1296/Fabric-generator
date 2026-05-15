@@ -1,0 +1,360 @@
+# Data contract — `yarn_library/<yarn_id>/metadata.json`
+
+> **Read this if**: you are touching anything that writes, reads, or transforms a yarn's metadata between yarnseamless and the Fabric-generator-tryon backend, or you are about to add a new Blender socket and want to know how to source its value.
+
+This is the authoritative reference. If anything else in the docs disagrees, this wins.
+
+---
+
+## The shape
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "id":  "20260512_163059_0b30c1",
+  "label": "thread_0",
+  "createdAt": "2026-05-12T11:01:00.699766Z",
+  "source": { "multithread_session_id": "...", "multifragment_session_id": "...", "scan_size_px": [W, H] },
+
+  // Raw measurements (provenance + re-derivation).
+  "image_size_px": [42124, 301],
+  "dpi": 1600.0,
+  "width":  { "px": 30,    "mm": 0.4762,  "top_y_in_export": 136, "bottom_y_in_export": 165, "description": "..." },
+  "length": { "px": 42124, "mm": 668.7185, "description": "..." },
+  "bands_px":     { "core": [136, 165], "fiber_top": [123, 136], "fiber_bot": [165, 181] },
+  "bands_v_norm": { "_convention": "blender (V=0 bottom, V=1 top)", "core": [...], "fiber_top": [...], "fiber_bot": [...] },
+  "thickness_px": { "core_height": 30, "fiber_top_height": 13, "fiber_bot_height": 16 },
+  "params": { "fiber_frac": 0.02 },
+
+  // Pre-computed Blender-ready block. Consumer pushes these as-is.
+  "blender": {
+    "_convention": "Pre-computed for direct push to Parametric Weave knotty...",
+    "schema_version": 1,
+    "texture_world_width_m":  0.6687185,
+    "texture_world_width_mm": 668.7185,
+    "image_width_px":         42124,
+    "scanner_pixels_per_bu":  62992.16,
+    "core_v_min":             0.4518272425249169,
+    "core_v_max":             0.548172757475083,
+    "fiber_top_v_min":        0.548172757475083,
+    "fiber_top_v_max":        0.5913621262458472,
+    "fiber_bot_v_min":        0.3986710963455149,
+    "fiber_bot_v_max":        0.5913621262458472
+  },
+
+  "joins": [ ... ],
+  "threads_solid_band": [ ... ],
+  "files": { "rgba": "rgba.png", "thumbnail": "input_thumb.jpg", "metadata": "metadata.json" }
+}
+```
+
+---
+
+## The two zones
+
+| Zone | Who writes it | Source of truth | Who reads it |
+|---|---|---|---|
+| Top-level (`image_size_px`, `dpi`, `width`, `length`, `bands_*`, `joins`, …) | `backend/app/yarnseamless/yarn_library.py` | The `rgba.png` file on disk + the multifragment session it was exported from | UI provenance, future re-derivation. **NOT pushed to Blender directly.** |
+| `physical_scale` | `backend/app/yarnseamless/yarn_library.py` | Declared export DPI cross-checked against embedded source-scan DPI and processed/export image DPI | Confidence/provenance only. Helps separate scanner truth from metadata-only truth. |
+| `blender` block | `backend/app/yarnseamless/yarn_library.py` (derived from top-level) | The top-level fields | Fabric-generator-tryon → pushed to the `Parametric Weave knotty` modifier sockets. **One field per socket, no math.** |
+
+**Rule**: the consumer never does unit conversion. If a Blender socket needs a number, that number lives in `blender.*` already, pre-computed.
+
+---
+
+## Runtime render texture fields
+
+These fields live on Fabric-generator-tryon's runtime `YarnAsset`, not in the source `yarn_library/<id>/metadata.json`. They describe how the backend should feed the processed images to Blender.
+
+| Runtime field | Meaning |
+|---|---|
+| `renderDiffuseFilename` / `renderAlphaFilename` | Cycles-safe fallback textures. If the source exceeds the device cap, these point to `cycles_safe/*_max16384.png`. |
+| `renderTextureMode` | `"tiled"` when full-resolution UDIM tiles are available; `"single"` otherwise. |
+| `renderDiffuseTilePattern` / `renderAlphaTilePattern` | Relative `<UDIM>` patterns such as `cycles_tiled/albedo_<UDIM>.png`. Blender receives absolute versions of these patterns. |
+| `renderDiffuseTileFilenames` / `renderAlphaTileFilenames` | Concrete tile filenames, eg. `cycles_tiled/albedo_1001.png` ... `1003.png`. |
+| `renderTileCount` / `renderTileWidthPx` / `renderTileHeightPx` | Tile manifest for material generation and diagnostics. |
+
+Phase 4a rule: direct preview materials prefer UDIM tiles when present. The shader maps `fract(uv_scaled.x) * renderTileCount` into UDIM U space, so the yarn repeat still behaves like one image while each tile stays below the `16384` single-texture cap. Atlas fallback continues to use `renderDiffuseFilename` / `renderAlphaFilename`.
+
+Phase 4c/4d/4h rule: Fabric-generator-tryon pushes raw `core_v_min/max`. The `.blend` exposes `Arc 1 V Padding` on the `Weave` modifier and applies the expansion after material selection: Arc 1 V Min moves downward, Arc 1 V Max moves upward, and both clamp inside `fiber_bot_v_min..fiber_top_v_max` so Arc 2 halo sections do not invert. Phase 4h sets the current default to `0.012` and exposes it in the Web UI. Source `metadata.json` remains unmodified.
+
+---
+
+## The `blender` block → Blender socket map
+
+Modifier: `Weave` on `ParametricWeave`, node group `Parametric Weave knotty`. All sockets accept `NodeSocketFloat`.
+
+**Socket vocabulary aligned to Arc 1 / Arc 2 (Phase 3d, 2026-05-14)** — the .blend's internal node names (`PW Band - Arc1 Map`, `PW Band - Arc2 Top/Core/Bot`) define the V-band partition, so the interface socket names now match. Producer keys in `bandMeta.blender` are unchanged (they describe scan data; not coupled to socket names).
+
+| `metadata.blender` field | Blender socket | What it does |
+|---|---|---|
+| `texture_world_width_m` | `Texture World Width BU` *(reserved — not yet on this .blend)* | Physical U-length of one texture repeat, in BU (1 BU = 1 m). Would replace the legacy two-socket divide. |
+| `image_width_px` | `Material N Image Width Px` *(also `Image Width Px` global)* | Image width in pixels. Combined with `Scanner Pixels Per BU` reproduces the world width. |
+| `scanner_pixels_per_bu` | `Scanner Pixels Per BU` *(modifier-level; not per-material)* | Per-DPI calibration. `dpi × 39.3701`. |
+| `core_v_min` | `Material N Arc 1 V Min` | Lower V edge of the dense core. Feeds `PW Band - Arc1 Map.To Min`, `PW Band - Arc2 Core.To Max`, and `PW Band - Arc2 Bot.To Min`. |
+| `core_v_max` | `Material N Arc 1 V Max` | Upper V edge of the dense core. Feeds `PW Band - Arc1 Map.To Max`, `PW Band - Arc2 Core.To Min`, and `PW Band - Arc2 Top.To Max`. |
+| `fiber_bot_v_min` | `Material N Arc 2 V Min` | **Strand silhouette's bottommost V** (outer edge of the lower halo). Feeds `PW Band - Arc2 Bot.To Max`. |
+| `fiber_top_v_max` | `Material N Arc 2 V Max` | **Strand silhouette's topmost V** (outer edge of the upper halo). Feeds `PW Band - Arc2 Top.To Min`. |
+| `fiber_bot_v_max` (= `core_v_min` by construction) | (no longer pushed to a socket after Phase 3e; retained in metadata for diagnostics) | Inner-edge value made redundant by Arc 1 V Min. |
+| `fiber_top_v_min` (= `core_v_max` by construction) | (no longer pushed to a socket after Phase 3e; retained in metadata for diagnostics) | Inner-edge value made redundant by Arc 1 V Max. |
+
+**Band timing note (Phase 3p)**:
+
+- `width.top_y_in_export` / `width.bottom_y_in_export` start as per-thread `c_band` rows during multithread processing, before multifragment assembly and join inpainting. Export then offsets and averages those rows into export-image coordinates.
+- `fiber_bot_v_min` / `fiber_top_v_max` are detected later during save-to-library from `export_assembled_alpha.png`, after assemble, regenerate-alpha, join alpha composition, and no-wraparound export trimming.
+- Consequence: the core band and the outer strand silhouette are both useful, but they are not detected from one single final-image pass.
+
+**Arc 2 sections, current Phase-3q geometry-owned split test, map cross-section coordinate → texture-V range:**
+
+Phase 3q keeps Arc 1 geometry stable and computes Arc 2's core interval from profile geometry, not texture V span:
+
+```text
+arc1_profile_radius = 0.015
+arc2_profile_radius = 0.025
+core_frac = clamp(arc1_profile_radius / max(arc2_profile_radius, 0.0001), 0, 1)
+Split Minus = 0.5 - core_frac / 2  # current evaluated value: 0.2
+Split Plus  = 0.5 + core_frac / 2  # current evaluated value: 0.8
+```
+
+| Cross-section region (`v_around`) | Texture-V output range | Samples |
+|---|---|---|
+| `[0, Split Minus]` → `Arc2 Top` | `[Arc 2 V Max, Arc 1 V Max]` = `[fiber_top_v_max, core_v_max]` | Upper halo, outer edge → core edge |
+| `[Split Minus, Split Plus]` → `Arc2 Core` | `[Arc 1 V Max, Arc 1 V Min]` = `[core_v_max, core_v_min]` | Dense core, top → bottom |
+| `[Split Plus, 1]` → `Arc2 Bot` | `[Arc 1 V Min, Arc 2 V Min]` = `[core_v_min, fiber_bot_v_min]` | Lower halo, core edge → outer edge |
+
+The graph stores these evaluated debug attributes on the output mesh:
+
+| Attribute | Current value | Meaning |
+|---|---:|---|
+| `arc1_radius_geometry` | `0.015` | Arc 1 profile radius source used by the split math |
+| `arc2_radius_geometry` | `0.025` | Arc 2 profile radius source used by the split math |
+| `arc2_core_frac_raw` | `0.6` | Raw `arc1 / arc2` fraction |
+| `arc2_core_frac_geometry` | `0.6` | Clamped core fraction |
+| `arc2_core_split_min` | `0.2` | Top halo/core boundary in `v_around` |
+| `arc2_core_split_max` | `0.8` | Core/bottom halo boundary in `v_around` |
+
+The old Phase 3m centered texture-span nodes still exist as visual leftovers, but they no longer drive `PW Band - Split Minus/Plus`.
+
+Globals after Phase 3f cleanup: only `Scanner Pixels Per BU` survives. The five legacy `Image Width Px` / `Image Arc 1 V Min/Max` / `Image Arc 2 V Min/Max` sockets were removed from the .blend on 2026-05-14 once an audit confirmed no Group Input was consuming them — the per-Material V-band sockets are the only path the graph uses now. Producer code ([blender_live.py:GLOBAL_SOCKETS](../../backend/app/blender_live.py)) shrunk to one entry to match.
+
+Pinned, **not** pushed per yarn — these six form the live bandMeta "footgun" set: `Sub Strand Enable = True`, `Texture Scale V = 1`, `Texture Offset V = 0`, `Texture Side Flatten = 0`, `Sub Texture Scale V = 0`, `Sub Texture Offset V = 0`. Producer asserts them on every bandMeta push via `PINNED_FOOTGUN_SOCKETS`. **`Sub Strand Enable` is the critical one** — without it, Arc 2's halo mapping doesn't fire and the rendered yarn loses its silhouette character. Root `Texture Scale U` is no longer in this pinned set; render/setup sync owns it because the value depends on the current `Fit To Space` target. See [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md) Rules 3, 11, and 14.
+
+### Render-control sockets (driven by `renderSettings`, not `bandMeta`)
+
+| `renderSettings` field | Blender socket | Notes |
+|---|---|---|
+| `spacing` (0..1) | `Spacing` | Backend remaps 0..1 → 0.03..0.10 (`map_unit_setting`). |
+| `patternNoiseX` (0..1) | `Pattern Noise X` | Backend remaps 0..1 → 0..0.03. |
+| `patternNoiseY` (0..1) | `Pattern Noise Y` | Backend remaps 0..1 → 0..0.03. |
+| `uvRandomU` (0..20) | `UV Random U` | Pushed as-is. Per-strand U-shift to break visible repetition. |
+| `textureUCalibration` (hidden default `0.1`) | `Material N Texture Scale U` formula | Multiplies the fit-aware per-material U correction. Phase 4d canonicalizes the tested "divide by 10" behavior; Phase 4e keeps it off the Web UI; Phase 4i moves the correction off root U. |
+| `arc1VPadding` (default `0.012`) | `Arc 1 V Padding` | Expands Arc 1's sampled core band after the material switch chain and clamps inside Arc 2. |
+| `warpThreads` / `weftThreads` | `Warp Threads` / `Weft Threads` | Driven together by Web UI zoom presets: `80`, `120`, `160`, `200`. Lower count = closer inspection; `200` = widest swatch preset. |
+| — | `UV Random V` | Pinned to `0`. User direction: U-axis only. |
+
+---
+
+## Derivations (so anyone can re-prove them)
+
+```
+texture_world_width_m  =  image_width_px / dpi × 0.0254          # 1 inch = 0.0254 m
+scanner_pixels_per_bu  =  dpi × 39.3701                          # 1 BU = 1 m = 39.3701 in
+core_v_min             =  1 − bottom_y_in_export / image_height
+core_v_max             =  1 − top_y_in_export    / image_height
+```
+
+The `1 −` flips the image-Y axis (top of image = high Y in pixels) into Blender's V axis (top of texture = V=1).
+
+---
+
+## Schema versioning
+
+`schemaVersion: 1` lives at the top level. The `blender` block also carries its own `schema_version: 1` so the two can evolve independently.
+
+Bumping the schema is a producer-side decision. The consumer should:
+1. Check `schemaVersion` on import.
+2. If unknown, fail loudly. Do not silently fall back to defaults — the whole point of the contract is that defaults are wrong.
+
+---
+
+## What is NOT in the contract
+
+These are explicitly out and should never be added without revisiting this doc:
+
+- `dpi` is not pushed to Blender. It lives in `metadata.dpi` purely for provenance and to let the producer re-derive `texture_world_width_m`. If you find yourself needing dpi in `render_jobs.py`, you are doing math the producer should have done.
+- `physical_scale.confidence` is not pushed to Blender. It records whether declared DPI was corroborated by source image metadata (`high`) or is only carried by export metadata (`metadata_only`).
+- `twist_period_px` / FFT outputs. No socket consumes this.
+- `normal.png` / `roughness.png` / `overlay.png`. The Blender material loads `albedo.png` + `alpha.png` only.
+- Per-thread variance in `threads_solid_band`. The unified `core_v_min/max` is the only consumed band; per-thread is diagnostic.
+
+---
+
+## Source of truth for the file on disk
+
+`rgba.png` is. If `metadata.image_size_px` disagrees with `Image.open(rgba.png).size`, the file wins. We hit this in Phase 1 — see [phase_log.md](phase_log.md) → "Phase 1".
+
+The producer enforces this by always opening the file before writing metadata.
+
+---
+
+## Complete mapping reference — metadata.json → Blender modifier sockets
+
+Five tables, organised by where the data originates. Read the **bandMeta** table for the per-yarn path; the other four for everything else that lands on the modifier each render.
+
+Example values use yarn `bb5464ffe724` (thread001) where applicable — image_width_px=45058, dpi=1600, library yarn id `20260514_014216_ccb942`.
+
+### 1. Per-yarn V-band & U-scale path (bandMeta → modifier)
+
+The yarn-specific path. Producer ([backend/app/yarnseamless/yarn_library.py](../../backend/app/yarnseamless/yarn_library.py)) writes the top-level fields from the seamless scan, then derives a `blender` sub-block with pre-computed values for direct push. The tryon backend ([backend/app/yarn_assets.py](../../backend/app/yarn_assets.py)) projects those onto a runtime `YarnAsset.bandMeta` shape, and [backend/app/blender_live.py:PER_MATERIAL_SOCKETS](../../backend/app/blender_live.py) decides which `bandMeta.blender` field lands on which socket per material.
+
+For N = the asset's slot index + 1 (so warp/weft cycle ids match):
+
+| metadata.json source | Derivation | bandMeta.blender key | Blender socket | What it drives | thread001 value |
+|---|---|---|---|---|---|
+| `image_size_px[0]` | (file truth — see Phase 1 Rule 1) | `image_width_px` | `Material N Image Width Px` | Combined with Scanner Pixels Per BU → physical U length per texture repeat | `45058` |
+| `blender.texture_scale_u` or constant `1.0` | Multiplied by setup-owned `material_texture_scale_u` during render/setup push | `texture_scale_u` | `Material N Texture Scale U` | Per-yarn multiplier on U after world-width math. Phase 4i multiplies the fit/divide-by-10 correction here instead of root U. | `1.0 × material_texture_scale_u` |
+| `bands_v_norm.core[0]` | `1 − bottom_y_in_export / image_height` | `core_v_min` | `Material N Arc 1 V Min` | Lower V edge of the dense core. Feeds `PW Band - Arc1 Map.To Min`, `PW Band - Arc2 Core.To Max`, and `PW Band - Arc2 Bot.To Min` | `0.4835` |
+| `bands_v_norm.core[1]` | `1 − top_y_in_export / image_height` | `core_v_max` | `Material N Arc 1 V Max` | Upper V edge of the dense core. Feeds `PW Band - Arc1 Map.To Max`, `PW Band - Arc2 Core.To Min`, and `PW Band - Arc2 Top.To Max` | `0.5165` |
+| `bands_v_norm.fiber_bot[0]` | `1 − fby1 / image_height` (lowest pixel where fiber-density still exceeds floor) | `fiber_bot_v_min` | `Material N Arc 2 V Min` | Strand silhouette's **bottommost V**. Feeds `PW Band - Arc2 Bot.To Max` | `0.4582` |
+| `bands_v_norm.fiber_top[1]` | `1 − fty0 / image_height` (highest pixel where fiber-density still exceeds floor) | `fiber_top_v_max` | `Material N Arc 2 V Max` | Strand silhouette's **topmost V**. Feeds `PW Band - Arc2 Top.To Min` | `0.5367` |
+| `bands_v_norm.fiber_top[0]` (= core[1]) | n/a | `fiber_top_v_min` | (no socket — kept in entry dict for diagnostics) | Was used pre-Phase-3e as inner upper boundary of Arc 2; now `Arc 1 V Max` serves that role | `0.5165` |
+| `bands_v_norm.fiber_bot[1]` (= core[0]) | n/a | `fiber_bot_v_max` | (no socket — kept in entry dict for diagnostics) | Was used pre-Phase-3e as inner lower boundary of Arc 2; now `Arc 1 V Min` serves that role | `0.4835` |
+
+The two "diagnostic only" rows (`fiber_top_v_min` / `fiber_bot_v_max`) are pre-Phase-3e legacy keys. They mirror `core_v_max` / `core_v_min` exactly because the yarn bands are contiguous in V. Producer still emits them; consumer reads but doesn't push them anywhere.
+
+### 2. Per-yarn world-scale path (bandMeta → modifier global)
+
+Pushed once per render from the **first** ordered yarn asset (Material 1's). The graph reads this single global to convert pixel-space U back into world-space U.
+
+| metadata.json source | Derivation | bandMeta.blender key | Blender socket (modifier-level, not per-material) | What it drives | thread001 value |
+|---|---|---|---|---|---|
+| `dpi` | `dpi × 39.3701` (1 BU = 1 m = 39.3701 in) | `scanner_pixels_per_bu` | `Scanner Pixels Per BU` | Internal divisor: `texture_world_width_BU = Material N Image Width Px / Scanner Pixels Per BU` | `62992.16` |
+
+`bandMeta.blender.texture_world_width_m` (= `image_width_px / dpi × 0.0254`, eg. 0.7153 m for thread001) is **computed by the producer and shipped** but **no socket reads it yet** — the .blend's legacy two-socket path (`Image Width Px` ÷ `Scanner Pixels Per BU`) does the equivalent divide. Adding a `Texture World Width BU` socket is in the [open scope](README.md#whats-remaining).
+
+### 3. Render-settings path (draft.renderSettings → modifier)
+
+Per-project, set in the wizard's Step 3 Render Preview controls. Producer-side normalization in [frontend/src/domain/draft.ts:normalizeRenderSettings](../../frontend/src/domain/draft.ts); consumer-side `map_unit_setting` remap in [backend/app/blender_sync.py](../../backend/app/blender_sync.py).
+
+| renderSettings field | Range on UI | Backend remap | Blender socket | What it drives |
+|---|---|---|---|---|
+| `spacing` | 0..1 (default 0) | `0..1 → 0.03..0.10` via `map_unit_setting` | `Spacing` | Strand-to-strand spacing in world units. 0.03 m = tightest weave; 0.10 m = loosest. |
+| `patternNoiseX` | 0..1 (default 0) | `0..1 → 0..0.03` | `Pattern Noise X` | Horizontal positional jitter per strand. Breaks regular-grid artefacts. |
+| `patternNoiseY` | 0..1 (default 0) | `0..1 → 0..0.03` | `Pattern Noise Y` | Vertical positional jitter per strand. |
+| `uvRandomU` | 0..20 (default 1) | identity (pushed as float) | `UV Random U` | Per-strand U-shift on texture sampling. 0 = lock all strands to same U; higher = more visible variation across strands, kills repeating-pattern look. |
+| `textureUCalibration` | hidden default 0.1 | identity multiplier | `Material N Texture Scale U` formula | Divides the fit-aware U scale by 10 by default. Not exposed in the Web UI; use JSON/env override only for debugging. |
+| `arc1VPadding` | 0..0.25 (default 0.012) | identity | `Arc 1 V Padding` | Expands the core texture band on both sides inside the .blend graph. |
+| `warpThreads` / `weftThreads` | presets `80`, `120`, `160`, `200` | identity ints | `Warp Threads` / `Weft Threads` | One Web UI zoom selector writes both values together. The frontend still floors to the draft's actual end/pick count if that exceeds a preset. |
+| (always 0) | n/a | n/a | `UV Random V` | Pinned to 0. V-axis randomization is off by user direction (would misalign the Arc 1/2 V-band partition). |
+
+### 4. Pinned footgun defaults
+
+Asserted by the producer ([blender_live.py:PINNED_FOOTGUN_SOCKETS](../../backend/app/blender_live.py)) on every bandMeta push. The set contains one halo gate plus five V-related **additive deltas**, NOT absolute overrides — leaving them at the pinned values is the only safe shape for scan-driven yarns. See [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md) Rules 11 and 12.
+
+| Blender socket | Pinned value | What happens if it drifts |
+|---|---|---|
+| `Sub Strand Enable` | `True` *(critical)* | `False` → main-strand geometry only → `is_sub_strand=0` everywhere → `PW Band - Band V` falls back to `Arc1 Map` only → halo never renders. Phase 3g's central fix was pinning this on. |
+| `Texture Scale V` | `1.0` | Drift multiplies the V output, misaligning the entire Arc 1/2 band partition vs the actual yarn V positions in the texture. |
+| `Texture Offset V` | `0.0` | Drift shifts where the strand cross-section samples — visible as the yarn's "centre" moving inside the silhouette. |
+| `Texture Side Flatten` | `0.0` | Drift mixes a cylindrical-projection contribution into the V output. May look good for some yarns; off by default to keep the mapping linear in cross-section. |
+| `Sub Texture Scale V` | `0.0` | Additive delta on V for sub-strand layer. `0.0` keeps the sub-strand aligned with the main strand. `1.0` would *double* the Arc 2 V mapping (= main scale 1 + delta 1). |
+| `Sub Texture Offset V` | `0.0` | Same idea on the offset axis. |
+
+### 5. Draft-driven sockets (DraftDocument → modifier)
+
+Pushed each render from the [DraftDocument](../../frontend/src/domain/types.ts) and project bindings. Geometry comes from the live `WebDraft_Live` mesh that [build_blender_sync_code](../../backend/app/blender_sync.py) writes per render.
+
+| DraftDocument source | Blender socket | What it drives | Notes |
+|---|---|---|---|
+| `WebDraft_Live` object | `Draft Object` | Source of `cell_code` / `warp_material_id` / `weft_material_id` face attributes the graph samples | Built per render from `draft.drawdown` |
+| `draft.threading.length` | `Draft Columns` | Cell count along U | |
+| `draft.treadling.length` | `Draft Rows` | Cell count along V | |
+| `renderSettings.warpThreads` | `Warp Threads` | Warp strand count along the swatch | Web UI zoom presets: `80`, `120`, `160`, `200`; frontend floors to `draft.threading.length` when needed |
+| `renderSettings.weftThreads` | `Weft Threads` | Weft strand count along the swatch | Same zoom preset as warp; frontend floors to `draft.treadling.length` when needed |
+| `colorBindings.warp[i].yarnAssetId` *(via cycle compression)* | `Warp Length 1..4` + `Warp Material 1..4` + `Warp Offset` | 4-step warp-material cycle. Backend compresses the binding sequence into run-length pairs `(length, 1-indexed material id)` and pads to 4 entries with `(0, 1)`. | See `compress_runs` in the live-sync helper. |
+| `colorBindings.weft[i].yarnAssetId` *(via cycle compression)* | `Weft Length 1..4` + `Weft Material 1..4` + `Weft Offset` | 4-step weft-material cycle. | |
+| ordered asset list | `Material 1..16` (NodeSocketMaterial inputs in `Material Slots` panel) | Per-slot material picks. Slot index = ordered position of the yarn asset in the project bindings (first-seen first). | Material 1 also link-drives `Set Material.Material` inside the graph; Materials 2-16 feed `PW Set Material 2..16.Material` through `PW Input - Material Slots` Group Input. |
+
+### 6. Quick alphabetical index — every modifier socket the producer touches
+
+Helpful when you're staring at the modifier panel trying to figure out where a value comes from. Skipped: the 96 V-band sockets in `V-Band Mapping` panel (all covered in table 1).
+
+| Socket | Lives in panel | Driven by | Range / default |
+|---|---|---|---|
+| Amplitude | Pattern | (none — artist default in .blend) | n/a |
+| Draft Columns | (root) | `draft.threading.length` | int |
+| Draft Object | (root) | live `WebDraft_Live` mesh | NodeSocketObject |
+| Draft Rows | (root) | `draft.treadling.length` | int |
+| Geometry | (root) | (modifier input from object base mesh) | n/a |
+| Main Strand Radius | (root) | (none — artist default) | float, 0.025 BU |
+| Material 1..16 | Material Slots | ordered asset list | NodeSocketMaterial |
+| Over Count / Under Count | Pattern | (none — artist default) | int |
+| Pattern Noise X | Imperfections | `renderSettings.patternNoiseX` | 0..0.03 (after remap) |
+| Pattern Noise Y | Imperfections | `renderSettings.patternNoiseY` | 0..0.03 (after remap) |
+| Scanner Pixels Per BU | (root) | `bandMeta.blender.scanner_pixels_per_bu` (first asset) | float, ~62992 at 1600 dpi |
+| Seed | General | (none — artist default) | int |
+| Spacing | Pattern | `renderSettings.spacing` | 0.03..0.10 (after remap) |
+| Sub Strand Enable | Sub Strand | **pinned True** | bool |
+| Sub Strand Height / Width | Sub Strand | (artist default) | float |
+| Sub Texture Offset V | Sub Strand | **pinned 0** | float |
+| Sub Texture Scale V | Sub Strand | **pinned 0** | float |
+| Texture Offset V | Texture | **pinned 0** | float |
+| Texture Scale U | (root) | **Neutral `1.0` after Phase 4i.** Kept as a global/artistic override only; setup-owned fit correction lives on `Material N Texture Scale U`. | float |
+| Texture Scale V | Texture | **pinned 1** | float |
+| Texture Side Flatten | Texture | **pinned 0** | float |
+| Thread Subdivisions | Surface | (artist default) | float |
+| UV Random U | Imperfections | `renderSettings.uvRandomU` | 0..20 |
+| UV Random V | Imperfections | **forced 0** | float |
+| Warp Length 1..4 / Warp Material 1..4 / Warp Offset | Warp Material Cycle | compressed `colorBindings` (warp scope) | int |
+| Warp Threads | Pattern | `renderSettings.warpThreads` from the Web UI zoom preset | int |
+| Weft Length 1..4 / Weft Material 1..4 / Weft Offset | Weft Material Cycle | compressed `colorBindings` (weft scope) | int |
+| Weft Threads | Pattern | `renderSettings.weftThreads` from the same zoom preset | int |
+| Wobble Amount / Wobble Scale | Imperfections | (artist default) | float |
+| Loose Strand Density / Length / Thickness / Frizz | Loose Strands | (artist default) | float |
+
+U-scale formula for scan-driven yarns:
+
+```text
+source_strand_length_BU = Warp Threads * Spacing
+visible_target_length_BU = max(Space.dimensions.x, Space.dimensions.y) * Fill Ratio
+texture_u_calibration = renderSettings.textureUCalibration or 0.1
+root_texture_scale_u = 1.0
+material_texture_scale_u = visible_target_length_BU / source_strand_length_BU * texture_u_calibration
+texture_world_width_BU = Material N Image Width Px / Scanner Pixels Per BU
+effective_repeats = source_strand_length_BU / texture_world_width_BU
+                  * root_texture_scale_u
+                  * (bandMeta.texture_scale_u or 1.0)
+                  * material_texture_scale_u
+```
+
+For the current 45058 px / 1600 dpi yarn, `texture_world_width_BU = 45058 / 62992.16 = 0.71529536`. With the old `Warp Threads = 180`, `Spacing = 0.03`, and a `3 × 3` Space target, the fit-only value was `3.0 / 5.4 = 0.55556`; Phase 4d's default calibration produces a per-material fit multiplier of `0.05556` for that same setup. With the new default zoom preset (`Warp Threads = 80`, `Spacing = 0.03`), the same target produces `3.0 / 2.4 × 0.1 = 0.125`. Phase 4i keeps root `Texture Scale U` at `1.0` and applies this number to each `Material N Texture Scale U`. The `0.1` is a tested calibration default, not a Blender-unit conversion assumption.
+
+### Worked example — a single thread001 cell of a 2×2 twill
+
+Given the latest web-UI project (id `23bde041afd6`, 2/2 Twill 8×8, both warp+weft bound to thread001=`bb5464ffe724`):
+
+1. **Producer** writes [yarn_library/20260514_014216_ccb942/metadata.json](../../../yarn_library/20260514_014216_ccb942/metadata.json) with `image_size_px=[45058, 395]`, `dpi=1600`, and a pre-computed `blender` block holding `image_width_px=45058`, `scanner_pixels_per_bu=62992.16`, `core_v_min=0.4835`, `core_v_max=0.5165`, `fiber_top_v_max=0.5367`, `fiber_bot_v_min=0.4582`.
+2. **Tryon backend** ([yarn_assets.py:_build_band_meta_from_library](../../backend/app/yarn_assets.py)) mirrors the file into `YarnAsset.bandMeta`, with `library_yarn_id` for provenance.
+3. **At render time** ([blender_live.py:build_material_asset_entry](../../backend/app/blender_live.py)) flattens the bandMeta into the entry dict the live-push and headless paths both consume.
+4. **Push** writes (for asset slot 1 / Material 1):
+   - `Material 1 Image Width Px = 45058`
+   - `Material 1 Texture Scale U = 1.0 × material_texture_scale_u` (`0.05` when the fit-only value is `0.5` and calibration is `0.1`)
+   - `Material 1 Arc 1 V Min = 0.4835`
+   - `Material 1 Arc 1 V Max = 0.5165`
+   - `Material 1 Arc 2 V Min = 0.4582`
+   - `Material 1 Arc 2 V Max = 0.5367`
+   - `Scanner Pixels Per BU = 62992.16`
+   - `Sub Strand Enable = True` (footgun)
+   - `Texture Scale V = 1.0`, `Texture Offset V = 0`, `Texture Side Flatten = 0`, `Sub Texture Scale V = 0`, `Sub Texture Offset V = 0` (footgun)
+5. **Render settings push** from the project's `draft.renderSettings = {spacing:0, patternNoiseX:0, patternNoiseY:0, uvRandomU:20}`:
+   - `Spacing = 0.03` (remap of 0 → 0.03)
+   - `Pattern Noise X = 0.0`
+   - `Pattern Noise Y = 0.0`
+   - `UV Random U = 20.0`
+   - `UV Random V = 0.0`
+6. **Cycle push** from `colorBindings = [{scope:warp, yarnAssetId:bb5464...}, {scope:weft, yarnAssetId:bb5464...}]`:
+   - `Warp Offset = 0`, `Warp Length 1 = 1`, `Warp Material 1 = 1`, rest 0
+   - `Weft Offset = 0`, `Weft Length 1 = 1`, `Weft Material 1 = 1`, rest 0
+7. **Material assignment**: `mod["Socket_61"] = WebYarn_thread001_bb5464ff` (Material 1 modifier input → drives Set Material via Group Input link). `obj.material_slots[0].material = WebYarn_thread001_bb5464ff`.
+
+Result: 180 × 180 weave geometry, each face textured with thread001's albedo + alpha using measured V destinations. With Sub Strand Enable on, Arc 2's three-section mapping fires on sub-strand geometry and the halo path is active. Phase 3p keeps the exact Arc 2 split area open because the split should be derived from generated geometry, not texture V-span alone.

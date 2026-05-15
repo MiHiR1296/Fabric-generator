@@ -11,6 +11,11 @@ export default defineConfig({
       '/api/parser': 'http://127.0.0.1:8000',
       '/api/blender': 'http://127.0.0.1:8000',
       '/api/yarn': 'http://127.0.0.1:8000',
+      // Yarnseamless routes (Phase 2b ported these to FastAPI). One backend
+      // now serves both the wizard and the yarn-processing flow.
+      '/api/lama': 'http://127.0.0.1:8000',
+      '/api/multithread': 'http://127.0.0.1:8000',
+      '/api/multifragment': 'http://127.0.0.1:8000',
     },
   },
   build: {

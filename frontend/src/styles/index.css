@@ -1,3 +1,10 @@
+/* Tailwind utilities (no preflight — see tailwind.config.js). Added to
+ * support the ported yarnseamless editors which lean heavily on utility
+ * classes. The existing tryon design system below is untouched. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   color-scheme: dark;
   /* infiknit theme — gold accent on deep navy */
@@ -896,6 +903,33 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+.render-zoom-control {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 0.45rem;
+}
+
+.render-zoom-control > span {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.render-zoom-control__buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.render-zoom-control__button {
+  min-width: 0;
+  text-align: center;
+}
+
+.render-zoom-control__button--active {
+  background: var(--accent);
+  color: #fffaf5;
 }
 
 .render-panel {
@@ -2400,4 +2434,433 @@ textarea {
 @keyframes render-progress-shimmer {
   0%   { background-position: 0% 50%; }
   100% { background-position: 200% 50%; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Step 1 — yarnseamless flow at full wizard-page (Phase 2e v2, 2026-05-13)
+ *
+ * Replaces the earlier `.yarnseamless-host` / `.yarnseamless-frame` rules
+ * which framed the editor inside a small 720 px card — wrong layout. Per
+ * user direction (2026-05-13): the yarnseamless UI is shown EXACTLY as in
+ * the standalone yarnseamless app, with only the infiknit hero + stepper
+ * above and the wizard footer below. No card wrapping, no max-height frame.
+ *
+ *   .ys-step                 → fills wizard-page (flex column, height 100%)
+ *   .ys-library-strip        → optional slim bar at top with saved yarns
+ *   .ys-editor-host          → takes remaining vertical space, holds the
+ *                              ported <MultiThreadImageEditor> or
+ *                              <MultiFragmentEditor>
+ *
+ * The editor's own <main className="flex-1 … overflow-auto"> handles its
+ * internal scroll — we just give it a flex parent so flex-1 resolves.
+ * ------------------------------------------------------------------------- */
+.fabric-shell .ys-step {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.ys-library-strip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.ys-library-strip__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ys-library-strip__spacer { flex: 1 1 auto; }
+
+.ys-library-strip__items {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.ys-library-card {
+  flex: 0 0 240px;
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+}
+
+.ys-library-card img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+
+.ys-library-card__placeholder {
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  flex: 0 0 auto;
+}
+
+.ys-library-card__body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ys-library-card__body h4 {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ys-library-card__body p {
+  margin: 0;
+  font-size: 0.7rem;
+}
+
+.ys-editor-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ys-editor-host > main {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Scoped Tailwind preflight for .ys-step (Phase 2e v3, 2026-05-13)
+ *
+ * Yarnseamless's editors were built against Tailwind v3's default preflight
+ * (`box-sizing: border-box` everywhere, `margin: 0` on most elements, button/
+ * input font-inheritance, list resets, etc.). We can't enable Tailwind's
+ * global preflight in tryon because it would destroy the 2,400 lines of
+ * tryon design-system CSS. Solution: scope a preflight subset to the
+ * `.ys-step` subtree so the embedded editors render exactly as in the
+ * standalone yarnseamless app (run on :5173 to compare).
+ *
+ * This is Tailwind v3's preflight, prefixed with `.ys-step ` so it only
+ * applies inside the Step 1 editor host. Specificity is intentionally low
+ * (0,1,1) so Tailwind utility classes (0,1,0) on these elements still take
+ * precedence where they conflict. The `:disabled` and `[hidden]` selectors
+ * use the same approach.
+ * ------------------------------------------------------------------------- */
+
+.ys-step,
+.ys-step *,
+.ys-step *::before,
+.ys-step *::after {
+  box-sizing: border-box;
+  border-width: 0;
+  border-style: solid;
+  border-color: currentColor;
+}
+
+.ys-step hr {
+  height: 0;
+  color: inherit;
+  border-top-width: 1px;
+}
+
+.ys-step h1,
+.ys-step h2,
+.ys-step h3,
+.ys-step h4,
+.ys-step h5,
+.ys-step h6 {
+  font-size: inherit;
+  font-weight: inherit;
+  margin: 0;
+}
+
+.ys-step a {
+  color: inherit;
+  text-decoration: inherit;
+}
+
+.ys-step b,
+.ys-step strong {
+  font-weight: bolder;
+}
+
+.ys-step button,
+.ys-step input,
+.ys-step optgroup,
+.ys-step select,
+.ys-step textarea {
+  font-family: inherit;
+  font-feature-settings: inherit;
+  font-variation-settings: inherit;
+  font-size: 100%;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  margin: 0;
+  padding: 0;
+}
+
+.ys-step button,
+.ys-step select {
+  text-transform: none;
+}
+
+.ys-step button,
+.ys-step input[type='button'],
+.ys-step input[type='reset'],
+.ys-step input[type='submit'] {
+  -webkit-appearance: button;
+  background-color: transparent;
+  background-image: none;
+}
+
+.ys-step :-moz-focusring { outline: auto; }
+.ys-step :-moz-ui-invalid { box-shadow: none; }
+.ys-step progress { vertical-align: baseline; }
+
+.ys-step ::-webkit-inner-spin-button,
+.ys-step ::-webkit-outer-spin-button { height: auto; }
+
+.ys-step [type='search'] {
+  -webkit-appearance: textfield;
+  outline-offset: -2px;
+}
+
+.ys-step ::-webkit-search-decoration { -webkit-appearance: none; }
+
+.ys-step ::-webkit-file-upload-button {
+  -webkit-appearance: button;
+  font: inherit;
+}
+
+.ys-step summary { display: list-item; }
+
+.ys-step blockquote,
+.ys-step dl,
+.ys-step dd,
+.ys-step figure,
+.ys-step p,
+.ys-step pre {
+  margin: 0;
+}
+
+.ys-step fieldset { margin: 0; padding: 0; }
+.ys-step legend { padding: 0; }
+
+.ys-step ol,
+.ys-step ul,
+.ys-step menu {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ys-step dialog { padding: 0; }
+.ys-step textarea { resize: vertical; }
+
+.ys-step input::placeholder,
+.ys-step textarea::placeholder {
+  opacity: 1;
+  color: #9ca3af;  /* gray-400 */
+}
+
+.ys-step button,
+.ys-step [role='button'] { cursor: pointer; }
+
+.ys-step :disabled { cursor: default; }
+
+.ys-step img,
+.ys-step svg,
+.ys-step video,
+.ys-step canvas,
+.ys-step audio,
+.ys-step iframe,
+.ys-step embed,
+.ys-step object {
+  display: block;
+  vertical-align: middle;
+}
+
+.ys-step img,
+.ys-step video {
+  max-width: 100%;
+  height: auto;
+}
+
+.ys-step [hidden] { display: none; }
+
+/* And finally — the body-level styling yarnseamless's index.html sets via
+ * `<body class="bg-gray-950 text-white">`. We can't change tryon's body, so
+ * we apply it to the .ys-step root instead. Same visual result. */
+.ys-step {
+  background-color: rgb(3 7 18);   /* Tailwind gray-950 */
+  color: rgb(255 255 255);          /* white */
+}
+
+/* ---------------------------------------------------------------------------
+ * Step 1 escape hatch — render yarnseamless at full-document scroll
+ * (Phase 2e v4, 2026-05-13)
+ *
+ * Default `.fabric-shell.studio-shell` is `height: 100vh; overflow: hidden` —
+ * a viewport-locked wizard layout where each step fills the viewport. That
+ * works for the draft editor / render preview / try-on viewport, but it
+ * traps the yarnseamless editors in a small region and prevents scroll.
+ *
+ * When App.tsx applies `.step-yarnseamless` to the shell (only when
+ * step === 0), we override the layout to a natural-scroll document:
+ *   - shell is height: auto, no overflow trap
+ *   - hero / stepper sit at the top, normal flow
+ *   - wizard-page is height: auto, the yarnseamless editor renders at its
+ *     natural full size
+ *   - footer becomes sticky to the bottom of the viewport so the user can
+ *     always reach the Next button without scrolling to the bottom of a
+ *     potentially very tall editor
+ *
+ * Other steps (1-3) are completely unaffected.
+ * ------------------------------------------------------------------------- */
+
+.fabric-shell.studio-shell.step-yarnseamless {
+  height: auto;
+  min-height: 100vh;
+  overflow: visible;
+}
+
+.fabric-shell.studio-shell.step-yarnseamless .wizard-page,
+.fabric-shell.studio-shell.step-yarnseamless .fabric-step-stack {
+  flex: 0 0 auto;
+  height: auto;
+  overflow: visible;
+  min-height: 0;
+}
+
+.fabric-shell.studio-shell.step-yarnseamless .ys-step {
+  height: auto;
+  min-height: calc(100vh - 200px);
+}
+
+.fabric-shell.studio-shell.step-yarnseamless .ys-editor-host {
+  /* Without the viewport lock, the editor host needs a meaningful min-height
+   * so its inner `<main className="flex-1 …">` resolves to a real size. */
+  min-height: calc(100vh - 240px);
+}
+
+/* Make the wizard footer always reachable when the page is taller than the
+ * viewport. Sticky position so it floats at the bottom of the visible area. */
+.fabric-shell.studio-shell.step-yarnseamless .wizard-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  background: rgba(10, 10, 20, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Optional: compact hero on Step 1 so the editor gets more vertical room.
+ * Keeps the wizard stepper visible without dominating the page. */
+.fabric-shell.studio-shell.step-yarnseamless .fabric-hero {
+  padding-top: 1rem;
+  padding-bottom: 0.5rem;
+}
+.fabric-shell.studio-shell.step-yarnseamless .fabric-hero h1 {
+  font-size: clamp(1.4rem, 2vw, 1.9rem);
+}
+.fabric-shell.studio-shell.step-yarnseamless .fabric-hero__summary {
+  display: none;
+}
+
+/* The wizard-page is a `display: grid; padding: 0 2rem 2rem` container — that
+ * works for the cards-laid-out steps but compresses the yarnseamless editor.
+ * For step 1 only, make it edge-to-edge flex column. */
+.fabric-shell.studio-shell.step-yarnseamless .fabric-step-stack {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  gap: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Phase 2e v5 — REMOVED. Replaced by Phase 2e v8 (Tailwind `important: true`).
+ *
+ * The v5 block reset input/select/textarea inside `.ys-step` to neutral
+ * values so Tailwind utilities could re-apply on top. It had two bugs:
+ *   1. Specificity (0,2,1) was higher than Tailwind utilities (0,1,0),
+ *      meaning my "neutral" values won over Tailwind backgrounds/padding.
+ *   2. Using the `border: 0` shorthand also set `border-style: none`, which
+ *      CSS forces computed-width to 0 even when a later rule set width 1px.
+ *
+ * Fix: removed the override block entirely. Tailwind config now has
+ * `important: true` (see tailwind.config.js) — every utility is !important,
+ * beating tryon's `.fabric-shell input` rules AND our scoped preflight
+ * without any explicit override at all.
+ * ------------------------------------------------------------------------- */
+
+/* Any `.button` instance inside the editor (yarnseamless doesn't generally
+ * use this class, but for safety) is also reset so Tailwind takes over. */
+.fabric-shell .ys-step .button {
+  background: transparent;
+  color: inherit;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Button affordances inside .ys-step (Phase 2e v7, 2026-05-13)
+ *
+ * User feedback: "all the buttons look like capital texts can u highlight
+ * them somehow". The Tailwind classes on each button DO give them
+ * backgrounds (bg-blue-600, bg-green-600, etc.), but they lack the universal
+ * affordance cues that make a button feel tappable — hover-brightness, press
+ * feedback, focus rings, disabled state.
+ *
+ * These rules are ADDITIVE: they don't override Tailwind's bg-* / text-* /
+ * px-* utilities. They just layer hover/active/focus feedback on top so
+ * every <button> in the editor feels like a button.
+ * ------------------------------------------------------------------------- */
+
+.fabric-shell .ys-step button {
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.06s ease, box-shadow 0.15s ease;
+  /* Subtle inner highlight so buttons look raised regardless of their bg. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.fabric-shell .ys-step button:not(:disabled):hover {
+  filter: brightness(1.12);
+}
+
+.fabric-shell .ys-step button:not(:disabled):active {
+  transform: translateY(1px);
+  filter: brightness(0.95);
+}
+
+.fabric-shell .ys-step button:focus-visible {
+  outline: 2px solid rgba(232, 184, 74, 0.55); /* infiknit gold */
+  outline-offset: 2px;
+}
+
+.fabric-shell .ys-step button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }

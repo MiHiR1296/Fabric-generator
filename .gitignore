@@ -16,6 +16,10 @@ backend/**/__pycache__/
 backend/**/*.pyc
 backend/vendor/yarn_pipeline/big-lama.pt
 
+*.blend1
+*.pre-*.blend
+
+runtime/debug/
 runtime/yarn_assets/*
 !runtime/yarn_assets/.gitkeep
 runtime/render_jobs/*

@@ -12,6 +12,8 @@ import type {
 export const DEFAULT_WARP_COLOR = '#f3ede2';
 export const DEFAULT_WEFT_COLOR = '#b85e3c';
 export const STORAGE_KEY = 'weaving-draft-studio/current-draft';
+export const WEAVE_ZOOM_THREAD_LEVELS = [80, 120, 160, 200] as const;
+export const DEFAULT_ARC1_V_PADDING = 0.012;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -69,14 +71,84 @@ function normalizeColorSequence(colors: unknown, fallback: string, length: numbe
   return Array.from({ length }, (_, index) => palette[index % palette.length]);
 }
 
+// Shape and defaults mirror v2 (Fabric-generator-codex-fabric-generator-v2/frontend/src/domain/draft.ts).
+// Spacing / pattern-noise controls exposed on the web UI are forced to 0 per
+// product decision (2026-05-14). v2's spacing default of 0.29 is intentionally
+// overridden here so the input fields start at 0 in tryon.
+// Non-exposed fields keep v2's geometric defaults so unedited renders still look right.
+function numberOrFallback(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function integerOrFallback(value: unknown, fallback: number) {
+  return Math.round(numberOrFallback(value, fallback));
+}
+
+function normalizeUnitControl(value: unknown, fallback: number) {
+  return clamp(numberOrFallback(value, fallback), 0, 1);
+}
+
+function normalizeRenderThreadCount(value: unknown, fallback: number, draftCount: number) {
+  const minThreads = Math.max(draftCount, WEAVE_ZOOM_THREAD_LEVELS[0]);
+  const maxThreads = Math.max(minThreads, WEAVE_ZOOM_THREAD_LEVELS[WEAVE_ZOOM_THREAD_LEVELS.length - 1]);
+  return clamp(integerOrFallback(value, fallback), minThreads, maxThreads);
+}
+
+function normalizeSpacingControl(
+  raw: Partial<DraftRenderSettings>,
+  fallback: DraftRenderSettings,
+) {
+  const value = numberOrFallback(raw.spacing, fallback.spacing);
+  const hasUnitControls =
+    Object.prototype.hasOwnProperty.call(raw, 'patternNoiseX') ||
+    Object.prototype.hasOwnProperty.call(raw, 'patternNoiseY');
+
+  // Legacy physical-spacing values (0.005..0.2) get remapped onto the 0..1
+  // unit scale the v2 backend now expects. Once both patternNoise controls
+  // are present we trust the value is already on the unit scale.
+  if (!hasUnitControls && Number.isFinite(value) && value >= 0.005 && value <= 0.2) {
+    return Math.round(clamp((value - 0.03) / (0.1 - 0.03), 0, 1) * 100) / 100;
+  }
+
+  return clamp(value, 0, 1);
+}
+
 function buildDefaultRenderSettings(warpEnds: number, picks: number): DraftRenderSettings {
   return {
-    warpThreads: Math.max(warpEnds * 8, 96),
-    weftThreads: Math.max(picks * 8, 96),
-    spacing: 0.03,
-    amplitude: 0.005,
+    warpThreads: Math.max(warpEnds, WEAVE_ZOOM_THREAD_LEVELS[0]),
+    weftThreads: Math.max(picks, WEAVE_ZOOM_THREAD_LEVELS[0]),
+    // Exposed on the web UI — defaults pinned to 0.
+    spacing: 0,
+    patternNoiseX: 0,
+    patternNoiseY: 0,
+    // Non-exposed — v2 geometric defaults.
+    amplitude: 0.008,
+    threadRadius: 0.028,
+    threadSubdivisions: 8,
+    plyCount: 3,
+    plyRadius: 0.013,
+    twistAmount: 16,
+    plyResolution: 5,
+    textureScaleU: 8,
+    textureUCalibration: 0.1,
     textureScaleV: 0.5,
+    textureOffsetV: 0,
+    textureSideFlatten: 0.7,
+    arc1VPadding: DEFAULT_ARC1_V_PADDING,
+    lumpStrength: 0.0015,
+    lumpScale: 6,
+    fiberDensity: 0,
+    fiberLength: 0.04,
+    fiberThickness: 0.15,
+    fiberFrizz: 0.02,
+    fiberSubdivs: 4,
+    seed: 0,
     fillRatio: 1,
+    // Per-strand texture U-shift. 1 = baseline scatter (default), 0 = lock,
+    // 20 = strong scatter. Exposed in the web UI alongside Spacing /
+    // Pattern Noise. Pushed to the global 'UV Random U' modifier socket.
+    uvRandomU: 1,
   };
 }
 
@@ -89,20 +161,42 @@ function normalizeRenderSettings(
   const raw = typeof settings === 'object' && settings !== null ? settings as Partial<DraftRenderSettings> : {};
 
   return {
-    warpThreads: clamp(
-      Math.round(Number(raw.warpThreads) || fallback.warpThreads),
-      warpEnds,
-      512,
+    warpThreads: normalizeRenderThreadCount(raw.warpThreads, fallback.warpThreads, warpEnds),
+    weftThreads: normalizeRenderThreadCount(raw.weftThreads, fallback.weftThreads, picks),
+    spacing: normalizeSpacingControl(raw, fallback),
+    patternNoiseX: normalizeUnitControl(raw.patternNoiseX, fallback.patternNoiseX),
+    patternNoiseY: normalizeUnitControl(raw.patternNoiseY, fallback.patternNoiseY),
+    amplitude: clamp(numberOrFallback(raw.amplitude, fallback.amplitude), 0.001, 0.1),
+    threadRadius: clamp(numberOrFallback(raw.threadRadius, fallback.threadRadius), 0.001, 0.2),
+    threadSubdivisions: clamp(
+      numberOrFallback(raw.threadSubdivisions, fallback.threadSubdivisions),
+      3,
+      64,
     ),
-    weftThreads: clamp(
-      Math.round(Number(raw.weftThreads) || fallback.weftThreads),
-      picks,
-      512,
+    plyCount: clamp(integerOrFallback(raw.plyCount, fallback.plyCount), 1, 16),
+    plyRadius: clamp(numberOrFallback(raw.plyRadius, fallback.plyRadius), 0.001, 0.1),
+    twistAmount: clamp(numberOrFallback(raw.twistAmount, fallback.twistAmount), 0, 128),
+    plyResolution: clamp(integerOrFallback(raw.plyResolution, fallback.plyResolution), 2, 24),
+    textureScaleU: clamp(numberOrFallback(raw.textureScaleU, fallback.textureScaleU), 0.1, 64),
+    textureUCalibration: clamp(numberOrFallback(raw.textureUCalibration, fallback.textureUCalibration), 0.01, 2),
+    textureScaleV: clamp(numberOrFallback(raw.textureScaleV, fallback.textureScaleV), 0.05, 5),
+    textureOffsetV: clamp(numberOrFallback(raw.textureOffsetV, fallback.textureOffsetV), -2, 2),
+    textureSideFlatten: clamp(
+      numberOrFallback(raw.textureSideFlatten, fallback.textureSideFlatten),
+      0,
+      1,
     ),
-    spacing: clamp(Number(raw.spacing) || fallback.spacing, 0.005, 0.2),
-    amplitude: clamp(Number(raw.amplitude) || fallback.amplitude, 0.001, 0.1),
-    textureScaleV: clamp(Number(raw.textureScaleV) || fallback.textureScaleV, 0.05, 5),
-    fillRatio: clamp(Number(raw.fillRatio) || fallback.fillRatio, 0.6, 1),
+    arc1VPadding: clamp(numberOrFallback(raw.arc1VPadding, fallback.arc1VPadding), 0, 0.25),
+    lumpStrength: clamp(numberOrFallback(raw.lumpStrength, fallback.lumpStrength), 0, 0.1),
+    lumpScale: clamp(numberOrFallback(raw.lumpScale, fallback.lumpScale), 0.1, 50),
+    fiberDensity: clamp(numberOrFallback(raw.fiberDensity, fallback.fiberDensity), 0, 5),
+    fiberLength: clamp(numberOrFallback(raw.fiberLength, fallback.fiberLength), 0, 1),
+    fiberThickness: clamp(numberOrFallback(raw.fiberThickness, fallback.fiberThickness), 0, 1),
+    fiberFrizz: clamp(numberOrFallback(raw.fiberFrizz, fallback.fiberFrizz), 0, 1),
+    fiberSubdivs: clamp(integerOrFallback(raw.fiberSubdivs, fallback.fiberSubdivs), 0, 24),
+    seed: clamp(integerOrFallback(raw.seed, fallback.seed), 0, 1000000),
+    fillRatio: clamp(numberOrFallback(raw.fillRatio, fallback.fillRatio), 0.6, 1),
+    uvRandomU: clamp(numberOrFallback(raw.uvRandomU, fallback.uvRandomU), 0, 20),
   };
 }
 
