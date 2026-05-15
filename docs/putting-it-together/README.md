@@ -8,6 +8,10 @@ External runtime assets are shared through Google Drive:
 
 https://drive.google.com/drive/folders/18UPKaVFXKBNetcwFR0fXdipJ3HLsZSXU?usp=drive_link
 
+Direct asset bundle:
+
+https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP
+
 ---
 
 ## Why this exists

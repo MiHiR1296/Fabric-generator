@@ -4,6 +4,10 @@ Google Drive folder:
 
 https://drive.google.com/drive/folders/18UPKaVFXKBNetcwFR0fXdipJ3HLsZSXU?usp=drive_link
 
+Direct asset bundle:
+
+https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP
+
 The GitHub repo contains the application code, docs, tests, and the current Blender scene. The Drive folder carries local runtime assets that should not live in Git.
 
 ## Expected Drive Contents
