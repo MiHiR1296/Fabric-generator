@@ -4,6 +4,10 @@ The integration project. One workflow across three apps: **yarnseamless** (asset
 
 This folder is the living record of how we made the three talk to each other. Read it in the order below.
 
+External runtime assets are shared through Google Drive:
+
+https://drive.google.com/drive/folders/18UPKaVFXKBNetcwFR0fXdipJ3HLsZSXU?usp=drive_link
+
 ---
 
 ## Why this exists

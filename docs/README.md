@@ -13,6 +13,10 @@ Read in this order:
 | 5 | [WebUIChanges/](WebUIChanges/) | Wizard / FastAPI surface changes — the three state layers (library / runtime asset / color binding), the sync points between them, and every UI-visible behavior fix logged Symptom / Diagnosis / Fix / Verification. |
 | 6 | [WebUIbands/](WebUIbands/) | Yarn band detection (core + fiber halos) — current two-pass setup, the YarnSeamless FWHM port target, and the cut-over plan to run band detection on the assembled alpha post-inpaint. |
 
+External runtime assets are shared here:
+
+https://drive.google.com/drive/folders/18UPKaVFXKBNetcwFR0fXdipJ3HLsZSXU?usp=drive_link
+
 ---
 
 ## Current shipping status (2026-05-15)

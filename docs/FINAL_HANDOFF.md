@@ -106,6 +106,21 @@ This folder is intentionally ignored by Git. It can contain raw uploads, detecti
 
 ## Large File Strategy
 
+External runtime assets are shared through Google Drive:
+
+https://drive.google.com/drive/folders/18UPKaVFXKBNetcwFR0fXdipJ3HLsZSXU?usp=drive_link
+
+Expected Drive contents:
+
+```text
+FabricGenerator_ExternalAssets_2026-05-16/
+  README_ASSETS.md
+  CHECKSUMS.sha256
+  yarn_library/
+  models/
+    big-lama.pt
+```
+
 The raw `big-lama.pt` model should not be committed.
 
 The loader checks:
@@ -123,6 +138,15 @@ Recommended local model setup:
 
 ```bash
 export BIG_LAMA_MODEL_PATH="/absolute/path/to/big-lama.pt"
+```
+
+Recommended local placement:
+
+```text
+yarnseamless UI/
+  Fabric-generator-tryon/
+  yarn_library/
+  big-lama.pt
 ```
 
 ## Blender Integration

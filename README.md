@@ -4,6 +4,10 @@ One repo for the integrated yarn-to-fabric workflow: yarn scan processing, weave
 
 The final project handoff lives in [docs/FINAL_HANDOFF.md](docs/FINAL_HANDOFF.md). Start there when you want the full collaboration summary, feature list, process map, and open-item inventory.
 
+External runtime assets live in Google Drive:
+
+https://drive.google.com/drive/folders/18UPKaVFXKBNetcwFR0fXdipJ3HLsZSXU?usp=drive_link
+
 ## What The App Does
 
 The web app is a four-step studio:
@@ -40,6 +44,17 @@ Do not commit local generated data, raw scan uploads, virtual environments, or t
 
 Git LFS is currently disabled for the GitHub repository, so this branch does not rely on LFS. The current Blender scene is about 26 MB and is committed normally. Raw model weights stay external or local.
 
+The Drive folder should contain:
+
+```text
+FabricGenerator_ExternalAssets_2026-05-16/
+  README_ASSETS.md
+  CHECKSUMS.sha256
+  yarn_library/
+  models/
+    big-lama.pt
+```
+
 The repo already ignores:
 
 - `backend/vendor/yarn_pipeline/big-lama.pt`
@@ -61,6 +76,15 @@ Recommended local setup for the raw model:
 
 ```bash
 export BIG_LAMA_MODEL_PATH="/absolute/path/to/big-lama.pt"
+```
+
+Recommended local placement after downloading the Drive folder:
+
+```text
+yarnseamless UI/
+  Fabric-generator-tryon/
+  yarn_library/
+  big-lama.pt
 ```
 
 ## Prerequisites
