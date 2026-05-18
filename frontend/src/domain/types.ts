@@ -8,9 +8,35 @@ export interface DraftRenderSettings {
   warpThreads: number;
   weftThreads: number;
   spacing: number;
+  patternNoiseX: number;
+  patternNoiseY: number;
   amplitude: number;
+  threadRadius: number;
+  threadSubdivisions: number;
+  plyCount: number;
+  plyRadius: number;
+  twistAmount: number;
+  plyResolution: number;
+  textureScaleU: number;
+  textureUCalibration: number;
   textureScaleV: number;
+  textureOffsetV: number;
+  textureSideFlatten: number;
+  arc1VPadding: number;
+  lumpStrength: number;
+  lumpScale: number;
+  fiberDensity: number;
+  fiberLength: number;
+  fiberThickness: number;
+  fiberFrizz: number;
+  fiberSubdivs: number;
+  seed: number;
   fillRatio: number;
+  // Per-strand U-offset randomization. 0 disables; 1 (default) is the baseline
+  // shift; up to 20 produces strong staggering so the same texture repeat
+  // doesn't appear identically across the swatch. Pushed to the global
+  // 'UV Random U' modifier socket.
+  uvRandomU: number;
 }
 
 export interface ReviewCell {
@@ -63,11 +89,25 @@ export interface DraftCounts {
   picks: number;
 }
 
+export type WeaveType =
+  | 'plain'
+  | 'twill'
+  | 'satin'
+  | 'basket'
+  | 'rib'
+  | 'compound'
+  | 'lace'
+  | 'double'
+  | 'huck'
+  | 'other';
+
 export interface PresetDefinition {
   id: string;
   label: string;
   summary: string;
   document: DraftDocument;
+  weaveType?: WeaveType;
+  previewImage?: string;
 }
 
 export interface BookPatternEntry {
@@ -81,6 +121,8 @@ export interface BookPatternEntry {
   draft?: DraftDocument;
   status: 'loadable' | 'pending';
   note?: string;
+  weaveType?: WeaveType;
+  previewImage?: string;
 }
 
 export interface PatternBook {

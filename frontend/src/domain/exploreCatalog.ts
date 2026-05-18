@@ -1,5 +1,21 @@
+import { generatedPatternsForBook } from './generatedPatterns';
 import { oelsnerStarterPatterns } from './oelsnerPatterns';
-import type { PatternBook } from './types';
+import type { BookPatternEntry, PatternBook } from './types';
+
+/**
+ * Each book gets:
+ *   1. its curated hand-authored entries (where available — currently only
+ *      Oelsner), followed by
+ *   2. a deterministic set of generated structural reconstructions from
+ *      `generatedPatterns.ts` so the picker is meaningfully populated for
+ *      every book in the reference shelf.
+ *
+ * Generated entries are tagged 'generated' and their note disclaims that
+ * they're family-taxonomy reconstructions, not literal page transcriptions.
+ */
+function bookPatterns(bookId: string, curated: BookPatternEntry[] = []): BookPatternEntry[] {
+  return [...curated, ...generatedPatternsForBook(bookId)];
+}
 
 export const referenceBooks: PatternBook[] = [
   {
@@ -15,8 +31,8 @@ export const referenceBooks: PatternBook[] = [
     access: 'public-domain',
     tags: ['reference', 'twill', 'compound'],
     note:
-      'Curated starter reconstructions are grounded in the 1915 public-domain Oelsner book and labeled by chapter page so users can read the source context.',
-    patterns: oelsnerStarterPatterns,
+      'Curated starter reconstructions are grounded in the 1915 public-domain Oelsner book and labeled by chapter page so users can read the source context. Additional entries are family-taxonomy reconstructions, not literal page transcriptions.',
+    patterns: bookPatterns('oelsner', oelsnerStarterPatterns),
   },
   {
     id: 'kastanek',
@@ -29,8 +45,8 @@ export const referenceBooks: PatternBook[] = [
     sourceLabel: 'Public-domain reference',
     access: 'public-domain',
     tags: ['foundation weaves', 'teaching', 'reference'],
-    note: 'Book cataloged for local indexing, but pattern-by-pattern extraction is not bundled yet.',
-    patterns: [],
+    note: 'Book cataloged for local indexing. Bundled entries are family-taxonomy reconstructions matching the book’s emphasis, not literal page transcriptions.',
+    patterns: bookPatterns('kastanek'),
   },
   {
     id: 'posselt',
@@ -43,8 +59,8 @@ export const referenceBooks: PatternBook[] = [
     sourceLabel: 'Catalog reference',
     access: 'catalog',
     tags: ['dictionary', '4 shafts', '8 shafts'],
-    note: 'Cataloged as a source book. Pattern extraction should happen from a licensed or public-domain copy.',
-    patterns: [],
+    note: 'Cataloged as a source book. Bundled entries are family-taxonomy reconstructions emphasising 4-to-8-shaft twills/satins, not literal page transcriptions.',
+    patterns: bookPatterns('posselt'),
   },
   {
     id: 'jansen',
@@ -57,8 +73,8 @@ export const referenceBooks: PatternBook[] = [
     sourceLabel: 'Public-domain reference',
     access: 'public-domain',
     tags: ['design plates', 'historic', 'pattern book'],
-    note: 'Book metadata is present. Pattern indexing should be done locally from a source scan.',
-    patterns: [],
+    note: 'Book metadata is present. Bundled entries are family-taxonomy reconstructions in the book’s design-plate style, not literal page transcriptions.',
+    patterns: bookPatterns('jansen'),
   },
   {
     id: 'serrure',
@@ -71,8 +87,8 @@ export const referenceBooks: PatternBook[] = [
     sourceLabel: 'Catalog reference',
     access: 'catalog',
     tags: ['atlas', 'french', 'large collection'],
-    note: 'Source book is cataloged, but the extracted pattern library is not bundled in the repo.',
-    patterns: [],
+    note: 'Source book is cataloged. Bundled entries are family-taxonomy reconstructions, not literal page transcriptions.',
+    patterns: bookPatterns('serrure'),
   },
   {
     id: 'fressinet',
@@ -85,8 +101,8 @@ export const referenceBooks: PatternBook[] = [
     sourceLabel: 'Catalog reference',
     access: 'catalog',
     tags: ['atlas', 'french', 'historic'],
-    note: 'Prepared as a catalog entry for future local indexing.',
-    patterns: [],
+    note: 'Prepared as a catalog entry. Bundled entries are family-taxonomy reconstructions, not literal page transcriptions.',
+    patterns: bookPatterns('fressinet'),
   },
   {
     id: 'morath',
@@ -99,8 +115,8 @@ export const referenceBooks: PatternBook[] = [
     sourceLabel: 'Catalog reference',
     access: 'catalog',
     tags: ['manuscript', 'historic', 'german'],
-    note: 'Best handled as a locally indexed manuscript source rather than a repo-bundled pattern dump.',
-    patterns: [],
+    note: 'Manuscript source. Bundled entries are family-taxonomy reconstructions matching the manuscript’s emphasis, not literal transcriptions.',
+    patterns: bookPatterns('morath'),
   },
   {
     id: 'thaller',
@@ -113,8 +129,8 @@ export const referenceBooks: PatternBook[] = [
     sourceLabel: 'Catalog reference',
     access: 'catalog',
     tags: ['manuscript', 'archive', 'historic'],
-    note: 'Catalog metadata only for now.',
-    patterns: [],
+    note: 'Archive manuscript. Bundled entries are family-taxonomy reconstructions, not literal page transcriptions.',
+    patterns: bookPatterns('thaller'),
   },
   {
     id: 'watson',
@@ -127,8 +143,8 @@ export const referenceBooks: PatternBook[] = [
     sourceLabel: 'Public-domain reference',
     access: 'public-domain',
     tags: ['color', 'reference', 'historic'],
-    note: 'Good candidate for a color-focused local indexing pass.',
-    patterns: [],
+    note: 'Color-focused reference. Bundled entries emphasise color-and-weave variants and foundation structures, not literal page transcriptions.',
+    patterns: bookPatterns('watson'),
   },
   {
     id: 'ashenhurst',
@@ -141,7 +157,7 @@ export const referenceBooks: PatternBook[] = [
     sourceLabel: 'Public-domain reference',
     access: 'public-domain',
     tags: ['7000 patterns', 'design reference', 'historic'],
-    note: 'Too large to bundle manually; best handled with a local ingest/index pipeline.',
-    patterns: [],
+    note: 'Large reference. Bundled entries are broad family-taxonomy reconstructions, not literal page transcriptions.',
+    patterns: bookPatterns('ashenhurst'),
   },
 ];

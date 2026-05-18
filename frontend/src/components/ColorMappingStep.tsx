@@ -23,6 +23,8 @@ interface ColorMappingStepProps {
     textureScaleV?: number;
     fillRatio?: number;
   }) => void;
+  showRender?: boolean;
+  showBindings?: boolean;
 }
 
 export default function ColorMappingStep({
@@ -37,6 +39,8 @@ export default function ColorMappingStep({
   onExportCanonical,
   onExportBlender,
   onApplyRenderSettings,
+  showRender = true,
+  showBindings = true,
 }: ColorMappingStepProps) {
   const slots = useMemo(() => deriveColorBindingSlots(draft), [draft]);
   const readyAssets = useMemo(
@@ -50,13 +54,14 @@ export default function ColorMappingStep({
 
   return (
     <section className="fabric-step-panel" data-testid="color-mapping-step">
+      {showBindings ? (
       <section className="card fabric-step-card">
         <div className="fabric-step-card__header">
           <div>
             <p className="eyebrow">Step 3</p>
             <h2>Color To Yarn Mapping</h2>
             <p className="fabric-step-card__summary">
-              Each unique warp and weft color becomes a binding slot. Assign a processed yarn asset to every slot before rendering.
+              Assign a processed yarn to every warp and weft color slot.
             </p>
           </div>
           <div className="fabric-step-card__actions">
@@ -71,33 +76,49 @@ export default function ColorMappingStep({
               const binding = colorBindings.find(
                 (entry) => entry.scope === slot.scope && entry.colorHex.toLowerCase() === slot.colorHex.toLowerCase(),
               );
+              const selectedAsset = binding?.yarnAssetId
+                ? yarnAssets.find((asset) => asset.id === binding.yarnAssetId)
+                : null;
+              const previewUrl = selectedAsset?.diffuseUrl || selectedAsset?.sourceUrl;
               return (
                 <label className="color-binding-card" key={slot.key}>
                   <span className="color-binding-card__label">
                     <span className="color-binding-card__swatch" style={{ background: slot.colorHex }} />
                     <span>{slot.label}</span>
                   </span>
-                  <select
-                    value={binding?.yarnAssetId || ''}
-                    data-testid={`binding-select-${slot.key}`}
-                    onChange={(event) => {
-                      const yarnAssetId = event.target.value || null;
-                      setColorBindings((current) =>
-                        current.map((entry) =>
-                          entry.scope === slot.scope && entry.colorHex === slot.colorHex
-                            ? { ...entry, yarnAssetId }
-                            : entry,
-                        ),
-                      );
-                    }}
-                  >
-                    <option value="">Select processed yarn</option>
-                    {readyAssets.map((asset) => (
-                      <option key={asset.id} value={asset.id}>
-                        {asset.label}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="color-binding-card__yarn">
+                    {previewUrl ? (
+                      <img
+                        className="color-binding-card__preview"
+                        src={previewUrl}
+                        alt={`${selectedAsset?.label || 'Yarn'} preview`}
+                        title={selectedAsset?.label}
+                      />
+                    ) : (
+                      <span className="color-binding-card__preview color-binding-card__preview--empty" aria-hidden="true" />
+                    )}
+                    <select
+                      value={binding?.yarnAssetId || ''}
+                      data-testid={`binding-select-${slot.key}`}
+                      onChange={(event) => {
+                        const yarnAssetId = event.target.value || null;
+                        setColorBindings((current) =>
+                          current.map((entry) =>
+                            entry.scope === slot.scope && entry.colorHex === slot.colorHex
+                              ? { ...entry, yarnAssetId }
+                              : entry,
+                          ),
+                        );
+                      }}
+                    >
+                      <option value="">Select processed yarn</option>
+                      {readyAssets.map((asset) => (
+                        <option key={asset.id} value={asset.id}>
+                          {asset.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </label>
               );
             })}
@@ -115,22 +136,25 @@ export default function ColorMappingStep({
             : 'Every visible draft color is assigned to a processed yarn asset.'}
         </p>
       </section>
+      ) : null}
 
-      <RenderPanel
-        draft={draft}
-        importMessage=""
-        renderJob={renderJob}
-        renderBusy={renderBusy}
-        onRenderPreview={onRenderPreview}
-        onExportCanonical={onExportCanonical}
-        onExportBlender={onExportBlender}
-        onApplyRenderSettings={onApplyRenderSettings}
-        stepLabel="Step 3"
-        title="Render Preview"
-        summaryText="Render the woven draft with the assigned yarn atlases and compare the Blender swatch against the drawdown."
-        statusMessage={renderMessage}
-        renderDisabled={!readyAssets.length || missingBindingsList.length > 0}
-      />
+      {showRender ? (
+        <RenderPanel
+          draft={draft}
+          importMessage=""
+          renderJob={renderJob}
+          renderBusy={renderBusy}
+          onRenderPreview={onRenderPreview}
+          onExportCanonical={onExportCanonical}
+          onExportBlender={onExportBlender}
+          onApplyRenderSettings={onApplyRenderSettings}
+          stepLabel="Step 3"
+          title="Render Preview"
+          summaryText="Render the woven draft in Blender and compare against the drawdown."
+          statusMessage={renderMessage}
+          renderDisabled={!readyAssets.length || missingBindingsList.length > 0}
+        />
+      ) : null}
     </section>
   );
 }

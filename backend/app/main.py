@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 try:
-    from fastapi import FastAPI, File, HTTPException, UploadFile
+    from fastapi import FastAPI, File, Form, HTTPException, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse
     from pydantic import BaseModel
@@ -11,6 +11,7 @@ except ImportError as exc:  # pragma: no cover - exercised through setup docs in
     FastAPI = None
     UploadFile = None
     File = None
+    Form = None
     HTTPException = RuntimeError
     BaseModel = object
     IMPORT_ERROR = exc
@@ -19,8 +20,12 @@ else:
 
 from .service import parse_file_bytes
 from .text_parser import parse_text_payload
+from .blender_live import build_material_asset_entry, push_bandmeta_to_live_blender
 from .blender_sync import load_blender_socket_config, send_blender_command, sync_draft_to_blender
+from .fabric_project import normalize_color_bindings, validate_project_bindings
 from .render_jobs import (
+    build_headless_render_script,
+    build_project_material_payloads,
     get_render_image_path,
     get_render_job,
     load_headless_blender_config,
@@ -29,15 +34,22 @@ from .render_jobs import (
 )
 from .yarn_assets import (
     create_yarn_assets,
+    delete_library_yarn,
     delete_yarn_asset,
+    get_library_yarn_file_path,
+    get_ready_yarn_assets_lookup,
     get_yarn_asset,
     get_yarn_asset_file_path,
+    import_yarn_from_library,
+    list_library_yarns,
     list_yarn_assets,
     retry_yarn_asset,
 )
 
 
 if FastAPI is not None:
+    from . import yarnseamless_routes  # yarn processing FastAPI router (Phase 2b)
+
     app = FastAPI(title="One-Point Fabric Studio Backend", version="0.2.0")
     app.add_middleware(
         CORSMiddleware,
@@ -45,6 +57,7 @@ if FastAPI is not None:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.include_router(yarnseamless_routes.router)
 
     class TextParseRequest(BaseModel):
         text: str
@@ -68,6 +81,19 @@ if FastAPI is not None:
         colorBindings: list[dict] = []
         target_object_name: str = "ParametricWeave"
         draft_object_name: str = "WebDraft_Live"
+
+
+    class PushBandMetaRequest(BaseModel):
+        yarnAssetIds: list[str] = []
+        target_object_name: str = "ParametricWeave"
+        modifier_name: str = "Weave"
+
+
+    class PushProjectBandMetaRequest(BaseModel):
+        draft: dict
+        colorBindings: list[dict] = []
+        target_object_name: str = "ParametricWeave"
+        modifier_name: str = "Weave"
 
 
     @app.get("/api/parser/health")
@@ -151,6 +177,81 @@ if FastAPI is not None:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+    @app.post("/api/blender/push-bandmeta")
+    async def push_bandmeta(request: PushBandMetaRequest):
+        lookup = get_ready_yarn_assets_lookup()
+        if request.yarnAssetIds:
+            ordered_assets = []
+            for asset_id in request.yarnAssetIds:
+                asset = lookup.get(asset_id)
+                if asset is None:
+                    raise HTTPException(status_code=404, detail=f"Yarn asset not ready: {asset_id}")
+                ordered_assets.append(asset)
+        else:
+            ordered_assets = list(lookup.values())
+        if not ordered_assets:
+            raise HTTPException(status_code=400, detail="No ready yarn assets to push.")
+        _atlas_entries, material_assets = build_project_material_payloads(ordered_assets)
+        response = push_bandmeta_to_live_blender(
+            material_assets,
+            target_object_name=request.target_object_name,
+            modifier_name=request.modifier_name,
+        )
+        if response.get("status") != "success":
+            raise HTTPException(status_code=502, detail=response)
+        return {
+            "status": "ok",
+            "pushed": len(material_assets),
+            "target": request.target_object_name,
+            "modifier": request.modifier_name,
+            "assets": [{"id": entry["id"], "label": entry["label"]} for entry in material_assets],
+            "blender": response.get("result"),
+        }
+
+
+    @app.post("/api/blender/push-project-bandmeta")
+    async def push_project_bandmeta(request: PushProjectBandMetaRequest):
+        # Phase 3f: live push from Pattern Builder. Uses the SAME slot ordering
+        # rule as render-project (validate_project_bindings → ordered_assets)
+        # so Material N here lines up with Material N at render time. Empty or
+        # partial bindings return 400 — the frontend gates on
+        # `allBindingsAssigned` already, so this is a safety net for stale UIs.
+        bindings = normalize_color_bindings(request.colorBindings)
+        lookup = get_ready_yarn_assets_lookup()
+        try:
+            _bindings, _warp_ids, _weft_ids, ordered_assets = validate_project_bindings(
+                request.draft, bindings, lookup,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not ordered_assets:
+            raise HTTPException(status_code=400, detail="No ready yarn assets to push.")
+        _atlas_entries, material_assets = build_project_material_payloads(ordered_assets)
+        script = build_headless_render_script(
+            request.draft,
+            render_path="/tmp/fabric-studio-live-setup.png",
+            target_object_name=request.target_object_name,
+            warp_material_ids=_warp_ids,
+            weft_material_ids=_weft_ids,
+            material_assets=material_assets,
+            weave_modifier_name=request.modifier_name,
+            render_still=False,
+        )
+        response = send_blender_command("execute_code", {"code": script})
+        if response.get("status") != "success":
+            raise HTTPException(status_code=502, detail=response)
+        return {
+            "status": "ok",
+            "pushed": len(material_assets),
+            "target": request.target_object_name,
+            "modifier": request.modifier_name,
+            "warpMaterialIds": _warp_ids,
+            "weftMaterialIds": _weft_ids,
+            "assets": [{"id": entry["id"], "label": entry["label"]} for entry in material_assets],
+            "blender": response.get("result"),
+        }
+
+
     @app.get("/api/blender/render-jobs/{job_id}")
     async def render_job_status(job_id: str):
         snapshot = get_render_job(job_id)
@@ -181,15 +282,61 @@ if FastAPI is not None:
         return list_yarn_assets()
 
 
+    @app.get("/api/yarn/library")
+    async def yarn_library_list():
+        return {"yarns": list_library_yarns()}
+
+
+    @app.get("/api/yarn/library/{yarn_id}/files/{filename:path}")
+    async def yarn_library_file(yarn_id: str, filename: str):
+        file_path = get_library_yarn_file_path(yarn_id, filename)
+        if file_path is None:
+            raise HTTPException(status_code=404, detail="Library file not found.")
+        suffix = file_path.suffix.lower()
+        media_type = "image/png"
+        if suffix in {".jpg", ".jpeg"}:
+            media_type = "image/jpeg"
+        elif suffix == ".webp":
+            media_type = "image/webp"
+        elif suffix == ".json":
+            media_type = "application/json"
+        return FileResponse(file_path, media_type=media_type, filename=file_path.name)
+
+
+    @app.post("/api/yarn/library/{yarn_id}/import")
+    async def yarn_library_import(yarn_id: str):
+        try:
+            return import_yarn_from_library(yarn_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+    @app.delete("/api/yarn/library/{yarn_id}")
+    async def yarn_library_delete(yarn_id: str):
+        try:
+            return delete_library_yarn(yarn_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
     @app.post("/api/yarn/assets")
-    async def upload_yarn_assets(files: list[UploadFile] = File(...)):
+    async def upload_yarn_assets(
+        files: list[UploadFile] = File(...),
+        orientation: str = Form("auto"),
+    ):
         if not files:
             raise HTTPException(status_code=400, detail="Upload at least one yarn image.")
+        if orientation not in ("auto", "horizontal", "vertical"):
+            raise HTTPException(status_code=400, detail="Invalid orientation.")
         try:
             payload = []
             for file in files:
                 payload.append((file.filename or "upload.png", await file.read()))
-            return create_yarn_assets(payload)
+            return create_yarn_assets(payload, orientation=orientation)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -219,9 +366,11 @@ if FastAPI is not None:
 
 
     @app.post("/api/yarn/assets/{asset_id}/retry")
-    async def retry_asset(asset_id: str):
+    async def retry_asset(asset_id: str, orientation: str = Form("auto")):
+        if orientation not in ("auto", "horizontal", "vertical"):
+            raise HTTPException(status_code=400, detail="Invalid orientation.")
         try:
-            return retry_yarn_asset(asset_id)
+            return retry_yarn_asset(asset_id, orientation=orientation)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Yarn asset not found.") from exc
         except Exception as exc:

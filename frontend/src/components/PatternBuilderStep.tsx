@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
+import ColorBindingGrid from './ColorBindingGrid';
 import DraftBoard from './DraftBoard';
-import ExploreLibrary from './ExploreLibrary';
 import InspectorPanel from './InspectorPanel';
+import PatternPickerPanel from './PatternPickerPanel';
 import StudioToolbar from './StudioToolbar';
 import {
   applyColorSequenceEdit,
@@ -19,7 +20,14 @@ import {
   updateDraftCounts,
 } from '../domain/draft';
 import { presets } from '../domain/presets';
-import type { DraftCounts, DraftDocument, FocusedDrawdownCell, ParserStatus } from '../domain/types';
+import type {
+  ColorBinding,
+  DraftCounts,
+  DraftDocument,
+  FocusedDrawdownCell,
+  ParserStatus,
+  YarnAsset,
+} from '../domain/types';
 import {
   checkParserStatus,
   describeImportSource,
@@ -30,14 +38,23 @@ import {
 interface PatternBuilderStepProps {
   draft: DraftDocument;
   setDraft: Dispatch<SetStateAction<DraftDocument>>;
+  yarnAssets: YarnAsset[];
+  colorBindings: ColorBinding[];
+  setColorBindings: Dispatch<SetStateAction<ColorBinding[]>>;
 }
 
-export default function PatternBuilderStep({ draft, setDraft }: PatternBuilderStepProps) {
+export default function PatternBuilderStep({
+  draft,
+  setDraft,
+  yarnAssets,
+  colorBindings,
+  setColorBindings,
+}: PatternBuilderStepProps) {
   const [focus, setFocus] = useState<FocusedDrawdownCell | null>(null);
   const [activeColor, setActiveColor] = useState(
     draft.warpColors[0] || draft.weftColors[0] || '#f3ede2',
   );
-  const [showExplore, setShowExplore] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
   const [parserStatus, setParserStatus] = useState<ParserStatus>('checking');
   const [busy, setBusy] = useState(false);
   const [pastedText, setPastedText] = useState('');
@@ -133,50 +150,6 @@ export default function PatternBuilderStep({ draft, setDraft }: PatternBuilderSt
 
   return (
     <section className="fabric-step-panel" data-testid="pattern-builder-step">
-      <StudioToolbar
-        counts={counts}
-        draft={draft}
-        parserStatus={parserStatus}
-        presets={presets}
-        busy={busy}
-        exploreOpen={showExplore}
-        onPresetChange={handlePresetChange}
-        onToggleExplore={() => setShowExplore((current) => !current)}
-        onCountsChange={handleCountsChange}
-        onImportClick={() => fileInputRef.current?.click()}
-        onReset={() => {
-          setDraft(createBlankDraft({ sourceType: 'manual', title: 'Untitled Draft' }));
-          setFocus(null);
-          setImportMessage('Started a fresh manual draft.');
-        }}
-        stepLabel="Step 2"
-        title="Pattern Builder"
-        summaryText="Shape the weave structure, edit the color strips, and prepare the draft that will drive the yarn-material render."
-      />
-
-      {showExplore ? (
-        <div className="studio-explore">
-          <ExploreLibrary
-            presets={presets}
-            onLoadPreset={(presetId) => {
-              handlePresetChange(presetId);
-              setShowExplore(false);
-            }}
-            onLoadDraft={(nextDraft, label) => {
-              setDraft({
-                ...normalizeDraft(nextDraft),
-                title: nextDraft.title || label,
-                sourceLabel: label,
-              });
-              setFocus(null);
-              setImportMessage(`Loaded ${label} from the local book library.`);
-              setShowExplore(false);
-            }}
-            onClose={() => setShowExplore(false)}
-          />
-        </div>
-      ) : null}
-
       <input
         ref={fileInputRef}
         type="file"
@@ -187,44 +160,77 @@ export default function PatternBuilderStep({ draft, setDraft }: PatternBuilderSt
       />
 
       <div className="studio-editor">
-        <DraftBoard
+        <StudioToolbar
+          counts={counts}
           draft={draft}
-          focus={focus}
-          activeColor={activeColor}
-          onThreadingSelect={(endIndex, shaft) => {
-            setDraft((current) => setThreadingShaft(current, endIndex, shaft));
+          parserStatus={parserStatus}
+          presets={presets}
+          busy={busy}
+          exploreOpen={showPicker}
+          onPresetChange={handlePresetChange}
+          onToggleExplore={() => setShowPicker((current) => !current)}
+          onCountsChange={handleCountsChange}
+          onImportClick={() => fileInputRef.current?.click()}
+          onReset={() => {
+            setDraft(createBlankDraft({ sourceType: 'manual', title: 'Untitled Draft' }));
+            setFocus(null);
+            setImportMessage('Started a fresh manual draft.');
           }}
-          onTieUpToggle={(shaftIndex, treadleIndex, forcedValue) => {
-            setDraft((current) => toggleTieUpCell(current, shaftIndex, treadleIndex, forcedValue));
-          }}
-          onTreadlingSelect={(pickIndex, treadle) => {
-            setDraft((current) => setTreadlingTreadle(current, pickIndex, treadle));
-          }}
-          onWarpColorPaint={(endIndex, color) => {
-            setDraft((current) => setWarpEndColor(current, endIndex, color));
-          }}
-          onWeftColorPaint={(pickIndex, color) => {
-            setDraft((current) => setWeftPickColor(current, pickIndex, color));
-          }}
-          onFocusCell={(cell) => {
-            setFocus((current) => (current?.pinned ? current : cell));
-          }}
-          onPinCell={(cell) => {
-            setFocus((current) => {
-              if (
-                current?.pinned &&
-                current.pickIndex === cell.pickIndex &&
-                current.endIndex === cell.endIndex
-              ) {
-                return null;
-              }
-              return { ...cell, pinned: true };
-            });
-          }}
-          onResetSection={(section) => {
-            setDraft((current) => resetSection(current, section));
-          }}
+          stepLabel="Step 2"
+          title="Pattern Builder"
+          summaryText="Shape the weave structure and color strips for your draft."
         />
+
+        <div className="studio-editor__center">
+          <DraftBoard
+            draft={draft}
+            focus={focus}
+            activeColor={activeColor}
+            onThreadingSelect={(endIndex, shaft) => {
+              setDraft((current) => setThreadingShaft(current, endIndex, shaft));
+            }}
+            onTieUpToggle={(shaftIndex, treadleIndex, forcedValue) => {
+              setDraft((current) => toggleTieUpCell(current, shaftIndex, treadleIndex, forcedValue));
+            }}
+            onTreadlingSelect={(pickIndex, treadle) => {
+              setDraft((current) => setTreadlingTreadle(current, pickIndex, treadle));
+            }}
+            onWarpColorPaint={(endIndex, color) => {
+              setDraft((current) => setWarpEndColor(current, endIndex, color));
+            }}
+            onWeftColorPaint={(pickIndex, color) => {
+              setDraft((current) => setWeftPickColor(current, pickIndex, color));
+            }}
+            onFocusCell={(cell) => {
+              setFocus((current) => (current?.pinned ? current : cell));
+            }}
+            onPinCell={(cell) => {
+              setFocus((current) => {
+                if (
+                  current?.pinned &&
+                  current.pickIndex === cell.pickIndex &&
+                  current.endIndex === cell.endIndex
+                ) {
+                  return null;
+                }
+                return { ...cell, pinned: true };
+              });
+            }}
+            onResetSection={(section) => {
+              setDraft((current) => resetSection(current, section));
+            }}
+          />
+
+          <ColorBindingGrid
+            draft={draft}
+            yarnAssets={yarnAssets}
+            colorBindings={colorBindings}
+            setColorBindings={setColorBindings}
+            eyebrow="Yarn Mapping"
+            title="Warp & Weft → Yarn"
+            compact
+          />
+        </div>
 
         <InspectorPanel
           draft={draft}
@@ -245,6 +251,27 @@ export default function PatternBuilderStep({ draft, setDraft }: PatternBuilderSt
           }}
         />
       </div>
+
+      {showPicker ? (
+        <PatternPickerPanel
+          presets={presets}
+          onLoadPreset={(presetId) => {
+            handlePresetChange(presetId);
+            setShowPicker(false);
+          }}
+          onLoadDraft={(nextDraft, label) => {
+            setDraft({
+              ...normalizeDraft(nextDraft),
+              title: nextDraft.title || label,
+              sourceLabel: label,
+            });
+            setFocus(null);
+            setImportMessage(`Loaded ${label} from the local book library.`);
+            setShowPicker(false);
+          }}
+          onClose={() => setShowPicker(false)}
+        />
+      ) : null}
     </section>
   );
 }

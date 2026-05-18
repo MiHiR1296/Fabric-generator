@@ -50,6 +50,32 @@ class YarnAsset:
     preprocessedUrl: str | None = None
     preprocessMeta: dict = field(default_factory=dict)
     alphaMeta: dict = field(default_factory=dict)
+    # Cycles-safe downscaled textures (≤16384 px); same as diffuse/alpha when
+    # the source already fits. Library-imported yarns always populate these.
+    renderDiffuseFilename: str | None = None
+    renderDiffuseUrl: str | None = None
+    renderAlphaFilename: str | None = None
+    renderAlphaUrl: str | None = None
+    # Full-resolution Cycles tiled/UDIM textures. Used when a scan exceeds the
+    # single-image device cap but can be split into legal U tiles.
+    renderTextureMode: str | None = None
+    renderDiffuseTilePattern: str | None = None
+    renderDiffuseTileFilenames: list[str] = field(default_factory=list)
+    renderDiffuseTileUrls: list[str] = field(default_factory=list)
+    renderAlphaTilePattern: str | None = None
+    renderAlphaTileFilenames: list[str] = field(default_factory=list)
+    renderAlphaTileUrls: list[str] = field(default_factory=list)
+    renderRgbaTilePattern: str | None = None
+    renderRgbaTileFilenames: list[str] = field(default_factory=list)
+    renderRgbaTileUrls: list[str] = field(default_factory=list)
+    renderTileCount: int | None = None
+    renderTileWidthPx: int | None = None
+    renderTileHeightPx: int | None = None
+    # Pre-computed Blender metadata block from the yarn library (see
+    # yarnseamless/web/yarn_library.py → metadata.blender). Consumer code in
+    # render_jobs.py pushes these straight to the Parametric Weave knotty
+    # modifier sockets without any further math.
+    bandMeta: dict = field(default_factory=dict)
     error: str | None = None
     createdAt: str | None = None
     updatedAt: str | None = None

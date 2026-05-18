@@ -6,6 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from PIL import Image
+
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -71,7 +73,7 @@ class YarnAssetTests(unittest.TestCase):
         self.assertFalse((self.assets_root / asset_id).exists())
 
     def test_create_yarn_assets_runs_pipeline_and_marks_assets_ready(self) -> None:
-        def fake_run_pipeline(*, input_path, output_dir, keep_intermediate, verbose):
+        def fake_run_pipeline(*, input_path, output_dir, orientation, keep_intermediate, verbose):
             processed_dir = Path(output_dir)
             processed_dir.mkdir(parents=True, exist_ok=True)
             seamless = processed_dir / "seamless.png"
@@ -84,7 +86,7 @@ class YarnAssetTests(unittest.TestCase):
                 "seamless": str(seamless),
                 "alpha": str(alpha),
                 "preprocessed": str(preprocessed),
-                "preprocess_meta": {"keptIntermediate": keep_intermediate},
+                "preprocess_meta": {"keptIntermediate": keep_intermediate, "orientation": orientation},
                 "alpha_meta": {"verbose": verbose},
             }
 
@@ -102,8 +104,62 @@ class YarnAssetTests(unittest.TestCase):
         self.assertEqual(asset.diffuseFilename, "processed/seamless.png")
         self.assertEqual(asset.alphaFilename, "processed/alpha.png")
         self.assertEqual(asset.preprocessedFilename, "processed/preprocessed.png")
-        self.assertEqual(asset.preprocessMeta, {"keptIntermediate": True})
+        self.assertEqual(asset.preprocessMeta, {"keptIntermediate": True, "orientation": "auto"})
         self.assertEqual(asset.alphaMeta, {"verbose": False})
+
+    def test_cycles_tiled_texture_set_slices_wide_strip_into_udims(self) -> None:
+        diffuse_path = self.root / "albedo.png"
+        alpha_path = self.root / "alpha.png"
+        Image.new("RGB", (33, 4), (255, 0, 0)).save(diffuse_path)
+        Image.new("L", (33, 4), 255).save(alpha_path)
+
+        tiled = yarn_assets.ensure_cycles_tiled_texture_set(
+            diffuse_path,
+            alpha_path,
+            self.root / "cycles_tiled",
+            max_dimension=16,
+        )
+
+        self.assertIsNotNone(tiled)
+        self.assertEqual(tiled["tile_count"], 3)
+        self.assertEqual(tiled["tile_width_px"], 11)
+        self.assertEqual(tiled["tile_height_px"], 4)
+        self.assertEqual(tiled["diffuse_pattern"].name, "albedo_<UDIM>.png")
+        self.assertEqual([path.name for path in tiled["diffuse_paths"]], [
+            "albedo_1001.png",
+            "albedo_1002.png",
+            "albedo_1003.png",
+        ])
+        for tile_path in tiled["diffuse_paths"]:
+            with Image.open(tile_path) as tile:
+                self.assertLessEqual(tile.size[0], 16)
+                self.assertEqual(tile.size[1], 4)
+
+    def test_cycles_tiled_rgba_texture_set_slices_source_rgba_into_udims(self) -> None:
+        rgba_path = self.root / "rgba.png"
+        Image.new("RGBA", (33, 4), (255, 0, 0, 128)).save(rgba_path)
+
+        tiled = yarn_assets.ensure_cycles_tiled_rgba_texture_set(
+            rgba_path,
+            self.root / "cycles_tiled",
+            max_dimension=16,
+        )
+
+        self.assertIsNotNone(tiled)
+        self.assertEqual(tiled["tile_count"], 3)
+        self.assertEqual(tiled["tile_width_px"], 11)
+        self.assertEqual(tiled["tile_height_px"], 4)
+        self.assertEqual(tiled["rgba_pattern"].name, "rgba_<UDIM>.png")
+        self.assertEqual([path.name for path in tiled["rgba_paths"]], [
+            "rgba_1001.png",
+            "rgba_1002.png",
+            "rgba_1003.png",
+        ])
+        for tile_path in tiled["rgba_paths"]:
+            with Image.open(tile_path) as tile:
+                self.assertEqual(tile.mode, "RGBA")
+                self.assertLessEqual(tile.size[0], 16)
+                self.assertEqual(tile.size[1], 4)
 
 
 if __name__ == "__main__":

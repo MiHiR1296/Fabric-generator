@@ -98,11 +98,8 @@ export default function InspectorPanel({
 
       <section className="card inspector__card">
         <p className="eyebrow">Draft Color Editor</p>
-        <h2>Pick the yarn colors for drafting</h2>
-        <p className="muted">
-          Use one active color at a time, then paint directly on the warp strip above the drawdown or
-          the weft strip beside it.
-        </p>
+        <h2>Pick the yarn colors</h2>
+        <p className="muted">Paint the warp or weft strip with the active color.</p>
 
         <div className="color-editor__toolbar">
           <label className="field field--compact color-editor__picker">

@@ -1,0 +1,1557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Fabric Generator Try-On Studio — Hyper-Detailed Project Review</title>
+<style>
+  /* ---------- print-aware base ---------- */
+  :root {
+    --ink: #1a1a1a;
+    --muted: #555;
+    --rule: #d9d4ca;
+    --accent: #6b3f1d;
+    --accent-soft: #f1ead8;
+    --warn: #8a4a00;
+    --good: #275c2a;
+    --bad: #8a1414;
+    --code-bg: #f6f3eb;
+    --callout: #fdf8e6;
+  }
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  html, body { background: #fff; color: var(--ink); }
+  body {
+    font: 11pt/1.55 "Iowan Old Style", "Georgia", "Cambria", "Times New Roman", serif;
+    max-width: 190mm;
+    margin: 0 auto;
+    padding: 8mm 0 18mm 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  h1, h2, h3, h4 { font-family: "Helvetica Neue", "Arial", sans-serif; color: #111; line-height: 1.25; }
+  h1 { font-size: 26pt; margin: 0 0 4pt 0; letter-spacing: -0.5px; }
+  h2 { font-size: 18pt; margin: 22pt 0 6pt 0; border-bottom: 2px solid var(--accent); padding-bottom: 3pt; page-break-after: avoid; }
+  h3 { font-size: 14pt; margin: 14pt 0 4pt 0; color: var(--accent); page-break-after: avoid; }
+  h4 { font-size: 11.5pt; margin: 10pt 0 2pt 0; text-transform: uppercase; letter-spacing: .5px; color: #444; }
+  p { margin: 0 0 8pt 0; orphans: 3; widows: 3; }
+  ul, ol { margin: 0 0 8pt 18pt; padding: 0; }
+  li { margin-bottom: 3pt; }
+  small, .small { font-size: 9.5pt; color: var(--muted); }
+  .lead { font-size: 12.5pt; color: #333; max-width: 165mm; }
+  .deck {
+    border-left: 4px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 8pt 12pt;
+    margin: 8pt 0 18pt 0;
+    font-style: italic;
+  }
+  code, pre, kbd, .mono { font-family: "JetBrains Mono", "Menlo", "Consolas", monospace; font-size: 9.5pt; }
+  pre {
+    background: var(--code-bg);
+    padding: 8pt 10pt;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow-x: auto;
+    white-space: pre;
+    page-break-inside: avoid;
+  }
+  code { background: var(--code-bg); padding: 0 4px; border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 12pt 0; font-size: 10pt; page-break-inside: avoid; }
+  th, td { border: 1px solid var(--rule); padding: 5pt 7pt; text-align: left; vertical-align: top; }
+  th { background: var(--accent-soft); font-family: "Helvetica Neue", Arial, sans-serif; font-size: 9.5pt; text-transform: uppercase; letter-spacing: .4px; }
+  tr:nth-child(even) td { background: #fafaf6; }
+  figure { margin: 12pt 0 14pt 0; page-break-inside: avoid; text-align: center; }
+  figure img { max-width: 100%; max-height: 145mm; border: 1px solid var(--rule); border-radius: 4px; background: #111; }
+  figcaption { font-size: 9.5pt; color: var(--muted); padding: 4pt 8pt 0 8pt; text-align: left; }
+  .callout {
+    border-left: 4px solid #c9a23a;
+    background: var(--callout);
+    padding: 8pt 12pt;
+    margin: 10pt 0;
+    page-break-inside: avoid;
+  }
+  .callout.bad { border-color: var(--bad); background: #fbeeee; }
+  .callout.good { border-color: var(--good); background: #eef5ee; }
+  .callout h4 { margin-top: 0; color: inherit; }
+  .pill {
+    display: inline-block;
+    background: #efeae0;
+    color: #4a3a1f;
+    border-radius: 99px;
+    padding: 1pt 8pt;
+    font-size: 9pt;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    letter-spacing: .3px;
+    text-transform: uppercase;
+    margin-right: 4pt;
+  }
+  .pill.done   { background: #d6ead7; color: #1f4a22; }
+  .pill.open   { background: #f4dbb5; color: #6b4116; }
+  .pill.risk   { background: #f4c3c3; color: #6b1414; }
+  .pill.legacy { background: #e0e0e0; color: #444; }
+  .ascii {
+    background: #111;
+    color: #ecead1;
+    padding: 10pt;
+    border-radius: 4px;
+    font-size: 8.8pt;
+    line-height: 1.4;
+    overflow-x: auto;
+    white-space: pre;
+    page-break-inside: avoid;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16pt; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12pt; }
+  @media print {
+    .grid-2, .grid-3 { display: block; }
+    h2 { page-break-before: always; }
+    h2.no-break { page-break-before: avoid; }
+    a, a:visited { color: var(--ink); text-decoration: none; }
+    .no-print { display: none; }
+  }
+  .toc ol { margin-left: 22pt; }
+  .toc li { margin-bottom: 2pt; }
+  .footer {
+    border-top: 1px solid var(--rule);
+    margin-top: 18pt;
+    padding-top: 8pt;
+    font-size: 9pt;
+    color: var(--muted);
+  }
+  .arrow { color: var(--accent); }
+  .v-min { color: #1f4a22; }
+  .v-max { color: #6b1414; }
+  .hint { color: var(--muted); font-size: 9.5pt; }
+  .table-compact td, .table-compact th { padding: 3pt 5pt; font-size: 9.5pt; }
+  hr.thin { border: 0; border-top: 1px solid var(--rule); margin: 12pt 0; }
+  .frontmatter {
+    border: 1px solid var(--rule);
+    padding: 10pt 14pt;
+    margin: 6pt 0 14pt 0;
+    background: #fbfaf6;
+  }
+  .frontmatter dt { font-weight: bold; }
+  .frontmatter dd { margin: 0 0 4pt 0; }
+  .twocol-defs { display: grid; grid-template-columns: max-content 1fr; column-gap: 14pt; row-gap: 3pt; font-size: 10pt; }
+  .twocol-defs dt { font-weight: bold; color: #444; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="small" style="text-transform:uppercase;letter-spacing:1px;color:var(--accent);font-weight:600;">Hyper-detailed project review · for print</div>
+  <h1>Fabric Generator Try-On Studio</h1>
+  <p class="lead">A four-step browser studio that turns a flatbed scan of physical yarn into a Blender-rendered woven fabric swatch, then tiles the swatch onto an interactive 3D try-on surface. This document records every step of the pipeline — what we did, why, the math, the drawbacks, the iterations.</p>
+
+  <div class="frontmatter">
+    <div class="twocol-defs">
+      <dt>Project root</dt><dd><code>yarnseamless UI/Fabric-generator-tryon/</code></dd>
+      <dt>Authors</dt><dd>Studio AI team (Impetus / Fynd)</dd>
+      <dt>Document date</dt><dd>2026-05-19 — revision 1.1</dd>
+      <dt>Status</dt><dd><span class="pill done">end-to-end working</span><span class="pill done">2026-05-19 visual baseline approved</span><span class="pill done">checkpointed</span></dd>
+      <dt>Backend</dt><dd>FastAPI · Python 3.11 · port 8000</dd>
+      <dt>Frontend</dt><dd>React + Vite + TypeScript · port 5180</dd>
+      <dt>Renderer</dt><dd>Blender 4.x · <code>Codex_ParametricWeave.blend</code> · MCP socket on port 9876</dd>
+      <dt>Shared contract</dt><dd>on-disk folder <code>yarn_library/&lt;yarn_id&gt;/</code> — <i>not</i> an HTTP API</dd>
+    </div>
+  </div>
+
+  <div class="deck">
+    The product change is that designers no longer juggle yarnseamless + draft-builder + Blender as three apps. <strong>The web app owns the workflow; Blender is treated as a render/setup engine behind the scenes.</strong> Every yarn that comes out of the scanner ships with a pre-computed Blender block in <code>metadata.json</code>, and the consumer's only job is to push those numbers verbatim to modifier sockets — no math on the consumer side.
+  </div>
+
+  <div class="callout good" style="page-break-inside:avoid;">
+    <h4 style="margin-top:0;">What's new since revision 1.0 (2026-05-18 → 2026-05-19)</h4>
+    <ul>
+      <li><strong>Visual baseline approved.</strong> The user signed off on the current direct web-to-Blender material result and froze it as the <em>2026-05-19 visual checkpoint</em>. Recorded in <code>docs/CHECKPOINT_2026-05-19.md</code>.</li>
+      <li><strong>New auto-scale denominator constant.</strong> The backend now separates <code>ARC1_V_AROUND_SPAN = 0.6</code> (geometry provenance — radius-owned core split) from <code>AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0</code> (the new active automatic Texture Scale U denominator). The 0.6 stays as documentation; the auto path uses 1.0.</li>
+      <li><strong>Pinned footgun set updated.</strong> <code>Texture Offset V</code> back to <code>0</code> (was 0.031914920); <code>Sub Texture Scale V</code> moved from <code>0</code> to <code>1</code>; <code>Arc 1 V Padding</code> default tightened from <code>0.012</code> to <code>0.008</code>; web-UI <code>Spacing = 0</code> now maps to Blender <code>Spacing = 0.026</code> (was 0.03).</li>
+      <li><strong>New rollback snapshots.</strong> <code>Codex_ParametricWeave.pre-scale-u-denominator-test-20260519_004510.blend</code> and <code>Codex_ParametricWeave.pre-spacing-default-20260519_030050.blend</code>.</li>
+      <li><strong>40 backend tests + frontend unit suite</strong> both pass against the checkpoint. Three render jobs (<code>c8b5f23c9cd8</code>, <code>65286a35639f</code>, <code>4365f1c9edcc</code>) shown in § 0 below as the approved-state outputs.</li>
+    </ul>
+  </div>
+</header>
+
+<nav class="toc">
+  <h2 class="no-break" style="page-break-before:auto;">Table of Contents</h2>
+  <ol start="0">
+    <li><a href="#checkpoint">2026-05-19 Visual Checkpoint &amp; Approved Outputs</a></li>
+    <li><a href="#exec">Executive Summary</a></li>
+    <li><a href="#arch">System Architecture — three apps, one shared folder</a></li>
+    <li><a href="#step1">Step 1 — Yarn Library (scan → seamless dossier)</a></li>
+    <li><a href="#step2">Step 2 — Pattern Builder (weaving draft)</a></li>
+    <li><a href="#step3">Step 3 — Render Preview (Blender + Parametric Weave knotty)</a></li>
+    <li><a href="#step4">Step 4 — Try On 3D</a></li>
+    <li><a href="#contract">The Data Contract — <code>metadata.json</code></a></li>
+    <li><a href="#blender">Blender Deep-Dive — Arc 1 / Arc 2, profile, V-band</a></li>
+    <li><a href="#phases">Phase Log — chronological record of every fix</a></li>
+    <li><a href="#tradeoffs">Drawbacks &amp; Advantages</a></li>
+    <li><a href="#open">Open Items</a></li>
+    <li><a href="#verify">Verification &amp; Testing</a></li>
+    <li><a href="#appendix">Appendix — file map, ports, env vars</a></li>
+  </ol>
+</nav>
+
+<!-- =====================================================  2026-05-19 CHECKPOINT  ===================================================== -->
+<section id="checkpoint">
+<h2 class="no-break">0. The 2026-05-19 Visual Checkpoint</h2>
+
+<p class="lead">After a long iteration on the Arc 2 V-mapping chain, the user visually approved the direct web-to-Blender material result on 2026-05-19 and asked to freeze it as the production baseline. Everything in this section is what "good" looks like today. Future Arc 2, padding, or U-scale work should branch from this state — not from the prior pinned-offset experiments.</p>
+
+<h3>0.1 Approved output renders</h3>
+
+<figure>
+  <img src="docs/_review_images/c8b5f23c9cd8_preview.jpg" alt="Approved Blender render — 6-shaft pointed twill, two scanned yarns, halo + core visible" />
+  <figcaption>Figure A — Job <code>c8b5f23c9cd8</code> (2026-05-19, 03:06). 6-shaft pointed twill (20×20) with two scanned yarns, rendered at 3 200×3 200, Cycles, 96 samples, denoising on. Direct per-yarn materials with the 2026-05-19 frozen defaults (<code>Arc 1 V Padding = 0.008</code>, <code>Spacing = 0.026</code>, <code>Texture Offset V = 0</code>, <code>Sub Texture Scale V = 1</code>, <code>AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0</code>). Halo and core both read correctly; section boundaries do not betray themselves on the strand silhouette.</figcaption>
+</figure>
+
+<figure>
+  <img src="docs/_review_images/65286a35639f_preview.jpg" alt="Approved Blender render — earlier iteration on the same draft" />
+  <figcaption>Figure B — Job <code>65286a35639f</code> (2026-05-19, 02:54). Same draft, earlier sweep during the visual approval session. Cells per cross-section match between Arc 1 and Arc 2; the halo flows outward from the raw core seam at the core V rate (Phase 10t).</figcaption>
+</figure>
+
+<figure>
+  <img src="docs/_review_images/4365f1c9edcc_preview.jpg" alt="Approved Blender render — third sample from the checkpoint session" />
+  <figcaption>Figure C — Job <code>4365f1c9edcc</code> (2026-05-19, 00:51). Earliest of the three approved-session samples. Shows the same baseline applied to a similar draft; the strand silhouette and the woven structure both look photoreal at swatch scale.</figcaption>
+</figure>
+
+<h3>0.2 Frozen socket values (canonical)</h3>
+
+<table>
+<thead><tr><th>Socket identifier</th><th>UI name</th><th>Checkpoint value</th><th>Was (rev 1.0)</th></tr></thead>
+<tbody>
+<tr><td><code>Socket_6</code></td><td>Spacing</td><td><code>0.026</code></td><td><code>0.03</code></td></tr>
+<tr><td><code>Socket_44</code></td><td>Texture Offset V</td><td><code>0</code></td><td><code>0.031914920</code> (Phase 10n checker phase)</td></tr>
+<tr><td><code>Socket_87</code></td><td>Sub Texture Scale V</td><td><code>1</code></td><td><code>0</code> (Rule 12 warning context)</td></tr>
+<tr><td><code>Socket_88</code></td><td>Sub Texture Offset V</td><td><code>0</code></td><td><code>0</code></td></tr>
+<tr><td><code>Socket_97</code></td><td>Texture Scale U (root)</td><td><code>1</code></td><td><code>1</code></td></tr>
+<tr><td><code>Socket_244</code></td><td>Arc 1 V Padding</td><td><code>0.008</code></td><td><code>0.012</code></td></tr>
+</tbody>
+</table>
+
+<p><em>Texture Scale U stays neutral at the root.</em> It is only a temporary visual test knob; per-material U correction belongs on <code>Material N Texture Scale U</code> and is derived from the new denominator below.</p>
+
+<h3>0.3 The new auto-scale denominator</h3>
+
+<p>The backend now keeps two distinct constants:</p>
+
+<pre>ARC1_V_AROUND_SPAN              = 0.6     # geometry provenance — Arc 1 / Arc 2 radius-owned core split (0.015 / 0.025)
+AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0    # active denominator for the automatic Texture Scale U path
+
+arc1_v_min_padded         = max(core_v_min − Arc 1 V Padding, fiber_bot_v_min)
+arc1_v_max_padded         = min(core_v_max + Arc 1 V Padding, fiber_top_v_max)
+visible_v_span            = arc1_v_max_padded − arc1_v_min_padded
+Material N Texture Scale U = visible_v_span / AUTO_TEXTURE_SCALE_U_DENOMINATOR</pre>
+
+<p>The previous <code>/ 0.6</code> formula folded the geometric split into the texture multiplier — convenient as a single number, but it conflated "what's the physical V rate of Arc 2's core?" with "what's the right texture U scale?". The 2026-05-19 split treats those as two independent concerns. The <code>0.6</code> stays as <em>radius/split provenance</em> in code comments and in this doc; the active auto path uses <code>1.0</code>.</p>
+
+<p>Smoke value from a recent yarn (visible V span 0.0338):</p>
+<pre>texture_scale_u_fallback = 0.0338 / 1.0 = 0.03384912959381048</pre>
+
+<h3>0.4 Pinned "footgun" set — checkpoint version</h3>
+
+<table>
+<thead><tr><th>Socket</th><th>Pinned value</th><th>Why this value</th></tr></thead>
+<tbody>
+<tr><td><code>Sub Strand Enable</code></td><td><code>True</code></td><td>Unchanged. Without this, Arc 2's halo mapping doesn't fire (Rule 11).</td></tr>
+<tr><td><code>Texture Scale V</code></td><td><code>1</code></td><td>Unchanged. Anything else multiplies the V output and misaligns the Arc 1/2 partition.</td></tr>
+<tr><td><code>Texture Offset V</code></td><td><code>0</code></td><td><strong>Changed.</strong> Phase 10n's <code>0.031914920</code> was a checker/material phase-alignment experiment; the approved checkpoint returns to neutral.</td></tr>
+<tr><td><code>Texture Side Flatten</code></td><td><code>0</code></td><td>Unchanged. Cross-section maps as flat ribbon (no cylindrical projection).</td></tr>
+<tr><td><code>Sub Texture Scale V</code></td><td><code>1</code></td><td><strong>Changed.</strong> In the approved baseline the sub-strand layer carries the same V scale as the main strand. Earlier docs pinned this to 0 with a warning that <code>1.0</code> would "double the Arc 2 V mapping"; on this branch the Arc 2 chain accepts it because Phase 10t's free-halo flow already inherits the core V rate.</td></tr>
+<tr><td><code>Sub Texture Offset V</code></td><td><code>0</code></td><td>Unchanged.</td></tr>
+</tbody>
+</table>
+
+<h3>0.5 Code defaults aligned to the checkpoint</h3>
+<ul>
+  <li><code>backend/app/blender_sync.py</code> — <code>DEFAULT_ARC1_V_PADDING = 0.008</code>; setup forces <code>Texture Offset V = 0</code>, <code>Sub Texture Scale V = 1</code>, <code>Sub Texture Offset V = 0</code>.</li>
+  <li><code>backend/app/blender_sync.py</code> — <code>DEFAULT_SPACING = 0.026</code>; Web UI <code>Spacing = 0</code> remaps to physical Blender <code>Spacing = 0.026</code>.</li>
+  <li><code>backend/app/blender_live.py</code> — <code>PINNED_FOOTGUN_SOCKETS</code> updated to the values above; <code>AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0</code>.</li>
+  <li><code>frontend/src/domain/draft.ts</code> — <code>DEFAULT_ARC1_V_PADDING = 0.008</code>.</li>
+</ul>
+
+<h3>0.6 Verification of the checkpoint</h3>
+<ul>
+  <li><strong>Backend</strong>: <code>python3 -m unittest discover backend/tests</code> → 40 tests OK.</li>
+  <li><strong>Frontend</strong>: <code>npm run test:unit</code> → passed after the UI default update.</li>
+  <li><strong>Blender readback</strong> via MCP confirmed every frozen socket above (<code>Socket_6 = 0.026</code>, <code>Socket_44 = 0</code>, <code>Socket_87 = 1</code>, <code>Socket_88 = 0</code>, <code>Socket_97 = 1</code>, <code>Socket_244 = 0.00800000037997961</code>).</li>
+  <li><strong>Renders</strong>: three full Cycles renders shipped from the checkpoint session; figures A–C above are the artefacts.</li>
+</ul>
+
+<h3>0.7 Rollback path</h3>
+<p>To compare against the pre-checkpoint state, restore one of:</p>
+<pre>Codex_ParametricWeave.pre-scale-u-denominator-test-20260519_004510.blend
+Codex_ParametricWeave.pre-spacing-default-20260519_030050.blend</pre>
+<p>Then reset the backend denominator to the previous visible-span formula <strong>only for comparison</strong>:</p>
+<pre>Material N Texture Scale U = visible_v_span / 0.6</pre>
+
+<div class="callout">
+<h4>Doc-vs-code reading rule</h4>
+Where § 7.4 (the original pinned set) and § 0.4 (the checkpoint pinned set) disagree, <strong>§ 0.4 wins</strong>. The earlier table is kept for traceability — it documents how the project arrived at the checkpoint — but the running code matches § 0.4.
+</div>
+
+</section>
+
+
+<!-- =====================================================  EXECUTIVE  ===================================================== -->
+<section id="exec">
+<h2 class="no-break">1. Executive Summary</h2>
+
+<p>Three previously-disconnected pieces of software now talk through one workflow:</p>
+<ol>
+  <li><strong>yarnseamless</strong> — an image-science pipeline that takes a 1600 DPI flatbed scan of physical yarn (multiple threads, several photos, hairy halos, missing alpha) and produces a seamless RGBA yarn dossier with pre-computed Blender metadata.</li>
+  <li><strong>Fabric-generator-tryon</strong> — the new 4-step React studio that owns the user-facing workflow: yarn authoring, draft authoring, render preview, and a browser-side try-on scene.</li>
+  <li><strong>Blender</strong> — <code>Codex_ParametricWeave.blend</code> with the <em>Parametric Weave knotty</em> geometry-node graph, driven via headless subprocess <em>or</em> a live MCP socket (port 9876).</li>
+</ol>
+
+<p>The studio runs the user from <em>"I have a yarn scan"</em> to <em>"I have a rendered fabric swatch tiled on a 3D shirt"</em> in four wizard steps. No tab juggling, no manual file copies, no Blender knowledge required from designers.</p>
+
+<h3>What ships today</h3>
+<table>
+<thead><tr><th>Capability</th><th>Status</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Multi-thread yarn scan splitter</td><td><span class="pill done">done</span></td><td>Detects 1–N parallel threads in one scan, levels each into its own strip, runs the band detector.</td></tr>
+<tr><td>Multi-fragment stitcher (yarn longer than one scan)</td><td><span class="pill done">done</span></td><td>User picks join points; LaMa inpaints; alpha is regenerated post-join.</td></tr>
+<tr><td>LaMa join inpainting</td><td><span class="pill done">done</span></td><td><code>big-lama.pt</code> resolved via env var or chunk-reconstruction at runtime.</td></tr>
+<tr><td>Post-inpaint band detector (FWHM density walk)</td><td><span class="pill done">done</span></td><td>One pass over assembled alpha returns <code>{core, fiber_top, fiber_bot}</code>.</td></tr>
+<tr><td>Yarn library (cross-app contract)</td><td><span class="pill done">done</span></td><td>Shared on-disk folder; the only inter-process API.</td></tr>
+<tr><td>Weaving draft editor</td><td><span class="pill done">done</span></td><td>Threading, tie-up, treadling, drawdown, paintable warp/weft colors.</td></tr>
+<tr><td>WIF / JSON / text / image import</td><td><span class="pill done">done</span></td><td>FastAPI service does structured parsing; frontend has a loose fallback.</td></tr>
+<tr><td>Color-to-yarn binding</td><td><span class="pill done">done</span></td><td>Each warp/weft palette color maps to a runtime yarn asset.</td></tr>
+<tr><td>Direct per-yarn material rendering in Blender</td><td><span class="pill done">done</span></td><td>Up to 16 yarns per swatch; atlas path retained as fallback.</td></tr>
+<tr><td>UDIM-style tiling for Cycles 16 384 px cap</td><td><span class="pill done">done</span></td><td>Wide scans split into <code>cycles_tiled/rgba_&lt;UDIM&gt;.png</code>; Cycles-safe downscale as 2nd-stage fallback.</td></tr>
+<tr><td>Headless render jobs</td><td><span class="pill done">done</span></td><td><code>blender -b … -P render_job.py</code>; preview polled by the UI.</td></tr>
+<tr><td>Live MCP push (dev mode)</td><td><span class="pill done">done</span></td><td><code>BLENDER_LIVE_RENDER=1</code> routes the render script into an already-open Blender.</td></tr>
+<tr><td>Arc 1 / Arc 2 V-band system (10+ phases of iteration)</td><td><span class="pill done">done</span><span class="pill done">checkpoint approved</span></td><td>Two-arc cross-section UV that captures both the dense core and the wispy halo.</td></tr>
+<tr><td>Try On 3D (three.js)</td><td><span class="pill done">done</span></td><td>Tiles the rendered swatch onto a draped surface.</td></tr>
+</tbody>
+</table>
+
+<h3>What's deliberately out of scope today</h3>
+<ul>
+  <li>No service registry, no message queue, no Docker. Localhost-only tool.</li>
+  <li>No authentication. Single-user assumption.</li>
+  <li>No persistent database. State is files; the studio is restart-safe by construction.</li>
+  <li>No live cross-tab sync. A 3-second poll on Step 1 is the only reactive surface.</li>
+</ul>
+</section>
+
+<!-- =====================================================  ARCHITECTURE  ===================================================== -->
+<section id="arch">
+<h2>2. System Architecture</h2>
+
+<p>Three processes; one shared folder. <strong>Not an HTTP API between the apps</strong> — the contract is a directory on disk.</p>
+
+<div class="ascii">
+┌────────────────────────────┐    ┌──────────────────────────────┐    ┌─────────────────────────┐
+│  yarnseamless              │    │  Fabric-generator-tryon      │    │  Blender                │
+│  (reference / source)      │    │  (the studio, this repo)     │    │  (renderer)             │
+│                            │    │                              │    │                         │
+│  Vite     :5173            │    │  Vite      :5180             │    │  MCP socket :9876       │
+│  Node API :3001            │    │  FastAPI   :8000             │    │  Codex_ParametricWeave  │
+│  Flask    :3002            │    │  Step 1 ported routes        │    │  .blend                 │
+└────────────┬───────────────┘    └────────────────┬─────────────┘    └────────────┬────────────┘
+             │                                     │                               │
+             │ writes                              │ reads / imports               │ rendered by
+             ▼                                     ▼                               │
+        ┌──────────────────────────────────────────────────────┐                   │
+        │  yarn_library/                                       │ ◀─────────────────┘
+        │  └── &lt;yarn_id&gt;/                                      │      Backend pushes
+        │       ├── rgba.png                                   │      bandMeta.blender.*
+        │       ├── input_thumb.jpg                            │      to modifier sockets
+        │       └── metadata.json   (see § 7)                  │
+        └──────────────────────────────────────────────────────┘
+</div>
+
+<h3>Why three apps, not one</h3>
+<table>
+<thead><tr><th>App</th><th>Responsibility</th><th>Why it stays separate</th></tr></thead>
+<tbody>
+<tr><td><strong>yarnseamless</strong> (reference)</td><td>Original image-science pipeline: scan → seamless dossier. Multi-thread split, multi-fragment stitch with LaMa, alpha matting, dimension extraction.</td><td>Kept as the canonical reference. The Step-1 path inside Fabric-generator-tryon is a faithful port of this.</td></tr>
+<tr><td><strong>Fabric-generator-tryon</strong></td><td>The studio: yarn authoring + draft authoring + Blender orchestration + Try-On 3D. The user-facing surface.</td><td>UX is wizard-style (4 steps) and now owns the end-to-end designer flow.</td></tr>
+<tr><td><strong>Blender</strong></td><td>Final rendering. The <em>Parametric Weave knotty</em> geometry-node graph + per-yarn materials.</td><td>Cycles cannot live inside a web process; the .blend is a versioned visible artefact; MCP gives us scripted control without forking Blender.</td></tr>
+</tbody>
+</table>
+
+<h3>The four wizard steps</h3>
+<table>
+<thead><tr><th>Step</th><th>What it does</th><th>Layout</th></tr></thead>
+<tbody>
+<tr><td>1 · Yarn Library</td><td>Upload scan(s), split multi-thread, stitch multi-fragment, LaMa-inpaint joins, regenerate alpha, save dossier, auto-import.</td><td>Full-page (canvas-heavy). Scrolls naturally; sticky header + footer chrome.</td></tr>
+<tr><td>2 · Pattern Builder</td><td>Manual or import draft (threading / tie-up / treadling / drawdown / warp + weft colors), paint, bind each color to a yarn.</td><td>Viewport-locked, tightly-packed grid editor.</td></tr>
+<tr><td>3 · Render Preview</td><td>Push draft + bindings + render settings to Blender; receive preview PNG; export draft / Blender handoff JSON.</td><td>Form + preview; medium info density.</td></tr>
+<tr><td>4 · Try On 3D</td><td>Use the swatch as a tiled texture in a three.js scene.</td><td>Full-viewport WebGL.</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+  <h4>Layout pattern established 2026-05-13</h4>
+  Every step is its own full-page React app. The only persistent chrome is a sticky header (hero + 4-step stepper) and a sticky footer (Back / Next). Steps opt into this pattern with a class on the shell — e.g. <code>step-yarnseamless</code> unlocks scroll for the canvas-heavy Step 1 editor. We tried twice to embed yarnseamless inside a viewport-locked layout and failed; the per-step shell is now mandatory.
+</div>
+
+<h3>Ports — full reference</h3>
+<table class="table-compact">
+<thead><tr><th>Process</th><th>Port</th><th>Purpose</th><th>Override</th></tr></thead>
+<tbody>
+<tr><td>yarnseamless Vite</td><td>5173</td><td>Original reference UI</td><td><code>vite.config.js</code></td></tr>
+<tr><td>yarnseamless Node</td><td>3001</td><td>Multipart uploads, light proxy</td><td>hard-coded</td></tr>
+<tr><td>yarnseamless Flask</td><td>3002</td><td>LaMa + alpha solver + multithread API</td><td>hard-coded</td></tr>
+<tr><td>Fabric-generator-tryon Vite</td><td>5180</td><td>The studio UI</td><td><code>vite.config.ts</code></td></tr>
+<tr><td>Fabric-generator-tryon FastAPI</td><td>8000</td><td>Library + draft + render endpoints</td><td><code>uvicorn.run(host=, port=)</code></td></tr>
+<tr><td>Blender MCP socket</td><td>9876</td><td><code>BlenderMCPAddon</code> socket server</td><td><code>BLENDER_PORT</code> env (Makefile pins 9876)</td></tr>
+</tbody>
+</table>
+
+<h3>Headless vs Live MCP render — one switch</h3>
+<table>
+<thead><tr><th><code>BLENDER_LIVE_RENDER</code></th><th>Executor</th><th>When to use</th></tr></thead>
+<tbody>
+<tr><td>unset / <code>0</code> (default)</td><td><strong>Headless</strong> — spawns <code>blender -b &lt;blend&gt; --python &lt;script&gt;</code>. The .blend re-opens cleanly each render.</td><td>Production. Default. Makefile target <code>make backend-dev</code>.</td></tr>
+<tr><td><code>1</code> / <code>true</code> / <code>on</code></td><td><strong>Live MCP</strong> — sends the same Python script body to Blender's port 9876 via <code>BlenderMCPAddon.execute_code</code>. Renders against the user's current scene.</td><td>Dev only — iterating on the .blend, want renders to land in the viewport you're editing. <code>make backend-dev-live</code>.</td></tr>
+</tbody>
+</table>
+
+<p>Both paths use the <em>same</em> script generation (<code>build_headless_render_script</code> in <code>render_jobs.py</code>) — only the executor differs. The live path locally overrides <code>BLENDER_TIMEOUT_SECONDS</code> → <code>BLENDER_LIVE_TIMEOUT_SECONDS</code> (default 900 s) so long Cycles renders don't TCP-timeout.</p>
+</section>
+
+<!-- =====================================================  STEP 1: YARN LIBRARY  ===================================================== -->
+<section id="step1">
+<h2>3. Step 1 — Yarn Library (scan → seamless dossier)</h2>
+
+<p class="lead">Step 1 takes a flatbed scan of physical yarn and produces a clean, seamless, dimension-bearing RGBA dossier. It is the most algorithmically intricate step in the entire studio.</p>
+
+<figure>
+  <img src="../yarn_library/20260518_011033_63b8c8/input_thumb.jpg" alt="Raw yarn scan thumbnail showing three parallel threads on a black background" />
+  <figcaption>Figure 1 — A raw scan ingested by Step 1. Three parallel threads, 3 572 × 15 689 px, embedded DPI 1600. The pipeline below splits each thread, stitches fragments end-to-end, inpaints the join seams, regenerates alpha, and emits one seamless yarn per thread.</figcaption>
+</figure>
+
+<h3>3.1 The five sub-stages</h3>
+<ol>
+  <li><strong>Upload</strong> — drag a scan into the studio. The backend stores raw bytes under <code>runtime/debug/&lt;session&gt;/</code> (git-ignored).</li>
+  <li><strong>Multi-thread split &amp; level</strong> — auto-detects parallel threads in the scan; cuts each into its own strip; levels them so the band centre is horizontal.</li>
+  <li><strong>Multi-fragment stitch</strong> — when one yarn was captured across multiple scans, the user picks join points and the system splices them end-to-end.</li>
+  <li><strong>LaMa join inpainting</strong> — the join seam is masked and inpainted with <code>big-lama.pt</code>; alpha is regenerated on the joined image.</li>
+  <li><strong>Band detection + dossier save</strong> — runs the FWHM density walk on the assembled alpha; pre-computes the Blender-ready V-band values; writes <code>rgba.png</code>, <code>input_thumb.jpg</code>, <code>metadata.json</code> into the shared library folder.</li>
+</ol>
+
+<h3>3.2 Multi-thread detection &amp; per-thread band finding</h3>
+
+<p>The <em>solid band</em> module in <code>backend/app/yarnseamless/multithread_flow/solid_band.py</code> runs two parallel band detectors per thread, then picks the better one for the alignment step:</p>
+
+<table>
+<thead><tr><th>Detector</th><th>Idea</th><th>Threshold</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><strong>Approach C</strong> <code>approach_c_longest_run</code></td><td>Per-row longest-True run / image-width.</td><td><code>COVERAGE_THRESHOLD = 0.85</code></td><td>Longest contiguous run of qualifying rows — the densest part of the thread.</td></tr>
+<tr><td><strong>Approach D</strong> <code>approach_d_combined_smoothed</code></td><td>Weighted sum <code>0.2·mean + 0.2·max + 0.3·coverage + 0.3·run_frac</code>, smoothed by a 5-tap moving average.</td><td><code>SCORE_THRESHOLD = 0.85</code></td><td>A wider, more forgiving band. Used as fallback when C returns a negative <code>top_y</code>.</td></tr>
+</tbody>
+</table>
+
+<p>Both feed <code>compute_fiber_extents_y</code>, which walks <em>outward</em> from the core, qualifying a row as "in strand" when its visible-pixel count is ≥ <code>max(3, 0.05 × peak_visible_count)</code>. The output per thread is:</p>
+
+<pre>{
+  "index": 0,
+  "c_band": { "top_y": 199, "bottom_y": 232, "height": 33,
+              "fiber_top_y": 119, "fiber_bot_y": 325 },
+  "d_band": { "top_y": 198, "bottom_y": 233, "height": 35,
+              "fiber_top_y": 119, "fiber_bot_y": 325 },
+  "width_samples": [{ "x", "top_y", "bottom_y", "width_px", "width_mm" }, ...]
+}</pre>
+
+<div class="callout">
+<h4>Why two detectors instead of one</h4>
+On clean, single-thread scans Approach C is more accurate (sharp core boundary). On noisy or multi-thread scans Approach C frequently returns <code>top_y &lt; 0</code> — its 0.85 coverage threshold is too strict — and the per-thread review needs <em>some</em> band-centre estimate before the user can manually offset. Approach D is the fallback.
+</div>
+
+<h3>3.3 The two-pass band problem (current → target)</h3>
+
+<p>Today there are <em>two</em> independent band detectors running on different stages of the pipeline:</p>
+
+<table>
+<thead><tr><th>Pass</th><th>Runs on</th><th>What it produces</th><th>Used by</th></tr></thead>
+<tbody>
+<tr><td><strong>Pass 1</strong> (pre-inpaint, per-thread)</td><td>Each thread's leveled alpha, before stitching.</td><td>C/D core bands + fiber extents per thread.</td><td>MTI alignment, review overlays, <code>width</code> field in export metadata.</td></tr>
+<tr><td><strong>Pass 2</strong> (post-inpaint, on assembled alpha)</td><td>The final <code>export_assembled_alpha.png</code> after multifragment stitching, LaMa inpainting, alpha regen, and no-wraparound export trimming.</td><td><code>bands_px = {core, fiber_top, fiber_bot}</code> and the normalised V-ranges in Blender convention (V=0 bottom).</td><td>Final <code>metadata.blender.{core_v_min/max, fiber_top_v_max, fiber_bot_v_min}</code>.</td></tr>
+</tbody>
+</table>
+
+<div class="callout bad">
+<h4>Drawback: the two passes don't fully agree</h4>
+Pass 2's core is currently inherited verbatim from Pass 1 averages (<code>unified_top = round(avg(c_band.top_y + frag_y))</code>). So the final assembled core is quantised to per-thread C/D guesses, not measured on the assembled alpha. Also, Pass 1 owns "core" and Pass 2's <code>compute_fiber_bands</code> owns "fibers" — different density semantics (binary threshold vs visible-pixel walk with peak%-of-floor).
+</div>
+
+<div class="callout good">
+<h4>Planned fix — one FWHM density walk post-inpaint</h4>
+A unified <code>detect_bands</code> (ported from <code>YarnSeamless/yarnseamless/band_segmenter.py</code>) runs once on the final assembled alpha and returns <code>{core, fiber_top, fiber_bot}</code> in a single pass. Pre-inpaint C/D stay only as <em>alignment helpers</em> for MTI. The save-to-library fiber walk is replaced by the new detector; the <code>width</code> field is recomputed on the new core. See <code>docs/WebUIbands/target_pipeline.md</code> for the cut-over plan.
+</div>
+
+<h3>3.4 Multi-fragment stitch &amp; LaMa join inpainting</h3>
+<p>When a yarn is too long for one flatbed pass, multiple scans are taken and stitched end-to-end. The user picks join points; the backend prepares a join canvas with a soft mask over the seam; LaMa (<code>big-lama.pt</code>, 392 MB) fills the seam; alpha is regenerated on the joined RGB so the new pixels also have correct opacity.</p>
+
+<p>Join records survive in <code>metadata.joins[]</code>:</p>
+<pre>"joins": [
+  { "join_index": 0, "from_thread_index": 0, "to_thread_index": 1,
+    "mode": "inpainted", "is_wraparound_excluded_from_export": false },
+  { "join_index": 1, "from_thread_index": 1, "to_thread_index": 2,
+    "mode": "inpainted", "is_wraparound_excluded_from_export": false },
+  { "join_index": 2, "from_thread_index": 2, "to_thread_index": 0,
+    "mode": "inpainted", "is_wraparound_excluded_from_export": true }
+]</pre>
+
+<p>The wraparound join is recorded but excluded from the exported image so the texture U axis is non-cyclic. The wraparound join is what would make the yarn loop seamlessly head-to-tail — we keep the data but trim the export.</p>
+
+<h4>LaMa model resolution order</h4>
+<ol>
+  <li><code>BIG_LAMA_MODEL_PATH</code> env var</li>
+  <li><code>LAMA_MODEL</code> env var</li>
+  <li><code>../big-lama.pt</code> next to the repo (typically <code>yarnseamless UI/big-lama.pt</code>)</li>
+  <li><code>backend/vendor/yarn_pipeline/big-lama.pt</code></li>
+  <li><code>~/.cache/torch/hub/checkpoints/big-lama.pt</code></li>
+  <li>Vendored chunk reconstruction when chunk files are present</li>
+</ol>
+
+<h3>3.5 Output: the yarn dossier</h3>
+
+<p>A saved yarn is a folder. The whole cross-app contract is this folder.</p>
+
+<pre>yarn_library/&lt;yarn_id&gt;/
+  rgba.png         # full-resolution RGBA, seamless along U
+  input_thumb.jpg  # small preview
+  metadata.json    # provenance + measurements + pre-computed Blender block
+</pre>
+
+<p>The <code>metadata.json</code> is the contract; § 7 walks it field by field.</p>
+
+<h3>3.6 The three-layer state model behind Step 1</h3>
+
+<p>The wizard's four steps share state through <strong>three layers</strong>, with three sync points where every cross-layer mutation lives.</p>
+
+<table>
+<thead><tr><th>Layer</th><th>Lives in</th><th>Source of truth for</th><th>Written by</th><th>Read by</th></tr></thead>
+<tbody>
+<tr><td><strong>L1 — Library</strong></td><td><code>yarn_library/&lt;id&gt;/</code> + <code>index.json</code></td><td>"What yarns has anyone ever scanned?"</td><td>Save-to-Library inside Step 1 (and the original yarnseamless)</td><td>Step 1's library strip via <code>/api/yarn/library</code></td></tr>
+<tr><td><strong>L2 — Runtime asset</strong></td><td><code>runtime/yarn_assets/&lt;asset_id&gt;/</code> + <code>_ASSETS</code> in-process cache</td><td>"What yarns has <em>this project</em> imported?"</td><td><code>import_yarn_from_library</code> &amp; <code>create_yarn_assets</code></td><td>Step 2 dropdowns, Step 3 render job, live bandMeta push</td></tr>
+<tr><td><strong>L3 — Color binding</strong></td><td><code>colorBindings</code> React state in <code>App.tsx</code></td><td>"Which yarn is assigned to which warp/weft palette color?"</td><td>ColorBindingGrid <code>&lt;select&gt;</code> onChange; auto-import on <code>handleImportFromLibrary</code></td><td>Pattern Builder preview; render-project; push-project-bandmeta</td></tr>
+</tbody>
+</table>
+
+<p>Critical invariant: <em>a <code>colorBinding.yarnAssetId</code> (L3) is a foreign key into L2; an L2 asset's <code>bandMeta.library_yarn_id</code> back-references L1.</em> There are no enforced constraints — every cross-layer mutation is a place a bug can live. <strong>Phase W1</strong> shipped the library-delete cascade so deletes in L1 propagate to L2 and L3.</p>
+
+</section>
+
+<!-- =====================================================  STEP 2: PATTERN BUILDER  ===================================================== -->
+<section id="step2">
+<h2>4. Step 2 — Pattern Builder (the weaving draft)</h2>
+
+<p class="lead">A draft editor that preserves the conventional "tie-up corner" reading direction and binds each palette color to a real yarn asset.</p>
+
+<h3>4.1 The canonical draft</h3>
+
+<pre>{
+  "version": 1,
+  "sourceType": "manual|wif|json|text|image",
+  "shaftCount": 8,
+  "treadleCount": 8,
+  "threading": [1, 2, 3, 4, ...],
+  "tieUp":     [[true, false], [false, true], ...],
+  "treadling": [1, 2, 3, 4, ...],
+  "drawdown":  [[1, 0, 1, 0], ...],          // derived
+  "warpColors":["#ffffff", ...],
+  "weftColors":["#cc0000", ...],
+  "parseConfidence": 0.92,
+  "warnings": [],
+  "lowConfidenceCells": [],
+  "title": "Example Draft",
+  "sourceLabel": "Preset: Example",
+  "renderSettings": {
+    "warpThreads": 96, "weftThreads": 96,
+    "spacing": 0.026, "amplitude": 0.005,
+    "textureScaleV": 0.5, "fillRatio": 1
+  }
+}</pre>
+
+<p>Rules:</p>
+<ul>
+  <li><code>drawdown</code> is derived from <code>threading + tieUp + treadling</code>; never edited directly.</li>
+  <li><code>warpColors.length === warpEnds</code> and <code>weftColors.length === picks</code>.</li>
+  <li><code>renderSettings</code> belongs to the draft document because preview output depends on it.</li>
+  <li>Imported drafts are normalised immediately.</li>
+</ul>
+
+<h3>4.2 Information architecture</h3>
+
+<table>
+<thead><tr><th>Region</th><th>File</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td>Toolbar</td><td><code>StudioToolbar.tsx</code></td><td>Quick-load presets, Explore/Load, file import, reset, count inputs, status pills.</td></tr>
+<tr><td>Draft Workspace</td><td><code>DraftBoard.tsx</code></td><td>Main weaving interface — tie-up top-right, threading top-left, drawdown centre-left, treadling centre-right, paint strips on the outer edges.</td></tr>
+<tr><td>Inspector</td><td><code>InspectorPanel.tsx</code></td><td>Secondary surface — understanding layer + color editor; advanced text editors hidden behind a disclosure.</td></tr>
+<tr><td>Render Step</td><td><code>RenderPanel.tsx</code></td><td>Step-two area: Render Preview, Export Draft JSON, Export Blender Map, Blender controls, preview image, recent logs.</td></tr>
+</tbody>
+</table>
+
+<h3>4.3 Orientation rule (do not regress)</h3>
+<p>The draft is read from the <strong>tie-up corner</strong>. Threading starts at the visible right side near the tie-up; the drawdown uses an explicit <code>getThreadingIndexFromDrawdownColumn(...)</code> in <code>src/domain/draft.ts</code>. This avoids mirrored drafts when users rebuild references from weaving sources.</p>
+
+<h3>4.4 Drawdown as cloth, not as cells</h3>
+<ul>
+  <li><strong>warp-over</strong> is rendered as a <em>vertical strand</em>.</li>
+  <li><strong>weft-over</strong> is rendered as a <em>horizontal strand</em>.</li>
+  <li>Adjacent warp floats connect vertically; adjacent weft floats connect horizontally.</li>
+  <li>The result reads as cloth, not as a binary matrix.</li>
+</ul>
+
+<h3>4.5 Import &amp; parse strategy</h3>
+<p>Two parsing layers on purpose:</p>
+<ul>
+  <li><strong>Service parsing</strong> — WIF, image-derived, structured text, and canonical normalisation. Files: <code>wif_parser.py</code>, <code>image_parser.py</code>, <code>text_parser.py</code>, <code>service.py</code>.</li>
+  <li><strong>Frontend fallback parsing</strong> — JSON fallback + loose text fallback in <code>utils/parserApi.ts</code>. Keeps the UI usable even when the parser service is offline.</li>
+</ul>
+
+<h3>4.6 Color → yarn binding</h3>
+<p>Each warp and weft palette color gets a row in <em>ColorBindingGrid</em>. A <code>&lt;select&gt;</code> lists every <em>ready</em> L2 asset (filtered by <code>status === 'ready'</code>). The selected yarn's <code>bandMeta.blender.*</code> is what Step 3 ultimately pushes to <code>Material N</code> sockets in Blender.</p>
+
+</section>
+
+<!-- =====================================================  STEP 3: RENDER PREVIEW  ===================================================== -->
+<section id="step3">
+<h2>5. Step 3 — Render Preview (Blender integration)</h2>
+
+<p class="lead">The render step takes the draft, the per-color yarn bindings, and the render settings, and produces a Blender-rendered fabric swatch. Behind the scenes this is a 1 100-line render script that builds a draft mesh, sets ~110 modifier sockets, generates per-yarn materials, then runs Cycles.</p>
+
+<h3>5.1 Request flow</h3>
+<div class="ascii">
+User clicks Preview in Step 3
+   │
+   ▼
+POST /api/blender/render-project   (body: draft + yarnAssets + colorBindings)
+   │
+   ▼
+backend/app/render_jobs.py:submit_project_render_job
+   │
+   ├──▶ For each YarnAsset → build a "material_asset" entry from asset.bandMeta.blender
+   ├──▶ Build a Blender Python script (build_headless_render_script)
+   ├──▶ Spawn  blender -b Codex_ParametricWeave.blend -P &lt;script&gt;
+   │   OR
+   │   Push over MCP socket to a running Blender on port 9876
+   │
+   ▼
+Blender:
+   ├──▶ Sets Parametric Weave knotty modifier sockets from material_asset entries
+   │     (Scanner Pixels Per BU, Material N Arc 1/2 V Min/Max, etc.)
+   ├──▶ Loads albedo.png + alpha.png into generated yarn materials (uv_scaled attribute)
+   └──▶ Renders → writes PNG → backend serves it back
+   │
+   ▼
+Frontend shows the rendered fabric in Step 3, then Step 4 tiles it as a three.js texture.
+</div>
+
+<h3>5.2 The render-control surface</h3>
+<table>
+<thead><tr><th>UI control</th><th>Range</th><th>Backend remap</th><th>Blender socket</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>spacing</code></td><td>0..1, default 0</td><td><code>0..1 → 0.026..0.10</code></td><td><code>Spacing</code></td><td>Strand-to-strand spacing. 0.026 m = tightest weave; 0.10 m = loosest.</td></tr>
+<tr><td><code>patternNoiseX</code></td><td>0..1, default 0</td><td><code>0..1 → 0..0.03</code></td><td><code>Pattern Noise X</code></td><td>Horizontal positional jitter — kills regular-grid artefacts.</td></tr>
+<tr><td><code>patternNoiseY</code></td><td>0..1, default 0</td><td><code>0..1 → 0..0.03</code></td><td><code>Pattern Noise Y</code></td><td>Vertical positional jitter.</td></tr>
+<tr><td><code>uvRandomU</code></td><td>0..20, default 0 (Phase 5)</td><td>identity</td><td><code>UV Random U</code></td><td>Per-strand U scatter. Defaulted to 0 since Phase-5 stride provides natural variation.</td></tr>
+<tr><td><code>arc1VPadding</code></td><td>0..0.25, default 0.008</td><td>identity</td><td><code>Arc 1 V Padding</code></td><td>Expands the core texture band; the .blend clamps inside Arc 2's silhouette.</td></tr>
+<tr><td><code>warpThreads</code> / <code>weftThreads</code></td><td>presets 80 / 120 / 160 / 200</td><td>identity ints</td><td><code>Warp Threads</code> / <code>Weft Threads</code></td><td>Zoom selector — both driven together. 80 = closest inspection; 200 = widest swatch.</td></tr>
+<tr><td>—</td><td>—</td><td>—</td><td><code>UV Random V</code></td><td>Pinned 0. V-axis randomisation would misalign the Arc 1/2 partition.</td></tr>
+</tbody>
+</table>
+
+<h3>5.3 Render quality defaults (Phase 4f)</h3>
+<ul>
+  <li>Resolution: <strong>3 200 × 3 200</strong>.</li>
+  <li>Engine: <strong>Cycles</strong>.</li>
+  <li>Samples: <strong>96</strong>.</li>
+  <li>Denoising: <strong>on</strong>.</li>
+  <li>Override with <code>WEAVE_PREVIEW_RENDER_RESOLUTION</code> / <code>WEAVE_PREVIEW_RENDER_SAMPLES</code>.</li>
+</ul>
+
+<h3>5.4 Cycles 16 384 px texture cap</h3>
+<p>Cycles silently downsamples any texture wider than 16 384 px. Real yarn scans routinely run 42 000–47 000 px wide. Two stages of fallback:</p>
+<ol>
+  <li><strong>UDIM tiles (preferred)</strong> — the source <code>rgba.png</code> is split into <code>cycles_tiled/rgba_&lt;UDIM&gt;.png</code> tiles each ≤ 16 384 px. The shader maps <code>fract(uv_scaled.x) × renderTileCount</code> into UDIM U space; the yarn still behaves like one image but every tile stays inside the cap.</li>
+  <li><strong>Cycles-safe downscale</strong> — if UDIM tiling isn't available, the backend writes <code>cycles_safe/{albedo,alpha}_max16384.png</code> and uses that. <em>Procedural Scale U math always reads <code>meta.image_size_px[0]</code>, not the loaded image width</em> — so the DPI math stays correct after downsampling.</li>
+</ol>
+
+<h3>5.5 Material assignment</h3>
+<p>For ≤ 16 yarns the script creates one generated material per yarn (<code>FabricStudioMaterial_XX_&lt;asset&gt;</code>), appends them to the object's material slots, then sets the modifier's <code>Material 1..16</code> sockets. The old colour-id <em>atlas</em> material is retained as a fallback for projects that exceed 16 unique yarns.</p>
+
+<div class="callout">
+<h4>Rule 7 — set the modifier socket, not the Set Material node default</h4>
+<code>Material 1</code> in <em>Parametric Weave knotty</em> is link-driven from the Group Input. <code>node.inputs["Material"].default_value = mat</code> does nothing — the link wins. You must set <code>mod["Socket_61"] = mat</code> (Material 1's stable identifier). This bit us in Phase 3f.
+</div>
+
+<h3>5.6 The setup-only "live push" (Phase 3i)</h3>
+<p>Pattern Builder can call <code>POST /api/blender/push-project-bandmeta</code> which runs the same setup body with <code>render_still=False</code>. It updates <code>WebDraft_Live</code>, object material slots, modifier <code>Material N</code> sockets, Warp/Weft material cycles, and V-band metadata, but skips <code>bpy.ops.render.render(...)</code>. Useful while drafting because the artist can see updated bindings in the viewport without paying for a Cycles render. Same-yarn warp/weft bindings collapse to one active Material 1, and stale <code>Material 2..16</code> sockets are cleared.</p>
+
+</section>
+
+<!-- =====================================================  STEP 4: TRY ON 3D  ===================================================== -->
+<section id="step4">
+<h2>6. Step 4 — Try On 3D</h2>
+
+<p>The rendered fabric image becomes a tileable texture in a browser-side three.js scene. The UI lets the user tile the swatch on draped or flat geometry to evaluate scale, repeat, and grain direction.</p>
+
+<p>Design rule: <strong>the browser owns polling and display</strong>. Blender ownership stays server-side. Render work is background work — the frontend polls the job state and only switches to the 3D preview when the PNG is ready.</p>
+
+<p>What's deliberately not in Step 4:</p>
+<ul>
+  <li>No live geometry editing (it's a preview surface, not a garment editor).</li>
+  <li>No physics simulation (planned, not shipped).</li>
+  <li>No texture authoring (that's Step 1).</li>
+</ul>
+
+</section>
+
+<!-- =====================================================  DATA CONTRACT  ===================================================== -->
+<section id="contract">
+<h2>7. The Data Contract</h2>
+
+<p class="lead">A real, recently-saved <code>metadata.json</code> from the live yarn library. <em>This is the entire interface between yarnseamless and the studio.</em></p>
+
+<pre>{
+  "schemaVersion": 1,
+  "id": "20260518_011033_63b8c8",
+  "label": "V2",
+  "createdAt": "2026-05-17T19:40:34.443312Z",
+  "source": {
+    "multithread_session_id": "20260518_010925_539",
+    "multifragment_session_id": "20260518_011006_52rx",
+    "scan_size_px": [3572, 15689]
+  },
+  "image_size_px": [47052, 1034],
+  "dpi": 1600.0,
+  "physical_scale": {
+    "declared_dpi": 1600.0,
+    "confidence": "high",
+    "source_scan": { "filename": "input.png", "size_px": [3572,15689],
+                      "embedded_dpi": [1599.9968,1599.9968],
+                      "matches_declared_dpi": true },
+    "processed_export": { "filename": "export_assembled_rgba.png",
+                          "size_px": [47052,1034],
+                          "embedded_dpi": null,
+                          "matches_declared_dpi": null },
+    "texture_world_width_m": 0.7469505,
+    "notes": [ "Original scan embedded DPI matches declared preprocessing DPI.",
+                "Processed/exported PNG has no embedded DPI; this is common." ]
+  },
+  "width":  { "px": 36, "mm": 0.5715, "top_y_in_export": 500, "bottom_y_in_export": 535,
+              "description": "Top-to-bottom of the unified solid thread band, in the EXPORT image's coordinates." },
+  "length": { "px": 47052, "mm": 746.9505,
+              "description": "Left-to-right of the export image (no wraparound)." },
+  "bands_px":     { "core": [500,535], "fiber_top": [484,500], "fiber_bot": [535,550] },
+  "bands_v_norm": { "_convention": "blender (V=0 bottom, V=1 top)",
+                     "core": [0.4826, 0.5164],
+                     "fiber_top": [0.5164, 0.5319],
+                     "fiber_bot": [0.4681, 0.4826] },
+  "thickness_px": { "core_height": 36, "fiber_top_height": 16, "fiber_bot_height": 15 },
+  "params": { "algorithm": "fwhm_density_walk", "core_frac": 0.5, "fiber_frac": 0.02,
+              "smooth_taps": 7, "peak_density": 1.0, "core_thresh": 0.5, "fiber_thresh": 0.02 },
+
+  "blender": {
+    "_convention": "Pre-computed for direct push to Parametric Weave knotty.
+                    Producer owns all unit conversion (px/dpi/mm/BU).
+                    Consumer just pushes each value to the same-named modifier socket.",
+    "schema_version": 1,
+    "texture_world_width_m": 0.7469505,
+    "texture_world_width_mm": 746.9505,
+    "image_width_px": 47052,
+    "scanner_pixels_per_bu": 62992.16,
+    "core_v_min":       0.48259187620889743,
+    "core_v_max":       0.5164410058027079,
+    "fiber_top_v_min":  0.5164410058027079,
+    "fiber_bot_v_max":  0.48259187620889743,
+    "fiber_bot_v_min":  0.46808510638297873,
+    "fiber_top_v_max":  0.5319148936170213,
+    "top_halo_frac":    0.238806,
+    "bot_halo_frac":    0.223881
+  },
+
+  "joins": [ {...inpainted...}, {...wraparound excluded...} ],
+  "threads_solid_band": [ ... per-thread diagnostic C/D bands ... ],
+  "files": { "rgba": "rgba.png", "thumbnail": "input_thumb.jpg", "metadata": "metadata.json" }
+}</pre>
+
+<h3>7.1 The two zones</h3>
+<table>
+<thead><tr><th>Zone</th><th>Who writes</th><th>Source of truth</th><th>Who reads</th></tr></thead>
+<tbody>
+<tr><td>Top-level (<code>image_size_px</code>, <code>dpi</code>, <code>width</code>, <code>length</code>, <code>bands_*</code>, <code>joins</code>, …)</td><td><code>backend/app/yarnseamless/yarn_library.py</code></td><td>The <code>rgba.png</code> file on disk + the multifragment session it was exported from.</td><td>UI provenance, future re-derivation. <strong>Not pushed to Blender.</strong></td></tr>
+<tr><td><code>physical_scale</code></td><td>Same producer</td><td>Declared DPI cross-checked against embedded DPI of source + export.</td><td>Confidence / provenance only. Helps separate scanner truth from metadata-only truth.</td></tr>
+<tr><td><code>blender</code> block</td><td>Derived from top-level</td><td>The top-level fields.</td><td>Fabric-generator-tryon → pushed to <em>Parametric Weave knotty</em> modifier sockets. <strong>One field per socket. No math on consumer side.</strong></td></tr>
+</tbody>
+</table>
+
+<h3>7.2 The derivations (so anyone can re-prove them)</h3>
+<pre>texture_world_width_m  =  image_width_px / dpi × 0.0254         # 1 inch = 0.0254 m
+scanner_pixels_per_bu  =  dpi × 39.3701                         # 1 BU = 1 m = 39.3701 in
+core_v_min             =  1 − bottom_y_in_export / image_height
+core_v_max             =  1 − top_y_in_export    / image_height</pre>
+<p>The <code>1 −</code> flips image-Y (top of image = high Y in pixels) into Blender's V axis (top of texture = V = 1).</p>
+
+<h3>7.3 The producer-key → Blender-socket map</h3>
+<table class="table-compact">
+<thead><tr><th><code>metadata.blender</code> field</th><th>Blender socket</th><th>What it drives</th></tr></thead>
+<tbody>
+<tr><td><code>texture_world_width_m</code></td><td><code>Texture World Width BU</code> <em>(reserved; not yet on the .blend)</em></td><td>Physical U length of one texture repeat, in BU (1 BU = 1 m). Would replace the legacy two-socket divide.</td></tr>
+<tr><td><code>image_width_px</code></td><td><code>Material N Image Width Px</code></td><td>Image width in pixels. Combined with <code>Scanner Pixels Per BU</code> reproduces the world width.</td></tr>
+<tr><td><code>scanner_pixels_per_bu</code></td><td><code>Scanner Pixels Per BU</code> (global)</td><td>Per-DPI calibration. <code>dpi × 39.3701</code>. Pushed once per render from the <strong>first</strong> ordered yarn asset.</td></tr>
+<tr><td><code>core_v_min</code></td><td><code>Material N Arc 1 V Min</code></td><td>Lower V edge of the dense core. Feeds Arc 1 Map.To Min, Arc 2 Top.To Max, Arc 2 Core.To Min.</td></tr>
+<tr><td><code>core_v_max</code></td><td><code>Material N Arc 1 V Max</code></td><td>Upper V edge of the dense core. Feeds Arc 1 Map.To Max, Arc 2 Core.To Max, Arc 2 Bot.To Min.</td></tr>
+<tr><td><code>fiber_bot_v_min</code></td><td><code>Material N Arc 2 V Min</code></td><td>Strand silhouette's <em>bottommost</em> V. Feeds Arc 2 Top.To Min.</td></tr>
+<tr><td><code>fiber_top_v_max</code></td><td><code>Material N Arc 2 V Max</code></td><td>Strand silhouette's <em>topmost</em> V. Feeds Arc 2 Bot.To Max.</td></tr>
+<tr><td><code>fiber_bot_v_max</code> (= core_v_min)</td><td>none — diagnostic only</td><td>Pre-Phase-3e legacy mirror of core_v_min.</td></tr>
+<tr><td><code>fiber_top_v_min</code> (= core_v_max)</td><td>none — diagnostic only</td><td>Pre-Phase-3e legacy mirror of core_v_max.</td></tr>
+</tbody>
+</table>
+
+<h3>7.4 Pinned "footgun" defaults</h3>
+<p>Six sockets are asserted by the producer on <em>every</em> bandMeta push. They are <em>not</em> per-yarn — they are global controls that have one correct value for scan-driven yarns. Drifting any of them silently breaks the rendering in a way that takes a debug cycle to diagnose.</p>
+
+<table>
+<thead><tr><th>Socket</th><th>Pinned value</th><th>What happens if it drifts</th></tr></thead>
+<tbody>
+<tr><td><code>Sub Strand Enable</code></td><td><code>True</code> <em>(critical)</em></td><td><code>False</code> → main-strand geometry only → <code>is_sub_strand=0</code> everywhere → <code>PW Band - Band V</code> falls back to <code>Arc1 Map</code> only → <strong>halo never renders</strong>. Phase 3g's central fix was pinning this on.</td></tr>
+<tr><td><code>Texture Scale V</code></td><td><code>1.0</code></td><td>Drift multiplies the V output, misaligning the entire Arc 1/2 band partition vs the actual yarn V positions in the texture.</td></tr>
+<tr><td><code>Texture Offset V</code></td><td><code>0</code></td><td>Neutral V phase for the approved 2026-05-19 direct-material checkpoint. The previous <code>0.031914920</code> value was a checker/material phase-alignment experiment.</td></tr>
+<tr><td><code>Texture Side Flatten</code></td><td><code>0.0</code></td><td>Drift mixes a cylindrical-projection contribution into the V output. Off keeps the mapping linear in cross-section.</td></tr>
+<tr><td><code>Sub Texture Scale V</code></td><td><code>1.0</code></td><td>Approved checkpoint value for the sub-strand V scale control.</td></tr>
+<tr><td><code>Sub Texture Offset V</code></td><td><code>0.0</code></td><td>Same idea on the offset axis.</td></tr>
+</tbody>
+</table>
+
+<h3>7.5 What is NOT in the contract</h3>
+<ul>
+  <li><code>dpi</code> is not pushed to Blender — provenance only.</li>
+  <li><code>physical_scale.confidence</code> is not pushed.</li>
+  <li><code>twist_period_px</code> / FFT outputs — no socket consumes this.</li>
+  <li><code>normal.png</code> / <code>roughness.png</code> / <code>overlay.png</code> — the Blender material loads albedo + alpha only.</li>
+  <li>Per-thread variance in <code>threads_solid_band</code> — diagnostic only; the unified <code>core_v_min/max</code> is the only consumed band.</li>
+</ul>
+
+</section>
+
+<!-- =====================================================  BLENDER DEEP-DIVE  ===================================================== -->
+<section id="blender">
+<h2>8. Blender Deep-Dive — Arc 1 / Arc 2 system</h2>
+
+<p class="lead">The single hardest engineering surface in this project. <em>Parametric Weave knotty</em> is a geometry-node graph that takes a draft mesh + a yarn texture and produces a woven fabric. The graph evolved through ten phases of fixes to make the rendered yarn faithfully reproduce both the dense core and the wispy halo of a scanned thread.</p>
+
+<h3>8.1 Object &amp; modifier stack</h3>
+<pre>ParametricWeave (mesh, 0 verts of its own — geometry is generated by modifiers)
+├── Weave            (Nodes modifier → Parametric Weave knotty)        ← what this section is about
+└── Fit To Space     (Nodes modifier → Fit Geometry To Space Plane)    ← scales output to fit Space plane</pre>
+
+<p><code>WebDraft_Live</code> is a separate hidden mesh object (one face per drawdown cell, with <code>cell_code</code> / <code>warp_material_id</code> / <code>weft_material_id</code> face attributes). Built by <code>backend/app/blender_sync.py:build_blender_sync_code</code> before each render. The Weave modifier reads it via the <code>Draft Object</code> socket.</p>
+
+<h3>8.2 The modifier panel (post-cleanup)</h3>
+<div class="ascii">
+┌── Globals (root level) ────────────────────────────────────┐
+│  Scanner Pixels Per BU                                     │
+│  Texture Scale U                                           │
+│  Geometry (input)                                          │
+│  Main Strand Radius                                        │
+│  Draft Object  /  Draft Columns  /  Draft Rows             │
+├── ▸ Pattern             (Over/Under Count, W/W Threads,    │
+│                          Spacing, Amplitude)               │
+├── ▸ Surface             (Thread Subdivisions,              │
+│                          Arc 2 Boundary Inset,             │
+│                          Match Section Slopes,             │
+│                          Arc 2 Edge Angle Mapping,         │
+│                          Arc 2 Match Arc 1 V Rate)         │
+├── ▸ Texture             (Texture Scale V, Offset V,        │
+│                          Side Flatten)                     │
+├── ▸ General             (Seed)                             │
+├── ▸ Imperfections       (Wobble Amount/Scale,              │
+│                          Pattern Noise X/Y,                │
+│                          UV Random U/V)                    │
+├── ▸ Loose Strands       (4 controls)                       │
+├── ▸ Material Slots      (Material 1 … Material 16,         │
+│                          NodeSocketMaterial picks)         │
+├── ▸ Warp Material Cycle (Offset + Length 1-4 + Mat 1-4)    │
+├── ▸ Weft Material Cycle (Offset + Length 1-4 + Mat 1-4)    │
+├── ▸ Sub Strand          (Enable, Width, Height,            │
+│                          Sub Texture Scale/Offset V)       │
+└── ▸ V-Band Mapping ⓘ    (96 sockets — Material 1..16 ×     │
+   (default-closed)        Image Width Px / Texture Scale U / │
+                           Arc 1 V Min/Max / Arc 2 V Min/Max) │
+</div>
+
+<p>Phase 3f removed 5 dead globals (<code>Image Width Px</code>, <code>Image Arc 1/2 V Min/Max</code>) along with the empty <code>Detail</code> panel. Producer's <code>GLOBAL_SOCKETS</code> in <code>blender_live.py</code> shrank to one entry (<code>Scanner Pixels Per BU</code>) to match.</p>
+
+<h3>8.3 The Arc 1 / Arc 2 design</h3>
+
+<p>A scanned yarn has two visual layers:</p>
+<ol>
+  <li>A <strong>dense core</strong> — the solid thread body, narrow, opaque.</li>
+  <li>A <strong>wispy halo</strong> — fibres sticking out above and below the core, semi-transparent.</li>
+</ol>
+
+<p>A single-arc UV mapping cannot capture both: if you map the whole cross-section to the core's V range, you lose the halo; if you map it to the silhouette's V range, the dense rows in the texture only occupy ~10% of the cross-section and the strand looks ghostly. <strong>Two arcs solve this</strong>: an inner arc (<em>Arc 1</em>, radius 0.015 BU) carries the core; an outer arc (<em>Arc 2</em>, radius 0.025 BU) carries the silhouette. The graph builds <em>both</em> arcs as profile curves and sweeps the strand along them.</p>
+
+<h4>Arc 1 — single-section mapping (fallback when sub-strand is OFF)</h4>
+<pre>From [0, 1]  →  To [Arc 1 V Min, Arc 1 V Max]
+</pre>
+<p>Maps the whole strand cross-section to the padded core V range. Result: the strand samples only the dense core texture — no halo. The fallback path.</p>
+
+<h4>Arc 1 V Padding (Phase 4c → 4h)</h4>
+<p>Exposed on the modifier (<code>Surface</code> panel, checkpoint default 0.008). The graph expands Arc 1 V Min downward and Arc 1 V Max upward by that amount, clamping inside Arc 2's silhouette:</p>
+<pre>Padded Arc 1 V Min = max(Material Arc 1 V Min − Arc 1 V Padding, Material Arc 2 V Min)
+Padded Arc 1 V Max = min(Material Arc 1 V Max + Arc 1 V Padding, Material Arc 2 V Max)</pre>
+<p>Backend metadata stays raw; the modifier owns this tuning value. Web UI default is 0.008.</p>
+
+<h4>Arc 2 — three-section mapping (used when sub-strand IS ON)</h4>
+<pre>v_around                  Map Range            Texture-V range
+─────────                 ─────────            ───────────────
+[0, Split Minus]    →   PW Band - Arc2 Top  →  [Arc 2 V Min, Arc 1 V Min]   (outer bottom → core bottom)
+[Split Minus, Split Plus] → PW Band - Arc2 Core → [Arc 1 V Min, Arc 1 V Max] (core bottom → core top)
+[Split Plus, 1]     →   PW Band - Arc2 Bot  →  [Arc 1 V Max, Arc 2 V Max]   (core top → outer top)</pre>
+
+<p>The three outputs go through "Weighted" nodes and <code>PW Band - Arc2 Sum A</code> + <code>PW Band - Arc2 V</code> (both ADD nodes) to combine into one piecewise V value per face.</p>
+
+<h4>How Arc 1 and Arc 2 combine — <code>PW Band - Band V</code></h4>
+<pre>Band V = is_sub_strand × (Arc2 V − Arc1 Map) + Arc1 Map</pre>
+<p>The MULTIPLY_ADD gates on <code>is_sub_strand</code>. On main strand geometry <code>is_sub_strand = 0</code>, so <code>Band V = Arc1 Map</code> (core only, no halo). On sub-strand geometry <code>is_sub_strand = 1</code>, so <code>Band V = Arc2 V</code> (halo + core + halo).</p>
+
+<div class="callout bad">
+<h4>Rule 4 — a gate hidden inside a MULTIPLY_ADD silently invalidates upstream fixes</h4>
+Phase 3e's Arc 2 rewire was correct in isolation. But because <code>is_sub_strand</code> only becomes 1 when sub-strand geometry is generated, and that only happens when <code>Sub Strand Enable = True</code>, the rendered output was unchanged until Phase 3g pinned the boolean on. <strong>The Arc 2 halo is invisible whenever Sub Strand Enable is off, regardless of how correct everything downstream is.</strong>
+</div>
+
+<h3>8.4 Split Minus / Plus — the geometry-owned split (Phase 3q)</h3>
+
+<p>The current split is computed from profile radii, not from texture V span:</p>
+<pre>arc1_profile_radius = 0.015
+arc2_profile_radius = 0.025
+core_frac = clamp(arc1_profile_radius / max(arc2_profile_radius, 0.0001), 0, 1)
+Split Minus = 0.5 − core_frac / 2   # geometry split value: 0.2
+Split Plus  = 0.5 + core_frac / 2   # geometry split value: 0.8</pre>
+
+<p>The Arc 2 cross-section gets a 20%-60%-20% partition: 20% top halo, 60% core, 20% bot halo. <em>This is fixed by geometry, not adjusted to the texture.</em> The Phase 10e <code>Match Section Slopes</code> toggle replaces this with a texture-proportional split derived from Material 1's V values.</p>
+
+<h3>8.5 Materials — the routing chain</h3>
+<pre>Object material slots          Geometry node "Set Material" nodes
+─────────────────────          ─────────────────────────────────
+Slot 0  ←  WebYarn_&lt;id&gt;  ←──── Material 1 (NodeSocketMaterial input socket)
+                                │  modifier socket Socket_61
+                                │  LINKED to 'Set Material'.Material (Group Input)
+                                ↓
+                          PW Set Material 2..16 inputs
+                                ↓  modifier sockets Socket_62..Socket_204
+                                ↓  LINKED via PW Input - Material Slots Group Input
+                                ↓  to PW Set Material 2..16.Material
+                                ↓  Selection = (PW Material Is N) gates by material_id</pre>
+
+<p>The 96 V-band sockets are <strong>not</strong> read directly by the Map Range nodes. Each per-material socket flows through a 16-deep chain of <code>Switch</code> nodes that picks the correct value per face based on the <code>material_id</code> attribute. Concretely for V Min:</p>
+
+<pre>Material 1 Arc 1 V Min ──┐
+Material 2 Arc 1 V Min ──┤
+   …                     ├─→ PW Material Core V Min Select 2..16  (cascading switches)
+Material 16 Arc 1 V Min ─┘
+                          └─→ output: "active material's Arc 1 V Min for this face"</pre>
+
+<p>The switch nodes still say "Core V Min" — Phase 3d renamed the <em>interface</em> sockets (visible to producer) but left the internal multiplexer node names alone. Cosmetic. They route correctly.</p>
+
+<h3>8.6 The Arc 2 V chain — five phases of fixes in one day (2026-05-17)</h3>
+
+<p>The five fixes shipped on 2026-05-17 are the highest-density piece of engineering in the project. Each phase solved a different layer of the same V-mapping problem. Reading them together is the best way to understand <em>why</em> the Arc 2 system is shaped the way it is.</p>
+
+<figure>
+  <img src="runtime/self_iter_arc2_centered_core_v_viewport.png" alt="Viewport screenshot showing Arc 2 cross-section with a centered core V band" />
+  <figcaption>Figure 2 — Phase 10t inspection: Arc 2 keeps its real Top/Core/Bot path. The central R1-equivalent core interval (Split Minus/Plus = 0.2/0.8) shares the same V rate as Arc 1, while the two outer halo strips extrapolate from the raw core seam outward at the core V rate.</figcaption>
+</figure>
+
+<figure>
+  <img src="runtime/self_iter_arc2_free_halo_v_flow_viewport.png" alt="Viewport screenshot of the Phase 10t free-halo Arc 2 state showing letter-row alignment across the strand silhouette" />
+  <figcaption>Figure 3 — The current saved graph state, "Phase 10t free-halo Arc 2 V flow", now wrapped by the 2026-05-19 visual checkpoint values. Match Section Slopes = false, Arc 2 Match Arc 1 V Rate = false, Arc 2 Edge Angle Mapping = false.</figcaption>
+</figure>
+
+<h4>Phase 10 — per-section U scale</h4>
+<p>Added 22 nodes (<code>PW U - Sec *</code>, <code>PW U - Section Slope</code>, <code>PW U - Section Ratio</code>, <code>PW U - Per Section Multiplier</code>) between <code>PW UV U Add</code> and <code>Combine XYZ.006.X</code>. Multiplies U by <code>section_v_slope / Arc 2 Core v_slope</code> so texels stay isotropic on Arc 2 Top / Core / Bot and Arc 1 main strand. Two debug attrs <code>pw_section_ratio</code> and <code>pw_section_slope</code> on the evaluated mesh.</p>
+
+<h4>Phase 10a — Arc 1 baseline correction</h4>
+<p>Initial Phase 10 used Arc 1 slope = <code>core_span / 1.0</code> (parametric), giving ratio 0.6 on Arc 1 vs 1.0 on Arc 2 Core — <strong>incorrect</strong>, because Phase 3q's split makes Arc 1 and Arc 2 Core share the <em>same physical V rate</em> by construction (<code>2π × 0.015 × 1.0 = 2π × 0.025 × 0.6 = 0.0942 BU</code>). Two-link rewire: <code>PW U - Section Slope.in[2]</code> and <code>PW U - Sub Minus Arc1 Slope.in[1]</code> now read from <code>PW U - Sec Core Slope</code> instead of <code>PW U - Sec Arc1 Slope</code> (latter left orphaned for revert).</p>
+
+<h4>Phase 10b — profile resolution bump (superseded by 10c)</h4>
+<p><code>Arc.001</code> and <code>Arc</code> Curve Arc primitives went from <code>Resolution = 7</code> to <code>Resolution = 11</code> so the Phase 3q section boundaries at <code>v_around = 0.2 / 0.8</code> land on profile vertices. Killed the original "thick noisy band where G should be" smearing — but works only while the radius ratio keeps boundaries on <code>0.1</code>-multiples.</p>
+
+<h4>Phase 10c — radius-agnostic robust profile</h4>
+<p>Replaced the static <code>Arc.001</code> profile feed with a 31-vertex polyline: <code>MeshLine (Count=31) → Position.X = natural_factor → piecewise Map Range to actual_factor → Sample Curve(Arc.001, factor) → SetPosition → MeshToCurve</code>. Vertices 6 and 24 always sit on actual_factor = <code>Split Minus</code> / <code>Split Plus</code>. Stress-tested with multiple <code>arc1_radius</code> values; section boundaries land exactly on vertices for every ratio.</p>
+
+<h4>Phase 10d — Arc 2 Boundary Inset</h4>
+<p>Surface-panel socket (range 0–0.025, default 0). Tent-weighted radial pull of profile vertices near <code>v_around = 0.2 / 0.8</code>:</p>
+<pre>nat = vertex.x   (natural factor 0..1 from the Mesh Line)
+dist = min(|nat − 0.2|, |nat − 0.8|)
+weight = max(0, 1 − dist / 0.2)
+inset_BU = Arc 2 Boundary Inset × weight
+scale = 1 − inset_BU / arc2_radius
+position_final = sampled_position × scale</pre>
+<p>At inset = <code>0.010 BU</code> (= arc2_radius − arc1_radius) the boundary vertex sits exactly on Arc 1's silhouette — the section discontinuity hides behind Arc 1.</p>
+
+<p><strong>Critical companion change</strong>: baked <code>pw_profile_natural = Position.X</code> as a custom attribute <em>before</em> <code>Set Position</code>, and re-routed <code>Store Named Attribute.003.Value</code> to read from it instead of <code>Spline Parameter Factor.002</code>. Otherwise the inset shifts arc-length and <code>v_around</code> drifts off the vertex grid.</p>
+
+<h4>Phase 10e — Match Section Slopes</h4>
+<p>Surface-panel boolean, default off. When on, replaces Phase 3q's geometric split (<code>arc1/arc2 = 0.6 → 0.2 / 0.8</code>) with a texture-proportional split (<code>top_v / total_v</code>, <code>(top_v + core_v) / total_v</code>) computed from Material 1's V values. All four section slopes become equal → the Phase 10 per-section multiplier becomes a no-op (ratio = 1.0 everywhere) → the V-slope-discontinuity band at boundaries disappears. <em>Caveat</em>: split is global (uses Material 1), so multi-material renders match exactly only on Material 1.</p>
+
+<h4>Phase 10f — Arc 2 Edge Angle Mapping</h4>
+<p>Surface-panel boolean, default off. Replaces linear-in-<code>v_around</code> V mapping in Top and Bot sections with cumulative-<code>sin(θ)</code> (= linear-in-<code>cos(θ)</code>) where θ is the actual angle of curvature on the source arc. The intuition: silhouette polygons (<code>θ ≈ 30°</code> or <code>150°</code>, <code>sin(θ) ≈ 0.5</code>) project to half the screen footprint of polygons near the top of the arc; allocating V proportionally to <code>sin(θ)</code> restores uniform cell size in screen space. Core mapping stays linear.</p>
+<pre>θ(v_around) = THETA_START + v_around × (Split Minus × SWEEP / 0.2)
+norm_top    = (cos(THETA_START) − cos(θ(v_around))) /
+              (cos(THETA_START) − cos(THETA_START + Split Minus × SWEEP))
+tex_v_top   = Arc 2 V Min + norm_top × (Arc 1 V Min Padded − Arc 2 V Min)</pre>
+<p><strong>Use with Match Section Slopes OFF</strong> for visible effect — Match ON shrinks Top/Bot to a tiny window where the cosine remap is negligible.</p>
+
+<h4>Phase 10g (postscript-adjusted) — Arc 2 Match Arc 1 V Rate</h4>
+<p>Surface-panel boolean, default off. Replaces Arc 2's entire piecewise V chain with a single linear mapping:</p>
+<pre>tex_v(v_around) = Arc 1 V Min Padded + v_around × padded_core_span</pre>
+<p>Arc 2 samples <em>exactly Arc 1's padded core V range</em> (multiplier = 1.0; the original <code>× r_arc2/r_arc1</code> physical-size match was rejected by the user as "1.7× squish"). Cells per silhouette match between Arc 1 and Arc 2 visually. <strong>Side effect</strong>: Arc 2 surface never shows halo content (texture outside Arc 1's padded V range isn't sampled).</p>
+
+<h3>8.7 Phase 10h–10t — post-Arc-2 chain</h3>
+
+<table>
+<thead><tr><th>Phase</th><th>What changed</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><strong>10h</strong></td><td>Auto-derive <code>Material N Texture Scale U</code> from visible padded V span. Superseded in active denominator by Phase 10u.</td><td>active</td></tr>
+<tr><td><strong>10i</strong></td><td>Post-bend U storage. <code>Store Warp U</code> / <code>Store Weft U</code> moved <em>after</em> <code>PW Warp/Weft Set Position</code>, so <code>u_along</code> measures the visible bent curve. <code>PW Warp/Weft U Stride Post-Bend Ratio</code> multiplies the backend's straight-baseline stride by the live length ratio.</td><td>active</td></tr>
+<tr><td><strong>10j</strong></td><td>Attempted <code>PW VisU - *</code> top-view projected-axis correction for Arc 2 U. <strong>Reverted</strong> — distorted the texture because the simple projected-axis model didn't match the actual swept shell.</td><td><span class="pill legacy">reverted</span></td></tr>
+<tr><td><strong>10k</strong></td><td>Arc 2 same-strand U transfer. <code>pw_strand_id</code> stored on warp (curve_index) and weft (curve_index + 10000) curves before join. Arc 2 uses <code>Sample Nearest Surface</code> with matching <code>Group ID</code> / <code>Sample Group ID</code> to borrow only Arc 1's U from the <em>same physical strand</em>. Combine XYZ.006.X is fed by <code>PW StrandXferU - Use Same-Strand Arc1 U On Arc2</code>. Only U transferred; Arc 2 keeps its own V mapping.</td><td>active</td></tr>
+<tr><td><strong>10l</strong></td><td>Tested a projected skew inside the matched range.</td><td><span class="pill legacy">superseded</span></td></tr>
+<tr><td><strong>10m</strong></td><td>Fixed Arc 1's top-view projection (<code>projected_v_arc1 = (1 − cos(π × v_around)) / 2</code>) and material phase, but kept the matched branch active.</td><td><span class="pill legacy">rejected by user</span> — Arc 2's halo was repeating the core texture instead of sampling outside Arc 1.</td></tr>
+<tr><td><strong>10n</strong></td><td>Texture Offset V checker phase repin to <code>0.031914920</code>.</td><td>historical; superseded by checkpoint offset <code>0</code></td></tr>
+<tr><td><strong>10p</strong></td><td>Bake <code>pw_profile_actual</code> alongside <code>pw_profile_natural</code>; route <code>Store Named Attribute.003.Value</code> to read from <code>pw_profile_actual</code> so the physical profile boundary and the Arc 2 UV section tests use the same split values.</td><td>active</td></tr>
+<tr><td><strong>10s</strong></td><td>Restored the full Top/Core/Bot Arc 2 path; <code>Arc 2 Match Arc 1 V Rate = False</code>. Switch chain still in the graph for comparison.</td><td>active</td></tr>
+<tr><td><strong>10t</strong></td><td>Free-halo Arc 2 V flow: Arc 2's top/bottom outer V values are extrapolated from the raw Arc 1 core seam at the core V rate, instead of being endpoint-fit to <code>Arc 2 V Min/Max</code>.</td><td><span class="pill done">current graph state</span></td></tr>
+<tr><td><strong>10u</strong></td><td>Approved visual checkpoint: <code>Spacing = 0.026</code>, root <code>Texture Scale U = 1</code>, <code>Texture Offset V = 0</code>, <code>Sub Texture Scale V = 1</code>, <code>Sub Texture Offset V = 0</code>, <code>Arc 1 V Padding = 0.008</code>, and auto U denominator <code>1.0</code>.</td><td><span class="pill done">current checkpoint</span></td></tr>
+</tbody>
+</table>
+
+<h3>8.8 Two recommended baselines</h3>
+
+<div class="grid-2">
+<div class="callout good">
+<h4>Low-padding mode (simplest)</h4>
+<ul>
+  <li><code>Arc 1 V Padding = 0.002</code></li>
+  <li>All four Phase 10e/f/g toggles <strong>OFF</strong></li>
+  <li>Pure linear V; slopes naturally align across all sections; Arc 1 and Arc 2 Core have equal physical V rate by Phase 3q construction.</li>
+</ul>
+</div>
+
+<div class="callout good">
+<h4>High-padding mode (artistic core padding)</h4>
+<ul>
+  <li><code>Arc 1 V Padding = 0.008</code> (current checkpoint; adjust only in a new experiment)</li>
+  <li><code>Match Section Slopes = True</code> (slope continuity at section boundaries)</li>
+  <li><code>Arc 2 Match Arc 1 V Rate = True</code> (Arc 2 cells visually match Arc 1)</li>
+  <li><code>Arc 2 Edge Angle Mapping = False</code> (overridden anyway)</li>
+  <li><code>Arc 2 Boundary Inset = 0.0</code> (smooth U profile)</li>
+</ul>
+</div>
+</div>
+
+<p>All toggles remain in the graph as opt-in tools. The current saved baseline is the Phase 10t free-halo graph plus the Phase 10u approved checkpoint values documented in <code>docs/CHECKPOINT_2026-05-19.md</code>.</p>
+
+<h3>8.9 Cross-axis curve-normal symmetry (Phase 5)</h3>
+<p>Both warp and weft branches carry a <code>Set Curve Normal</code> node with <code>Mode = 'Z Up'</code> (<code>PW Warp Set Curve Normal</code>, <code>PW Weft Set Curve Normal</code>) inserted between <code>Resample Curve</code> and <code>Store Warp/Weft U</code>. Without these, Blender's minimum-twist default oriented the cross-section profile differently per axis — the same <code>v_around</code> value pointed to different physical positions on warp vs weft strands, so <code>Arc 1 V Padding</code> visibly expanded the halo on weft but not on warp. Z-up alignment forces both axes to orient <code>v_around = 0.5</code> toward +Z (the camera-facing top), making V-band behaviour symmetric.</p>
+
+<h3>8.10 Per-strand U stride (Phase 5) — continuous yarn spooling</h3>
+<p>Two new globals on <em>Parametric Weave knotty</em> drive <strong>continuous yarn spooling</strong> across warp/weft strands so successive strands pick up where the previous one ended (physically: one weft thread snakes back and forth; one warp end runs the whole loom length).</p>
+
+<table class="table-compact">
+<thead><tr><th>Socket</th><th>Math</th></tr></thead>
+<tbody>
+<tr><td><code>U Stride Per Warp End</code></td><td><code>(weft_threads × spacing) / texture_world_width_BU × material_texture_scale_u</code></td></tr>
+<tr><td><code>U Stride Per Weft Pick</code></td><td><code>(warp_threads × spacing) / texture_world_width_BU × material_texture_scale_u</code></td></tr>
+</tbody>
+</table>
+
+<p>The stride exactly equals "repeats per strand", so strand <code>N+1</code>'s U-start = strand <code>N</code>'s U-end. Inside the graph: <code>uv_offset_u = PW Warp/Weft Variation.UV Offset U + curve_index × U Stride Per Warp End/Weft Pick</code>, added by <code>PW Warp/Weft U Stride x Index</code> (MULTIPLY) and <code>PW Warp/Weft UV Offset U Sum</code> (ADD) nodes inserted before each Store Named Attribute.</p>
+
+<h3>8.11 The full U-scale formula (Phase 5 + 10h + 10i + 10u)</h3>
+<pre>ARC1_V_AROUND_SPAN               = 0.6  # geometry provenance from Phase 3q split
+AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0  # active checkpoint denominator
+
+# Per-render/per-material:
+arc1_v_min_padded           = max(core_v_min − Arc 1 V Padding, fiber_bot_v_min)
+arc1_v_max_padded           = min(core_v_max + Arc 1 V Padding, fiber_top_v_max)
+visible_v_span              = arc1_v_max_padded − arc1_v_min_padded
+material_texture_scale_u    = visible_v_span / AUTO_TEXTURE_SCALE_U_DENOMINATOR
+
+# Per-render globals (read off the modifier at push time):
+texture_world_width_BU      = Material N Image Width Px / Scanner Pixels Per BU
+warp_strand_length_BU       = Weft Threads × Spacing
+weft_strand_length_BU       = Warp Threads × Spacing
+
+# Strides — equal to repeats-per-strand so strand N+1 starts where N ended:
+U Stride Per Warp End       = warp_strand_length_BU / texture_world_width_BU × material_texture_scale_u
+U Stride Per Weft Pick      = weft_strand_length_BU / texture_world_width_BU × material_texture_scale_u
+
+# Inside the graph (sampled per vertex, after Phase 10i):
+post_bend_length_ratio      = Spline Length after PW Warp/Weft Set Position / straight_strand_length
+u_along                     = Spline Parameter Factor after Set Position × post_bend_length_ratio
+post_bend_stride            = U Stride socket × post_bend_length_ratio
+PW U Scale U Final          = (source_strand_length / texture_world_width_BU) × Material N Texture Scale U
+uv_offset_u                 = PW Warp/Weft Variation.UV Offset U + curve_index × post_bend_stride
+base_u                      = u_along × PW U Scale U Final + uv_offset_u
+
+# Phase 10k Arc 2 transfer:
+pw_strand_id                = curve_index for warp, curve_index + 10000 for weft
+arc2_u_from_arc1            = Sample Nearest Surface(base_u on Arc 1, grouped by pw_strand_id)
+uv_scaled.x                 = base_u for Arc 1
+uv_scaled.x                 = arc2_u_from_arc1 for Arc 2
+
+# Phase 10t/10u project-from-view V + free-flow Arc 2 halo mapping:
+projected_v_arc1            = (1 − cos(π × v_around)) / 2
+phase_offset_v              = 0
+uv_scaled.y                 = map(projected_v_arc1, 0..1 → Arc 1 padded V) + phase_offset_v   for Arc 1
+uv_scaled.y                 = piecewise Arc 2 Top/Core/Bot V + phase_offset_v                 for Arc 2
+Arc 2 top/bot outer V       = raw core seam ± core_v_slope × outer_section_width
+Arc 2 Match Arc 1 V Rate    = False</pre>
+
+<p>Worked example (47 052 px / 1 600 dpi yarn, default zoom <code>Warp Threads = 80</code>, <code>Spacing = 0.026</code>):</p>
+<pre>texture_world_width_BU         = 47052 / 62992.16  = 0.7470
+visible V span @ padding 0.008 = 0.04985
+V stretch factor               = 1.0 / 0.04985     = 20.06×
+material_texture_scale_u       = 0.04985 / 1.0     = 0.04985
+PW U Scale U Auto              = 2.08 / 0.7470     = 2.785
+repeats per strand             = 2.785 × 0.04985   = 0.139
+u_stride                       = 0.139  (= repeats per strand → seamless join)
+total texture passes (80×)     = 80 × 0.139        = 11.1</pre>
+
+<h3>8.12 The custom 31-vertex polyline profile</h3>
+<pre>GeometryNodeMeshLine (Count = 31, Offset = (1/30, 0, 0))
+    │ uniform points in natural_factor ∈ [0, 1]
+    ▼
+Position → Separate XYZ → X = natural_factor
+    │
+    ├── piecewise Map Range (natural → actual factor):
+    │     [0, 0.2] → [0, Split Minus]              (Arc 2 Top)
+    │     [0.2, 0.8] → [Split Minus, Split Plus]   (Arc 2 Core)
+    │     [0.8, 1.0] → [Split Plus, 1.0]           (Arc 2 Bot)
+    │   combined via IsTop / IsCore / IsBot weighted sum
+    │
+    ▼
+PW Profile - Store Natural Factor (Store Named Attribute `pw_profile_natural` = Position.X)
+    │ — Phase 10d: bake the natural factor BEFORE Set Position runs,
+    │   so the fixed profile anchors survive any radial deformation
+    ▼
+PW Profile - Store Actual Factor (Store Named Attribute `pw_profile_actual` = actual factor)
+    │ — Phase 10p: bake the actual source-arc factor too, so v_around
+    │   uses the same split coordinates as the Arc 2 V Map Ranges
+    ▼
+GeometryNodeSampleCurve (Mode = FACTOR) on Arc.001 at `actual` → Position
+    │
+    ▼
+GeometryNodeSetPosition → optional Arc 2 Boundary Inset (Phase 10d)
+    │
+    ▼
+GeometryNodeMeshToCurve → polyline curve → Store Named Attribute.003 (writes v_around = pw_profile_actual)
+    │
+    ▼
+Curve to Mesh.001 (sweeps the strand curves through this profile)</pre>
+
+</section>
+
+<!-- =====================================================  PHASE LOG  ===================================================== -->
+<section id="phases">
+<h2>9. Phase Log — chronological record</h2>
+
+<p class="lead">A condensed timeline of every fix that shipped, grouped by phase. The full Symptom / Diagnosis / Fix / Verification entries live in <code>docs/putting-it-together/phase_log.md</code> and <code>docs/BlenderFixes/phase_log.md</code>.</p>
+
+<h3>9.1 Integration phases (putting-it-together)</h3>
+<table class="table-compact">
+<thead><tr><th>Phase</th><th>What shipped</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><strong>1</strong></td><td>Library wiring. Shared <code>yarn_library/</code>, FastAPI library endpoints, Step 1 import. <em>Lesson 1: the rgba.png on disk wins over <code>metadata.image_size_px</code> — file open before writing metadata.</em></td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>2a–2f</strong></td><td>Yarnseamless processing UI ported into wizard Step 1. Multi-thread split + multi-fragment stitch + FastAPI route port + frontend component port + save-to-library auto-import. <strong>The original yarnseamless server is no longer required at runtime.</strong></td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>3</strong></td><td>Push <code>bandMeta.blender</code> to live Blender. MCP socket on 9876 + headless Blender for production.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>3a</strong></td><td>Cycles 16384 px texture cap fix — atlas builder uses cycles_safe downscales.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>3b</strong></td><td>Render Preview control surface aligned with v2 — 3 exposed controls (Spacing, Pattern Noise X/Y), defaults 0.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>3c</strong></td><td>Fixed V-band producer bug (<code>fiber_bot_v_max</code> was wrongly set to <code>fiber_top_v[1]</code>); added per-strand U scatter.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>3d</strong></td><td>Renamed V-band sockets from Core/Fiber to Arc 1 / Arc 2. 68 sockets renamed in place; internal wiring preserved by identifier stability.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>3e</strong></td><td>Arc 2 internal link rewire — 4 Map Range link swaps so the halo region actually renders.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>3f</strong></td><td>Modifier panel reorganization + dead-socket removal. 5 legacy globals removed; Material Slots + V-Band Mapping panels consolidated.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>3g</strong></td><td>Pin <code>Sub Strand Enable = True</code> + <code>BLENDER_LIVE_RENDER</code> env var. Render jobs route to open Blender over MCP in live mode.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>3h–3q</strong></td><td>Direct per-yarn material rendering; Arc 1 V Padding socket; geometry-owned Split Minus/Plus; Arc 2 direction stitching; full halo Arc 2 path.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>4a–4i</strong></td><td>UDIM tile rendering; <code>Arc 1 V Padding</code> exposed in Web UI; preview quality pinned at 3 200 × 3 200 / Cycles / 96 samples / denoising on; fit-aware U calibration chain (later retired in Phase 5).</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>5</strong></td><td>Uniform-aspect U + per-strand U stride spool + curve-normal symmetry. Arc 1 V Padding and U stride collapsed into one scale model. The Phase 4d/4i fit-math chain retired; <code>UV Random U</code> default flipped to 0.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>W1, W2</strong></td><td>Library-delete cascade across L1 → L2 → L3 + boot-time orphan reconcile sweep.</td><td><span class="pill done">done</span></td></tr>
+</tbody>
+</table>
+
+<h3>9.2 Arc 2 V-mapping iteration (BlenderFixes — 2026-05-17 / -18)</h3>
+<table class="table-compact">
+<thead><tr><th>Phase</th><th>What shipped</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><strong>10</strong></td><td>Per-section U scale via 22 new <code>PW U - Sec *</code> nodes.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10a</strong></td><td>Arc 1 ratio = 1.0 (not 0.6) — two-link rewire to <code>PW U - Sec Core Slope</code>.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10b</strong></td><td>Profile resolution bump 7 → 11 (superseded by 10c).</td><td><span class="pill legacy">superseded</span></td></tr>
+<tr><td><strong>10c</strong></td><td>Custom 31-vertex polyline profile — radius-agnostic.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10d</strong></td><td>Arc 2 Boundary Inset socket + <code>pw_profile_natural</code> attribute.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10e</strong></td><td>Match Section Slopes boolean — texture-proportional split derived from Material 1.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10f</strong></td><td>Arc 2 Edge Angle Mapping boolean — cumulative-sin(θ) in Top/Bot sections.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10g</strong></td><td>Arc 2 Match Arc 1 V Rate boolean (postscript-adjusted: <code>× 1.0</code>, not <code>× r_arc2/r_arc1</code>).</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10h</strong></td><td>Auto-derive <code>Material N Texture Scale U</code> from visible padded V span.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10i</strong></td><td>Post-bend U storage (<code>Store Warp/Weft U</code> moved after <code>Set Position</code>) + post-bend stride ratio.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10j</strong></td><td>Top-view projected-axis correction for Arc 2 U — <strong>reverted</strong> (distorted the texture).</td><td><span class="pill risk">reverted</span></td></tr>
+<tr><td><strong>10k</strong></td><td>Same-strand U transfer via <code>pw_strand_id</code> + Sample Nearest Surface with matching Group ID.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10l</strong></td><td>Projected skew inside the matched range — <strong>superseded</strong>.</td><td><span class="pill legacy">superseded</span></td></tr>
+<tr><td><strong>10m</strong></td><td>Arc 1 top-view projection (<code>(1 − cos(π × v_around)) / 2</code>) + material phase — kept matched branch active, rejected by user.</td><td><span class="pill legacy">rejected</span></td></tr>
+<tr><td><strong>10n</strong></td><td><code>Texture Offset V = 0.031914920</code> — checker phase alignment experiment.</td><td><span class="pill legacy">superseded</span></td></tr>
+<tr><td><strong>10p</strong></td><td>Bake <code>pw_profile_actual</code> alongside <code>pw_profile_natural</code>; route Store Named Attribute.003 to read it.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10s</strong></td><td>Restored full Top/Core/Bot Arc 2 path; <code>Arc 2 Match Arc 1 V Rate = False</code>.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>10t</strong></td><td>Free-halo Arc 2 V flow — outer V values extrapolate from raw core seam at the core V rate.</td><td><span class="pill done">production</span></td></tr>
+<tr><td><strong>U-denom test (2026-05-19)</strong></td><td>Separate <code>AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0</code> from <code>ARC1_V_AROUND_SPAN = 0.6</code> (which stays as radius/split provenance). Only the automatic Texture Scale U path changes from <code>/ 0.6</code> to <code>/ 1.0</code>. Spool stride remains derived from the same final material scale.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>Spacing default (2026-05-19)</strong></td><td>Backend <code>DEFAULT_SPACING = 0.026</code>; Web UI <code>Spacing = 0</code> maps to physical Blender <code>0.026</code>. Brings the swatch closer to the visually-approved cell aspect at the default zoom.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>Padding default (2026-05-19)</strong></td><td>Backend + frontend <code>DEFAULT_ARC1_V_PADDING = 0.008</code> (was 0.012). Visually tighter halo expansion at the default.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>Pin reset (2026-05-19)</strong></td><td><code>Texture Offset V → 0</code>, <code>Sub Texture Scale V → 1</code>. Phase 10n's checker phase shift retired; Phase 10t's free-flow Arc 2 chain makes the sub-strand scale-1 path viable.</td><td><span class="pill done">done</span></td></tr>
+<tr><td><strong>Visual checkpoint (2026-05-19)</strong></td><td>User-approved baseline frozen. <code>docs/CHECKPOINT_2026-05-19.md</code> records every frozen socket value; <code>.pre-scale-u-denominator-test-20260519_004510.blend</code> + <code>.pre-spacing-default-20260519_030050.blend</code> are the rollback snapshots. 40 backend tests + frontend unit suite pass. Three approved-state renders shown in § 0.1.</td><td><span class="pill done">production baseline</span></td></tr>
+</tbody>
+</table>
+
+<h3>9.3 Key Rules earned the hard way (from <code>lessons.md</code>)</h3>
+
+<table>
+<thead><tr><th>Rule</th><th>Summary</th></tr></thead>
+<tbody>
+<tr><td><strong>1</strong></td><td>Interface socket <em>renames</em> preserve wiring (identifier-keyed). <em>Removals</em> are destructive.</td></tr>
+<tr><td><strong>2</strong></td><td>When values look wrong, the bug can be in three layers at once: producer, wiring, name semantics. Trace all three.</td></tr>
+<tr><td><strong>3</strong></td><td>Audit ALL Group Input nodes (there are 13 in <em>Parametric Weave knotty</em>) before removing sockets.</td></tr>
+<tr><td><strong>4</strong></td><td>A gate hidden in a MULTIPLY_ADD silently invalidates upstream fixes. Phase 3e's halo rewire didn't render until <code>Sub Strand Enable</code> was pinned on.</td></tr>
+<tr><td><strong>5</strong></td><td>Producer keys ≠ Blender socket names. Keep the mapping in one place: <code>PER_MATERIAL_SOCKETS</code> in <code>blender_live.py</code>.</td></tr>
+<tr><td><strong>6</strong></td><td>Snapshot the .blend before destructive ops — geometry-node interface edits aren't always undoable.</td></tr>
+<tr><td><strong>7</strong></td><td>Set the modifier's <code>NodeSocketMaterial</code> input, not the <code>Set Material</code> node's default value, when the input is link-driven.</td></tr>
+<tr><td><strong>8</strong></td><td>Modifier-input setters must tolerate missing sockets across .blend revisions (<code>maybe_set_modifier_input</code> vs <code>set_modifier_input</code>).</td></tr>
+<tr><td><strong>9</strong></td><td>Re-bind the Set Material chain when swapping yarns — texture data alone isn't enough; alpha matters.</td></tr>
+<tr><td><strong>10</strong></td><td>Override <code>BLENDER_TIMEOUT_SECONDS</code> locally for long Cycles renders; don't touch the global default.</td></tr>
+<tr><td><strong>11</strong></td><td>Arc 2 only fires on sub-strand geometry. Pin <code>Sub Strand Enable</code> for scan-driven yarns.</td></tr>
+<tr><td><strong>12</strong></td><td>The V footgun sockets are checkpoint controls. Current pins are <code>Texture Offset V = 0</code>, <code>Sub Texture Scale V = 1</code>, <code>Sub Texture Offset V = 0</code>.</td></tr>
+<tr><td><strong>13</strong></td><td>Piecewise Map Ranges must be continuous at split boundaries — direction matters, not just values.</td></tr>
+<tr><td><strong>14</strong></td><td>If UVs are stored before <code>Fit To Space</code>, per-material U carries the fit correction.</td></tr>
+<tr><td><strong>27 (Arc 2 chain)</strong></td><td>Each Arc 2 V symptom (haziness, missing rows, skewed aspect) has a distinct cause. Check Phase 10e + 10d state before deeper graph changes.</td></tr>
+<tr><td><strong>34–37</strong></td><td>Phase 10t owns the free-halo V flow; Phase 10u owns the approved neutral V phase and denominator checkpoint.</td></tr>
+</tbody>
+</table>
+
+</section>
+
+<!-- =====================================================  TRADEOFFS  ===================================================== -->
+<section id="tradeoffs">
+<h2>10. Drawbacks &amp; Advantages</h2>
+
+<h3>10.1 What this design gets right</h3>
+
+<div class="callout good">
+<h4>Single workflow, no app juggling</h4>
+The designer never opens yarnseamless, never touches Blender, never copies a file by hand. One web UI; one Save button; one Render button. The original three apps are still on disk, but only as a reference / fallback.
+</div>
+
+<div class="callout good">
+<h4>Files as the contract</h4>
+A folder on disk is the API. No service registry, no message queue, no REST. Restart-safe by construction. Diffable. Inspectable with <code>cat metadata.json</code>. Easy to back up (rsync). Easy to share (zip).
+</div>
+
+<div class="callout good">
+<h4>Pre-computed Blender block</h4>
+The producer owns all unit conversion. The consumer's only job is to push numbers to sockets. A bug in DPI math is impossible to introduce on the consumer side — there is no consumer-side math to break.
+</div>
+
+<div class="callout good">
+<h4>Two arcs, one cross-section</h4>
+The Arc 1 / Arc 2 split is the right level of abstraction. One inner arc carries the dense core, one outer arc carries the silhouette / halo. Captures the visual character of real scanned yarn (fuzzy halo + crisp core) that a single-arc UV can't.
+</div>
+
+<div class="callout good">
+<h4>Linked-identifier rename safety</h4>
+Phase 3d renamed 68 sockets (Core/Fiber → Arc 1 / Arc 2) without breaking a single internal link, because Blender keys by <code>identifier</code> (e.g. <code>Socket_61</code>), not by name. Rename-as-documentation is free; only deletion needs an audit.
+</div>
+
+<div class="callout good">
+<h4>Two-stage Cycles texture fallback</h4>
+UDIM tiling preferred, downscale as fallback. Wide scans (47 000 px) render correctly without anybody having to think about the 16 384 px cap.
+</div>
+
+<div class="callout good">
+<h4>Live MCP + headless from one script</h4>
+The render script generation is shared between live MCP and headless modes. Only the executor differs. So a fix to one path automatically benefits the other.
+</div>
+
+<h3>10.2 What this design pays for</h3>
+
+<div class="callout bad">
+<h4>The Arc 2 V chain has accumulated complexity</h4>
+Ten-plus phases of fixes, several reverted/superseded, and boolean toggles that interact non-trivially (Match Section Slopes × Arc 2 Match Arc 1 V Rate × Arc 2 Edge Angle Mapping). The approved checkpoint is documented, but a new artist still needs to read the phase log to understand why each toggle exists. The graph is the canonical source — there is no DSL that compiles to this graph.
+</div>
+
+<div class="callout bad">
+<h4>Pinned footgun sockets are still a smell (now smaller)</h4>
+Six sockets must be pushed to specific values on every render or the rendering silently breaks (no halo, doubled V mapping). The 2026-05-19 checkpoint <em>simplified</em> the values — <code>Texture Offset V</code> back to <code>0</code>, <code>Sub Texture Scale V = 1</code>, no exotic phase numbers — but the producer still asserts them defensively on every push. The footprint is smaller now but not gone.
+</div>
+
+<div class="callout bad">
+<h4>Two band detectors disagree</h4>
+Pre-inpaint Approach C/D owns the core; post-inpaint <code>compute_fiber_bands</code> owns the fibers. Different density semantics. The final assembled core is quantised to per-thread averages, not measured on the assembled alpha. Planned fix: one FWHM density walk post-inpaint. <em>Not yet shipped.</em>
+</div>
+
+<div class="callout bad">
+<h4>Texture World Width BU socket doesn't exist on the .blend yet</h4>
+Producer publishes <code>bandMeta.blender.texture_world_width_m</code>; the consumer falls back to the legacy <code>Material N Image Width Px ÷ Scanner Pixels Per BU</code> divide. Adding the socket would simplify the math and remove a pixel-level intermediate from the wire format.
+</div>
+
+<div class="callout bad">
+<h4>Live cross-tab sync is missing</h4>
+If two browser tabs are open on the same backend, a delete in tab A doesn't update tab B until the 3-second poll on Step 1 fires (or the user manually refreshes). Low-cost fix (small WebSocket), but no user has hit it yet.
+</div>
+
+<div class="callout bad">
+<h4>Internal switch-chain nodes still say Core/Fiber</h4>
+Phase 3d renamed the interface sockets (visible to producer) but didn't rename the internal multiplexer nodes — <code>PW Material Core V Min Select N</code> et al. Purely cosmetic. They route correctly. Cleanup candidate.
+</div>
+
+<div class="callout bad">
+<h4>Atlas fallback path still lives</h4>
+The legacy v2 colour-id atlas material is retained in the headless render script as a fallback (<code>ensure_atlas_preview_material</code>). It still works, but the direct per-yarn material path is the cleaner default. Retiring it cleanly would need verification on multi-yarn projects.
+</div>
+
+<div class="callout bad">
+<h4>The first <code>Set Material</code> node is dead</h4>
+Its geometry output never reaches Group Output. Only <code>Set Material.001</code> is in the active chain. Leaving it is safe but confusing for the artist.
+</div>
+
+<div class="callout bad">
+<h4>Managed visible-Blender auto-launch not ported</h4>
+v2 could launch normal Blender on demand. This branch supports rendering into an open Blender via <code>make backend-dev-live</code>, but you still open Blender and start BlenderMCP manually. Port v2's <code>blender_session.py</code> / <code>blender_session_startup.py</code> to restore one-click behaviour.
+</div>
+
+<div class="callout bad">
+<h4>Per-thread color variance not pushed to Blender</h4>
+<code>bandMeta.threads_solid_band</code> is diagnostic only. The renderer uses one unified core for the whole yarn. Fine for the current product, but per-segment colour drift is invisible to the render path.
+</div>
+
+</section>
+
+<!-- =====================================================  OPEN ITEMS  ===================================================== -->
+<section id="open">
+<h2>11. Open Items</h2>
+
+<div class="grid-2">
+<div>
+<h3>Bigger</h3>
+<ul>
+  <li><span class="pill done">resolved 2026-05-19</span> <strong>Arc 2 visual registration sign-off.</strong> The user approved the current direct web-to-Blender result; § 0 is the canonical record. Future Arc 2 work must explicitly state whether it branches from or replaces this baseline.</li>
+  <li><strong>Protect the approved checkpoint.</strong> Any new Arc 2, padding, or U-scale work must start from a fresh <code>.blend</code> snapshot and declare whether it supersedes <code>CHECKPOINT_2026-05-19.md</code>.</li>
+  <li><strong>Unified post-inpaint band detector.</strong> One FWHM density walk replacing the C/D + <code>compute_fiber_bands</code> split.</li>
+  <li><strong>Texture World Width BU socket on the .blend.</strong> Drop the pixel-level intermediate from the wire format. Producer already emits the value; only the .blend + the <code>PER_MATERIAL_SOCKETS</code> tuple in <code>blender_live.py</code> need the additional entry.</li>
+  <li><strong>Live-render UI toggle.</strong> Currently a backend env var; dev-only checkbox in Step 3 would help.</li>
+  <li><strong>Managed visible-Blender auto-launch.</strong> Port v2's session-startup helpers.</li>
+  <li><strong>High-res inspection mode vs alpha boost.</strong> Phase 3r flipped the current live material to full-res files for visual comparison, but the default still routes to Cycles-safe textures. Decide which is canonical post-checkpoint.</li>
+  <li><strong>UDIM visual approval.</strong> Phase 4a's UDIM material needs a live-viewport pass plus a crop render to confirm Cycles samples all tiles correctly.</li>
+  <li><strong>V-Ray duplicate-file proof.</strong> Run the same render via V-Ray GPU out-of-core textures (original albedo + alpha) for cross-renderer parity.</li>
+</ul>
+</div>
+<div>
+<h3>Smaller / cosmetic</h3>
+<ul>
+  <li>Rename internal Core/Fiber switch nodes to Arc 1 / Arc 2.</li>
+  <li>Retire the legacy atlas fallback after multi-yarn projects are accepted.</li>
+  <li>Delete the dead first <code>Set Material</code> node.</li>
+  <li>Live-sync of full project state to Blender (currently one-shot per click).</li>
+  <li>Runtime cleanup policy for old debug sessions and render jobs.</li>
+  <li>Undo for library delete (tombstone + restore).</li>
+</ul>
+</div>
+</div>
+
+<h3>Deferred (logged with rationale)</h3>
+<ul>
+  <li><strong>Atlas fallback parity</strong> with the direct per-yarn material path is lower priority — direct preview material now uses blended alpha for a smoother live preview. Hashed/dithered alpha can still be forced via env vars for sorting experiments.</li>
+  <li><strong>SAM2 / ViTMatte single-image flow</strong> from yarnseamless was deliberately not ported (Phase 2b). The yarn workflow doesn't use it. Small cost to revisit.</li>
+  <li><strong>Per-thread color variance</strong> in <code>bandMeta.threads_solid_band</code> remains diagnostic only.</li>
+  <li><strong>Migration of large model artifacts to release assets / LFS</strong> waits for the GitHub repo's LFS state to change.</li>
+</ul>
+
+</section>
+
+<!-- =====================================================  VERIFICATION  ===================================================== -->
+<section id="verify">
+<h2>12. Verification &amp; Testing</h2>
+
+<h3>12.1 Tests</h3>
+<table>
+<thead><tr><th>Surface</th><th>Command</th><th>Covered areas</th></tr></thead>
+<tbody>
+<tr><td>Backend</td><td><code>make backend-test</code></td><td>Render payload generation, yarn assets, Blender live setup helpers, draft parsing, render job script generation.</td></tr>
+<tr><td>Frontend (unit)</td><td><code>make frontend-test</code></td><td>Draft normalisation, drawdown computation, color-sequence editing, Blender handoff generation, project domain logic.</td></tr>
+<tr><td>Frontend (build)</td><td><code>cd frontend && npm run build</code></td><td>Type checking + Vite bundle.</td></tr>
+<tr><td>Frontend (e2e)</td><td><code>make frontend-e2e</code></td><td>Playwright smoke tests.</td></tr>
+<tr><td>Blender (manual)</td><td>Open <code>Codex_ParametricWeave.blend</code>; run <code>make backend-dev-live</code>; bind ready yarns; confirm sockets receive values.</td><td>Live MCP push + modifier socket assignment.</td></tr>
+</tbody>
+</table>
+
+<h3>12.2 Verification checklist (before publishing a change)</h3>
+<ul>
+  <li><code>make backend-test</code></li>
+  <li><code>make frontend-test</code></li>
+  <li><code>cd frontend && npm run build</code></li>
+  <li>Optional: <code>make frontend-e2e</code></li>
+  <li>Optional Blender check above</li>
+</ul>
+
+<h3>12.3 First-look table — where things break</h3>
+<table>
+<thead><tr><th>Symptom</th><th>First place to look</th></tr></thead>
+<tbody>
+<tr><td>Step 1 library section empty</td><td>Backend log: is <code>YARN_LIBRARY_ROOT</code> resolving correctly? <code>curl /api/yarn/library</code> directly.</td></tr>
+<tr><td><code>image_size_px</code> doesn't match the actual <code>rgba.png</code></td><td>The producer skipped the file open — Rule 1.</td></tr>
+<tr><td>Render uses wrong texture scale</td><td><code>metadata.blender.image_width_px</code>, <code>scanner_pixels_per_bu</code>, and <code>Material N Texture Scale U</code> vs the socket values Blender received.</td></tr>
+<tr><td>Fiber bands look misaligned</td><td>Check the checkpoint pins: <code>Texture Offset V = 0</code>, <code>Sub Texture Scale V = 1</code>, <code>Sub Texture Offset V = 0</code>.</td></tr>
+<tr><td>Backend can't reach Blender</td><td><code>BLENDER_PORT=9876</code> vs the MCP addon's listening port.</td></tr>
+<tr><td>Import works but <code>renderDiffuseUrl</code> is <code>cycles_safe/..._max16384.png</code></td><td>Normal — the source exceeded 16 384 px and got auto-downscaled.</td></tr>
+<tr><td>Halo never renders</td><td><code>Sub Strand Enable</code> drifted to <code>False</code>. Pin it back on.</td></tr>
+<tr><td>Yarn shown in Step 1 strip but missing from Step 2 dropdown</td><td>L2 was never created — <code>curl /api/yarn/assets</code>.</td></tr>
+<tr><td>Binding row says "Select processed yarn" even though one was assigned</td><td>Orphan L3 pointing at a deleted L2 id.</td></tr>
+</tbody>
+</table>
+
+</section>
+
+<!-- =====================================================  APPENDIX  ===================================================== -->
+<section id="appendix">
+<h2>13. Appendix</h2>
+
+<h3>13.1 Repository layout</h3>
+<pre>Fabric-generator-tryon/
+├── README.md
+├── Makefile
+├── docs/
+│   ├── README.md
+│   ├── FINAL_HANDOFF.md
+│   ├── EXTERNAL_ASSETS.md
+│   ├── application-blueprint.md
+│   ├── BlenderFixes/        ← Parametric Weave knotty internals
+│   │   ├── README.md
+│   │   ├── architecture.md  (~890 lines — node-by-node breakdown)
+│   │   ├── phase_log.md     (~4 400 lines — every Blender-side fix)
+│   │   └── lessons.md       (~1 300 lines — Rules 1–37)
+│   ├── putting-it-together/ ← three-app integration
+│   │   ├── architecture.md
+│   │   ├── data_contract.md
+│   │   ├── phase_log.md     (~5 700 lines — every integration fix)
+│   │   └── lessons.md
+│   ├── WebUIChanges/        ← React state machine + FastAPI surface
+│   │   ├── architecture.md
+│   │   ├── phase_log.md
+│   │   └── lessons.md
+│   └── WebUIbands/          ← yarn band detection history
+│       ├── current_pipeline.md
+│       ├── target_pipeline.md
+│       └── yarnseamless_reference.md
+├── backend/
+│   ├── app/
+│   │   ├── main.py                  FastAPI entrypoint
+│   │   ├── yarn_assets.py           L2 import / list / delete
+│   │   ├── yarnseamless_routes.py   Step 1 ported routes
+│   │   ├── yarnseamless/            yarn library port (multi-thread / multi-fragment / LaMa)
+│   │   ├── fabric_project.py        L3 + project bindings
+│   │   ├── blender_sync.py          builds WebDraft_Live + bandMeta push (live)
+│   │   ├── blender_live.py          PER_MATERIAL_SOCKETS, GLOBAL_SOCKETS, PINNED_FOOTGUN_SOCKETS, apply-metadata
+│   │   ├── render_jobs.py           build_headless_render_script, headless ↔ live executor
+│   │   ├── atlas.py                 legacy v2 atlas material fallback
+│   │   ├── wif_parser.py / image_parser.py / text_parser.py / service.py
+│   │   └── runtime_paths.py
+│   ├── requirements.txt
+│   ├── tests/
+│   └── vendor/yarn_pipeline/        big-lama chunks (optional)
+├── frontend/
+│   ├── index.html
+│   ├── src/
+│   │   ├── App.tsx                  wizard shell + L1/L2/L3 wiring
+│   │   ├── components/              StudioToolbar, DraftBoard, InspectorPanel, RenderPanel,
+│   │   │                            ColorBindingGrid, ExploreLibrary, yarnseamless/MultiFragmentEditor, ...
+│   │   ├── domain/                  draft.ts, types.ts, presets.ts, exploreCatalog.ts
+│   │   ├── utils/parserApi.ts
+│   │   └── styles/index.css
+│   └── tests/
+├── runtime/                         ← generated, gitignored
+│   ├── debug/                       raw uploads, intermediate images
+│   ├── yarn_assets/&lt;asset_id&gt;/      L2 imports
+│   ├── projects/&lt;project_id&gt;.json
+│   ├── render_jobs/&lt;job_id&gt;/
+│   │   ├── project.json
+│   │   ├── draft.json
+│   │   ├── render_job.py
+│   │   ├── stdout.log
+│   │   └── preview.png
+│   └── dev_logs/                    backend.log / blender.log / frontend.log / *.pid
+└── Codex_ParametricWeave.blend      the only Blender source today
+</pre>
+
+<h3>13.2 Environment variables (full list)</h3>
+<pre>YARN_LIBRARY_ROOT          absolute path to the shared yarn_library/
+BIG_LAMA_MODEL_PATH        absolute path to big-lama.pt
+LAMA_MODEL                 alternative name for the same
+BLENDER_BINARY_PATH        e.g. /Applications/Blender.app/Contents/MacOS/Blender
+WEAVE_BLEND_FILE           absolute path to Codex_ParametricWeave.blend
+WEAVE_RENDER_ROOT          where render jobs are written (default runtime/render_jobs)
+BLENDER_PORT               MCP socket port (Makefile pins 9876)
+BLENDER_LIVE_RENDER        1/true/on → live MCP executor; default headless
+BLENDER_TIMEOUT_SECONDS    diagnostic MCP-call timeout (default 30)
+BLENDER_LIVE_TIMEOUT_SECONDS  live-render override (default 900 s)
+CYCLES_MAX_TEXTURE_DIM     auto-downscale threshold (default 16384)
+WEAVE_PREVIEW_RENDER_RESOLUTION   override Cycles preview resolution (default 3200)
+WEAVE_PREVIEW_RENDER_SAMPLES      override Cycles sample count (default 96)
+WEAVE_CUTOUT_BLEND_METHOD         e.g. HASHED — force legacy alpha sorting
+WEAVE_SURFACE_RENDER_METHOD       e.g. DITHERED — force legacy surface alpha
+WEAVE_TEXTURE_INTERPOLATION       Linear|Closest|Cubic|Smart (default Linear)</pre>
+
+<h3>13.3 Quickstart commands</h3>
+<pre># One-time
+make backend-install
+make frontend-install
+
+# Normal dev (headless renders)
+make backend-dev
+make frontend-dev
+
+# Dev against an open Blender session (live MCP renders into the user's viewport)
+make backend-dev-live
+
+# Open the UI
+open http://127.0.0.1:5180/</pre>
+
+<h3>13.4 External asset bundle (Google Drive)</h3>
+<p>Direct asset bundle: <small><code>https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP</code></small></p>
+<pre>FabricGenerator_ExternalAssets_2026-05-16/
+  README_ASSETS.md
+  CHECKSUMS.sha256
+  yarn_library/
+  models/
+    big-lama.pt</pre>
+
+<h3>13.5 Documents referenced</h3>
+<ol>
+  <li><code>docs/FINAL_HANDOFF.md</code> — executive handoff</li>
+  <li><code>docs/application-blueprint.md</code> — weaving-draft subsystem spec</li>
+  <li><code>docs/putting-it-together/architecture.md</code> — three-app processes &amp; ports</li>
+  <li><code>docs/putting-it-together/data_contract.md</code> — authoritative metadata + socket map</li>
+  <li><code>docs/putting-it-together/phase_log.md</code> — full integration timeline</li>
+  <li><code>docs/putting-it-together/lessons.md</code> — earned rules (cross-app)</li>
+  <li><code>docs/BlenderFixes/architecture.md</code> — node-by-node Parametric Weave knotty</li>
+  <li><code>docs/BlenderFixes/phase_log.md</code> — every Blender-side fix</li>
+  <li><code>docs/BlenderFixes/lessons.md</code> — earned rules (Blender)</li>
+  <li><code>docs/WebUIChanges/architecture.md</code> — three layers + three sync points</li>
+  <li><code>docs/WebUIbands/current_pipeline.md</code> — band detection today</li>
+  <li><code>docs/WebUIbands/target_pipeline.md</code> — unified FWHM-density future</li>
+</ol>
+
+</section>
+
+<div class="footer">
+<p><strong>Document revision 1.1 · 2026-05-19.</strong> Revision history: 1.0 (2026-05-18, initial hyper-detailed review); 1.1 (2026-05-19, adds § 0 visual-checkpoint section, three approved render figures, updated pinned-footgun set, new auto-scale denominator constant, refreshed phase-log table, marks Arc 2 sign-off as resolved).</p>
+<p>This HTML is intended for both on-screen review and printing. To print: open in a browser → File → Print → use the browser's "Save as PDF" or send to printer. The CSS uses <code>@page</code> margins and avoids page-breaking inside figures, tables, and code blocks. Images load from local relative paths within the repo; the file is best viewed with the project tree intact next to it.</p>
+<p>For the canonical, append-only sources of truth, follow the documents referenced in § 13.5.</p>
+</div>
+
+</body>
+</html>

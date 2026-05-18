@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+
+from PIL import Image
 
 from app.atlas import AtlasBundle  # noqa: E402
 from app.models import YarnAsset  # noqa: E402
@@ -16,6 +19,12 @@ if str(ROOT) not in sys.path:
 from app.render_jobs import (  # noqa: E402
     DEFAULT_BLEND_FILE,
     DEFAULT_BLENDER_BINARY,
+    DEFAULT_CUTOUT_BLEND_METHOD,
+    DEFAULT_PREVIEW_RENDER_RESOLUTION,
+    DEFAULT_PREVIEW_RENDER_SAMPLES,
+    DEFAULT_SURFACE_RENDER_METHOD,
+    DEFAULT_TEXTURE_INTERPOLATION,
+    build_project_material_payloads,
     build_headless_render_command,
     build_headless_render_script,
     load_headless_blender_config,
@@ -51,6 +60,10 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("PreviewWeave", script)
         self.assertIn("PreviewDraft", script)
         self.assertIn("/tmp/unit-preview.png", script)
+        self.assertIn(f"_PW_PREVIEW_RENDER_RESOLUTION = {DEFAULT_PREVIEW_RENDER_RESOLUTION!r}", script)
+        self.assertIn(f"_PW_PREVIEW_RENDER_SAMPLES = {DEFAULT_PREVIEW_RENDER_SAMPLES!r}", script)
+        self.assertIn("scene.render.resolution_x = int(_PW_PREVIEW_RENDER_RESOLUTION)", script)
+        self.assertIn("scene.cycles.samples = int(_PW_PREVIEW_RENDER_SAMPLES)", script)
         self.assertIn("bpy.ops.render.render(write_still=True)", script)
 
     def test_build_headless_render_script_supports_atlas_preview_material(self) -> None:
@@ -80,6 +93,276 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("atlas_rows = 5", script)
         self.assertIn("colour_id", script)
         self.assertIn("warp_material_ids = [0, 1]", script)
+
+    def test_build_headless_render_script_prefers_direct_material_slots(self) -> None:
+        atlas = AtlasBundle(
+            diffuse_path=Path("/tmp/diffuse_atlas.png"),
+            alpha_path=Path("/tmp/alpha_atlas.png"),
+            rows=2,
+            tile_width=64,
+            tile_height=32,
+            asset_rows={"asset-red": 0, "asset-blue": 1},
+        )
+        script = build_headless_render_script(
+            {
+                "title": "Direct Material Test",
+                "drawdown": [[1, 0], [0, 1]],
+                "warpColors": ["#ffffff", "#111111"],
+                "weftColors": ["#aa0000", "#00aa00"],
+            },
+            render_path="/tmp/unit-preview.png",
+            atlas_bundle=atlas,
+            warp_material_ids=[0, 1],
+            weft_material_ids=[1, 0],
+            material_assets=[
+                {
+                    "id": "asset-red",
+                    "diffuse_path": "/tmp/red.png",
+                    "alpha_path": "/tmp/red-alpha.png",
+                    "image_width_px": 100,
+                    "core_v_min": 0.25,
+                    "core_v_max": 0.75,
+                },
+                {
+                    "id": "asset-blue",
+                    "diffuse_path": "/tmp/blue.png",
+                    "alpha_path": "/tmp/blue-alpha.png",
+                    "image_width_px": 200,
+                    "core_v_min": 0.2,
+                    "core_v_max": 0.8,
+                },
+            ],
+        )
+
+        self.assertIn("preview_materials = build_generated_preview_materials(_PW_MATERIAL_ASSETS)", script)
+        self.assertIn("FabricStudioMaterial_", script)
+        self.assertIn(f"_PW_TEXTURE_INTERPOLATION = {DEFAULT_TEXTURE_INTERPOLATION!r}", script)
+        self.assertIn(f"_PW_CUTOUT_BLEND_METHOD = {DEFAULT_CUTOUT_BLEND_METHOD!r}", script)
+        self.assertIn(f"_PW_SURFACE_RENDER_METHOD = {DEFAULT_SURFACE_RENDER_METHOD!r}", script)
+        self.assertIn("texture_node.interpolation = _PW_TEXTURE_INTERPOLATION", script)
+        self.assertIn("material.blend_method = _PW_CUTOUT_BLEND_METHOD", script)
+        self.assertIn("material.surface_render_method = _PW_SURFACE_RENDER_METHOD", script)
+        self.assertIn("set_modifier_input(modifier, node_group, f'Material {index}', material)", script)
+        self.assertIn("apply_material_cycle_inputs(modifier, node_group, 'Warp', warp_ids)", script)
+        self.assertIn("apply_material_cycle_inputs(modifier, node_group, 'Weft', weft_ids)", script)
+        self.assertNotIn("apply_material_cycle_inputs(modifier, node_group, 'Warp', weft_ids)", script)
+        self.assertIn("_PW_TEXTURE_SCALE_U_MULTIPLIER = float(globals().get('material_texture_scale_u', 1.0))", script)
+        self.assertIn("_pw_resolved_texture_scale_u(entry, modifier, node_group) * texture_scale_u_multiplier", script)
+        self.assertIn("/tmp/red.png", script)
+
+    def test_build_headless_render_script_loads_material_json_with_python_booleans(self) -> None:
+        script = build_headless_render_script(
+            {
+                "title": "Boolean Payload Test",
+                "drawdown": [[1]],
+                "warpColors": ["#ffffff"],
+                "weftColors": ["#111111"],
+            },
+            render_path="/tmp/unit-preview.png",
+            material_assets=[
+                {
+                    "id": "asset-one",
+                    "diffuse_path": "/tmp/one.png",
+                    "alpha_path": "/tmp/one-alpha.png",
+                    "texture_scale_u_is_auto": True,
+                },
+            ],
+            warp_material_ids=[0],
+            weft_material_ids=[0],
+        )
+
+        line = next(line for line in script.splitlines() if line.startswith("_PW_MATERIAL_ASSETS = "))
+        namespace = {"json": json}
+        exec(line, namespace)
+        self.assertTrue(namespace["_PW_MATERIAL_ASSETS"][0]["texture_scale_u_is_auto"])
+
+    def test_build_headless_render_script_supports_texture_interpolation_override(self) -> None:
+        with patch.dict("os.environ", {"WEAVE_TEXTURE_INTERPOLATION": "Closest"}):
+            script = build_headless_render_script(
+                {
+                    "title": "Sharp Texture Test",
+                    "drawdown": [[1]],
+                    "warpColors": ["#ffffff"],
+                    "weftColors": ["#111111"],
+                },
+                render_path="/tmp/unit-preview.png",
+                material_assets=[
+                    {
+                        "id": "asset-one",
+                        "diffuse_path": "/tmp/one.png",
+                        "alpha_path": "/tmp/one-alpha.png",
+                    },
+                ],
+                warp_material_ids=[0],
+                weft_material_ids=[0],
+            )
+
+        self.assertIn("_PW_TEXTURE_INTERPOLATION = 'Closest'", script)
+
+    def test_build_headless_render_script_supports_cutout_preview_overrides(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "WEAVE_CUTOUT_BLEND_METHOD": "HASHED",
+                "WEAVE_SURFACE_RENDER_METHOD": "DITHERED",
+            },
+        ):
+            script = build_headless_render_script(
+                {
+                    "title": "Cutout Preview Test",
+                    "drawdown": [[1]],
+                    "warpColors": ["#ffffff"],
+                    "weftColors": ["#111111"],
+                },
+                render_path="/tmp/unit-preview.png",
+                material_assets=[
+                    {
+                        "id": "asset-one",
+                        "diffuse_path": "/tmp/one.png",
+                        "alpha_path": "/tmp/one-alpha.png",
+                    },
+                ],
+                warp_material_ids=[0],
+                weft_material_ids=[0],
+            )
+
+        self.assertIn("_PW_CUTOUT_BLEND_METHOD = 'HASHED'", script)
+        self.assertIn("_PW_SURFACE_RENDER_METHOD = 'DITHERED'", script)
+
+    def test_build_headless_render_script_can_skip_render_for_live_setup(self) -> None:
+        script = build_headless_render_script(
+            {
+                "title": "Setup Only",
+                "drawdown": [[1]],
+                "warpColors": ["#ffffff"],
+                "weftColors": ["#111111"],
+            },
+            render_path="/tmp/setup-only.png",
+            material_assets=[
+                {
+                    "id": "asset-one",
+                    "diffuse_path": "/tmp/one.png",
+                    "alpha_path": "/tmp/one-alpha.png",
+                },
+            ],
+            warp_material_ids=[0],
+            weft_material_ids=[0],
+            render_still=False,
+        )
+
+        self.assertIn("setup_only_render_skipped", script)
+        self.assertIn("'status': \"setup_ready\"", script)
+        self.assertNotIn("bpy.ops.render.render(write_still=True)", script)
+
+    def test_build_headless_render_script_supports_udim_tiled_materials(self) -> None:
+        script = build_headless_render_script(
+            {
+                "title": "UDIM Test",
+                "drawdown": [[1]],
+                "warpColors": ["#ffffff"],
+                "weftColors": ["#111111"],
+            },
+            render_path="/tmp/udim-preview.png",
+            material_assets=[
+                {
+                    "id": "asset-wide",
+                    "diffuse_path": "/tmp/cycles-safe/albedo.png",
+                    "alpha_path": "/tmp/cycles-safe/alpha.png",
+                    "texture_mode": "udim_tiled",
+                    "texture_tile_count": 3,
+                    "diffuse_tile_pattern": "/tmp/tiles/albedo_<UDIM>.png",
+                    "alpha_tile_pattern": "/tmp/tiles/alpha_<UDIM>.png",
+                },
+            ],
+            warp_material_ids=[0],
+            weft_material_ids=[0],
+        )
+
+        self.assertIn("ensure_udim_image", script)
+        self.assertIn("asset_entry.get('texture_mode') == 'udim_tiled'", script)
+        self.assertIn("u_fract.operation = 'FRACT'", script)
+        self.assertIn("u_tile_scale.operation = 'MULTIPLY'", script)
+        self.assertIn("\"diffuse_tile_pattern\": \"/tmp/tiles/albedo_<UDIM>.png\"", script)
+
+    def test_build_headless_render_script_supports_rgba_udim_tiled_materials(self) -> None:
+        script = build_headless_render_script(
+            {
+                "title": "RGBA UDIM Test",
+                "drawdown": [[1]],
+                "warpColors": ["#ffffff"],
+                "weftColors": ["#111111"],
+            },
+            render_path="/tmp/rgba-udim-preview.png",
+            material_assets=[
+                {
+                    "id": "asset-wide",
+                    "diffuse_path": "/tmp/cycles-safe/albedo.png",
+                    "alpha_path": "/tmp/cycles-safe/alpha.png",
+                    "texture_mode": "udim_rgba_tiled",
+                    "texture_tile_count": 3,
+                    "rgba_tile_pattern": "/tmp/tiles/rgba_<UDIM>.png",
+                },
+            ],
+            warp_material_ids=[0],
+            weft_material_ids=[0],
+        )
+
+        self.assertIn("use_rgba_tiled = (", script)
+        self.assertIn("asset_entry.get('texture_mode') == 'udim_rgba_tiled'", script)
+        self.assertIn("asset_entry['rgba_tile_pattern']", script)
+        self.assertIn("alpha_output = alpha_tex.outputs['Alpha'] if use_rgba_tiled else alpha_tex.outputs['Color']", script)
+        self.assertIn("\"rgba_tile_pattern\": \"/tmp/tiles/rgba_<UDIM>.png\"", script)
+
+    def test_build_project_material_payloads_generates_udim_tiles_for_wide_assets(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            yarn_root = Path(tmpdir)
+            asset_dir = yarn_root / "wide-asset"
+            asset_dir.mkdir(parents=True)
+            Image.new("RGB", (16385, 4), (255, 0, 0)).save(asset_dir / "albedo.png")
+            Image.new("L", (16385, 4), 255).save(asset_dir / "alpha.png")
+            asset = YarnAsset(
+                id="wide-asset",
+                label="Wide Asset",
+                status="ready",
+                sourceFilename="source.png",
+                sourceUrl="/source.png",
+                diffuseFilename="albedo.png",
+                alphaFilename="alpha.png",
+            )
+
+            with patch("app.render_jobs.YARN_ASSETS_ROOT", yarn_root):
+                _atlas_entries, material_assets = build_project_material_payloads([asset])
+
+            self.assertEqual(material_assets[0]["texture_mode"], "udim_tiled")
+            self.assertEqual(material_assets[0]["texture_tile_count"], 2)
+            self.assertTrue((asset_dir / "cycles_tiled" / "albedo_1001.png").exists())
+            self.assertIn("<UDIM>", material_assets[0]["diffuse_tile_pattern"])
+
+    def test_build_project_material_payloads_prefers_rgba_udim_tiles_for_wide_assets(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            yarn_root = Path(tmpdir)
+            asset_dir = yarn_root / "wide-rgba-asset"
+            asset_dir.mkdir(parents=True)
+            Image.new("RGBA", (16385, 4), (255, 0, 0, 128)).save(asset_dir / "rgba.png")
+            Image.new("RGB", (16385, 4), (255, 0, 0)).save(asset_dir / "albedo.png")
+            Image.new("L", (16385, 4), 128).save(asset_dir / "alpha.png")
+            asset = YarnAsset(
+                id="wide-rgba-asset",
+                label="Wide RGBA Asset",
+                status="ready",
+                sourceFilename="rgba.png",
+                sourceUrl="/rgba.png",
+                diffuseFilename="albedo.png",
+                alphaFilename="alpha.png",
+            )
+
+            with patch("app.render_jobs.YARN_ASSETS_ROOT", yarn_root):
+                _atlas_entries, material_assets = build_project_material_payloads([asset])
+
+            self.assertEqual(material_assets[0]["texture_mode"], "udim_rgba_tiled")
+            self.assertEqual(material_assets[0]["texture_tile_count"], 2)
+            self.assertTrue((asset_dir / "cycles_tiled" / "rgba_1001.png").exists())
+            self.assertIn("<UDIM>", material_assets[0]["rgba_tile_pattern"])
 
     def test_build_headless_render_command_points_to_blend_file_and_script(self) -> None:
         fake_binary = ROOT / "tests" / "fixtures" / "blender-bin"
@@ -225,7 +508,10 @@ class RenderJobTests(unittest.TestCase):
                 self.assertEqual(captured["payload"]["atlas"]["rows"], 2)
                 self.assertTrue((captured["job_dir"] / "project.json").exists())
                 self.assertTrue((projects_root / "jobabc123def.json").exists())
-                self.assertIn("FabricStudioAtlasMaterial", captured["script_text"])
+                self.assertIn("build_generated_preview_materials(_PW_MATERIAL_ASSETS)", captured["script_text"])
+                self.assertIn("set_modifier_input(modifier, node_group, f'Material {index}', material)", captured["script_text"])
+                self.assertIn('"diffuse_path":', captured["script_text"])
+                self.assertNotIn("FabricStudioAtlasMaterial", captured["script_text"])
                 self.assertEqual(
                     captured["atlas_entries"],
                     [

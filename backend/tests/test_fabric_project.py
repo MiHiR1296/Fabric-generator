@@ -68,6 +68,38 @@ class FabricProjectTests(unittest.TestCase):
         self.assertEqual(weft_material_ids, [1, 0])
         self.assertEqual([asset.id for asset in ordered_assets], ["warp-asset", "weft-asset"])
 
+    def test_validate_project_bindings_deduplicates_same_asset_across_warp_and_weft(self) -> None:
+        bindings = normalize_color_bindings(
+            [
+                {"scope": "warp", "colorHex": "#ff0000", "yarnAssetId": "shared-asset"},
+                {"scope": "warp", "colorHex": "#ffffff", "yarnAssetId": "shared-asset"},
+                {"scope": "weft", "colorHex": "#ff0000", "yarnAssetId": "shared-asset"},
+                {"scope": "weft", "colorHex": "#ffffff", "yarnAssetId": "shared-asset"},
+            ]
+        )
+        assets = {
+            "shared-asset": YarnAsset(
+                id="shared-asset",
+                label="Shared Yarn",
+                status="ready",
+                sourceFilename="source.png",
+                sourceUrl="/shared/source.png",
+            ),
+        }
+
+        _, warp_material_ids, weft_material_ids, ordered_assets = validate_project_bindings(
+            {
+                "warpColors": ["#ff0000", "#ffffff", "#ffffff", "#ffffff"],
+                "weftColors": ["#ffffff", "#ff0000", "#ffffff", "#ffffff"],
+            },
+            bindings,
+            assets,
+        )
+
+        self.assertEqual(warp_material_ids, [0, 0, 0, 0])
+        self.assertEqual(weft_material_ids, [0, 0, 0, 0])
+        self.assertEqual([asset.id for asset in ordered_assets], ["shared-asset"])
+
     def test_validate_project_bindings_reports_missing_slots(self) -> None:
         bindings = normalize_color_bindings(
             [
