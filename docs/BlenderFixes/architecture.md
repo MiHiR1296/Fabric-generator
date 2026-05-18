@@ -25,7 +25,11 @@ What you see in Properties → Modifier (wrench) → Weave:
 │  Draft Object  /  Draft Columns  /  Draft Rows             │
 ├── ▸ Pattern             (Over/Under Count, W/W Threads,    │
 │                          Spacing, Amplitude)               │
-├── ▸ Surface             (Thread Subdivisions)              │
+├── ▸ Surface             (Thread Subdivisions,              │
+│                          Arc 2 Boundary Inset,             │
+│                          Match Section Slopes,             │
+│                          Arc 2 Edge Angle Mapping,         │
+│                          Arc 2 Match Arc 1 V Rate)         │
 ├── ▸ Texture             (Texture Scale V, Offset V,        │
 │                          Side Flatten)                     │
 ├── ▸ General             (Seed)                             │
@@ -53,7 +57,7 @@ For each ready yarn asset, the backend calls `build_material_asset_entry(asset)`
 | Producer key (`bandMeta.blender.*`) | Lands on socket | Drives |
 |---|---|---|
 | `image_width_px` | `Material N Image Width Px` | U-axis world-width per repeat |
-| `texture_scale_u * material_texture_scale_u` | `Material N Texture Scale U` | Per-yarn U multiplier after Image Width Px. Phase 4i puts the fit/divide-by-10 correction here. |
+| `texture_scale_u` (resolved at apply time) | `Material N Texture Scale U` | Per-yarn U multiplier after Image Width Px. Auto values are recomputed from the current padded visible V span; explicit non-`1.0` producer values are respected. |
 | `core_v_min` | `Material N Arc 1 V Min` | Raw core lower V edge from metadata. Phase 4c padding happens inside the .blend after material selection. |
 | `core_v_max` | `Material N Arc 1 V Max` | Raw core upper V edge from metadata. Phase 4c padding happens inside the .blend after material selection. |
 | `fiber_bot_v_min` | `Material N Arc 2 V Min` | Strand silhouette's bottommost V |
@@ -77,7 +81,7 @@ Material 2 Arc 1 V Min ──┤
 Material 16 Arc 1 V Min ─┘
                           └─→ output: "active material's Arc 1 V Min for this face"
                                        │
-                                       └─→ feeds into PW Band - Arc1 Map.To Min  (and Arc2 Core.To Max / Arc2 Bot.To Min)
+                                       └─→ feeds into PW Band - Arc1 Map.To Min  (and Arc2 Top.To Max / Arc2 Core.To Min after Phase 7)
 ```
 
 The switch node names still say "Core V Min" (internal naming — wasn't renamed in Phase 3d because the rename was on the interface only). What they output is whatever Material N Arc 1 V Min is set to on the modifier for the currently-rendered face's material.
@@ -94,7 +98,7 @@ The graph already labelled its internal nodes Arc 1 / Arc 2, but the interface s
 From [0, 1]  →  To [Arc 1 V Min, Arc 1 V Max]
 ```
 
-Phase 4c exposes `Arc 1 V Padding` on the modifier and inserts it after the material switch chain. Phase 4h sets its default to `0.012` and lets the Web UI push the same socket:
+Phase 4c exposes `Arc 1 V Padding` on the modifier and inserts it after the material switch chain. The 2026-05-19 checkpoint sets its default to `0.008` and lets the Web UI push the same socket:
 
 ```text
 Padded Arc 1 V Min = max(Material Arc 1 V Min - Arc 1 V Padding, Material Arc 2 V Min)
@@ -112,16 +116,16 @@ Three Map Range nodes partition the cross-section coordinate (`v_around`) at `Sp
 ```
 v_around                    Map Range            Texture-V range
 ─────────                   ─────────            ───────────────
-[0, Split Minus]    →   PW Band - Arc2 Top  →  [Arc 2 V Max, Arc 1 V Max]   (outer top → core top)
-[Split Minus, Split Plus] → PW Band - Arc2 Core → [Arc 1 V Max, Arc 1 V Min] (core top → core bottom)
-[Split Plus, 1]     →   PW Band - Arc2 Bot  →  [Arc 1 V Min, Arc 2 V Min]   (core bottom → outer bottom)
+[0, Split Minus]    →   PW Band - Arc2 Top  →  [Arc 2 V Min, Arc 1 V Min]   (outer bottom → core bottom)
+[Split Minus, Split Plus] → PW Band - Arc2 Core → [Arc 1 V Min, Arc 1 V Max] (core bottom → core top)
+[Split Plus, 1]     →   PW Band - Arc2 Bot  →  [Arc 1 V Max, Arc 2 V Max]   (core top → outer top)
 ```
 
 The three outputs go through "Weighted" nodes and `PW Band - Arc2 Sum A` + `PW Band - Arc2 V` (both ADD nodes) to combine into one piecewise V value per face.
 
 **The Phase 3e rewire moved 4 links** so the Top/Bot sections pull from the correct switch chains (`Core V Max Select` and `Fiber Top V Min Select` for Top; `Fiber Bot V Max Select` and `Core V Min Select` for Bot). Before the rewire, Arc 2 Top and Bot both mapped into the core's V range, making the halo invisible.
 
-**The Phase 3k direction fix swapped the To Min / To Max links** on all three Arc 2 Map Range nodes. `v_around=0` is the top outer edge and `v_around=1` is the bottom outer edge, so Arc 2 must run from outer top → core top → core bottom → outer bottom. Without this flip, the halo was present but inverted within each end band.
+**The Phase 7 direction review flips the whole stitched Arc 2 path**, not each Map Range in isolation. The current path is `Arc 2 V Min -> Arc 1 V Min -> Arc 1 V Max -> Arc 2 V Max`, so both split-boundary joins stay continuous.
 
 ### How Arc 1 and Arc 2 combine — `PW Band - Band V`
 
@@ -160,7 +164,18 @@ The old top/bot halo fraction nodes and the dead `r` nodes may still exist in th
 
 ## Texture U mapping
 
-The U direction maps generated strand length → texture U. The active graph already compensates generated curve length before the final texture scale:
+The U direction maps generated strand length → texture U. Since Phase 10i, the active graph stores `u_along` after the visible over/under bend:
+
+```
+PW Warp/Weft Set Curve Normal
+  -> PW Warp/Weft Set Position       # amplitude/noise/bend deformation
+  -> Store Warp/Weft U               # writes u_along after deformation
+  -> PW Warp/Weft UV Offset U
+```
+
+That ordering matters: `Spline Parameter` and `Spline Length` fields are contextual, so moving `Store Warp U` / `Store Weft U` after `PW Warp/Weft Set Position` makes them evaluate on the bent curve instead of the straight pre-bend curve.
+
+The graph compensates generated curve length before the final texture scale:
 
 ```
 Warp/Weft U Compensated = Spline Parameter Factor × (Spline Length / Straight Length)
@@ -170,7 +185,7 @@ Final U scale           = Straight Length / texture_world_width × root Texture 
 Those two pieces collapse to actual generated spline length:
 
 ```
-Factor × (Spline Length / Straight Length) × Straight Length = Factor × Spline Length
+Factor × (post-bend Spline Length / Straight Length) × Straight Length = Factor × post-bend Spline Length
 ```
 
 The texture-width part is built around three values:
@@ -191,16 +206,252 @@ source_strand_length_BU / (image_width_px / scanner_pixels_per_bu)
   * Material N Texture Scale U
 ```
 
-For scan-driven yarns after Phase 4i, [blender_sync.py](../../backend/app/blender_sync.py) keeps root `Texture Scale U` neutral and computes a per-material multiplier:
+For scan-driven yarns after Phase 5 and Phase 10u, [blender_sync.py](../../backend/app/blender_sync.py) keeps root `Texture Scale U` neutral. [blender_live.py](../../backend/app/blender_live.py) resolves each automatic per-material U scale during the apply-metadata pass, after the current `Arc 1 V Padding` socket is known:
 
 ```
-texture_u_calibration = 0.1  # override via renderSettings.textureUCalibration or FABRIC_TEXTURE_U_CALIBRATION
+Arc1_V_Min_Padded = max(Material N Arc 1 V Min - Arc 1 V Padding, Material N Arc 2 V Min)
+Arc1_V_Max_Padded = min(Material N Arc 1 V Max + Arc 1 V Padding, Material N Arc 2 V Max)
+visible_v_span = Arc1_V_Max_Padded - Arc1_V_Min_Padded
+
 root_texture_scale_u = 1.0
-material_texture_scale_u = (max(Space X/Y) * Fill Ratio) / (Warp Threads * Spacing) * texture_u_calibration
-Material N Texture Scale U = bandMeta.texture_scale_u * material_texture_scale_u
+AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0
+Material N Texture Scale U = visible_v_span / AUTO_TEXTURE_SCALE_U_DENOMINATOR   # auto mode only
 ```
 
-The producer pre-computes the measured width and pushes the raw `image_width_px` to `Material N Image Width Px`; the graph divides by `Scanner Pixels Per BU` internally to get world width. `bandMeta.texture_scale_u` remains the per-yarn/artistic override, defaulting to `1.0`, and the render/setup script multiplies it by `material_texture_scale_u` before pushing the socket. Phase 4d canonicalizes the user-tested divide-by-10 behavior as a calibration default, not as a unit conversion.
+The producer pre-computes the measured width and pushes the raw `image_width_px` to `Material N Image Width Px`; the graph divides by `Scanner Pixels Per BU` internally to get world width. `bandMeta.texture_scale_u` remains the per-yarn/artistic override. If it is unset or `1.0`, the consumer treats it as automatic and derives the visible-span value above; if it is non-`1.0`, the consumer pushes that explicit value unchanged. `ARC1_V_AROUND_SPAN = 0.6` remains geometry/radius provenance for the Arc 1 / Arc 2 split, not the active auto U denominator.
+
+The backend still sends `U Stride Per Warp End / Weft Pick` as the straight-baseline repeats-per-strand. Inside the graph, Phase 10i adds:
+
+```
+PW Warp U Stride Post-Bend Ratio = U Stride Per Warp End × Warp Length Ratio
+PW Weft U Stride Post-Bend Ratio = U Stride Per Weft Pick × Weft Length Ratio
+uv_offset_u = variation_offset + curve_index × post_bend_stride
+```
+
+Because the same post-bend length ratio drives both `u_along` and `uv_offset_u`, the end of strand `N` and the start of strand `N+1` stay in the same U phase even when amplitude/noise make the visible curve longer than the straight drafting span.
+
+### Per-section U scale (Phase 10 → 10a)
+
+`PW U - Scale U Final` is calibrated for *one* slope. The Arc 2 Top, Arc 2 Bot, and Arc 1 main-strand sections each have their own `tex_v / v_around` slope, so a single U scale leaves texels in the other sections non-square. Phase 10 corrects this by injecting a per-face multiplier between `PW UV U Add` and `Combine XYZ.006.X`:
+
+```
+PW U - Sec * (22 nodes)            compute per-section V slope and the gating ratio
+PW U - Section Ratio               = section_v_slope / Arc 2 Core v_slope
+  - Arc 2 Core face → 1.0
+  - Arc 2 Top/Bot face → scan-dependent (~1× on tight halos, ~5× on wispy halos)
+  - Arc 1 main-strand face → 1.0   (Phase 10a — see below)
+PW U - Per Section Multiplier      = PW UV U Add.Value × PW U - Section Ratio
+Combine XYZ.006.X                  ← PW U - Per Section Multiplier
+```
+
+Multiplying after the offset add scales both the within-strand U sampling rate AND the Phase 5 strand-to-strand spool stride, so the spool stays continuous within each section. The two debug attributes `pw_section_ratio` and `pw_section_slope` are stored on the evaluated mesh for readback.
+
+**Phase 10a fix — Arc 1 ratio = 1.0, not 0.6.** Arc 1 (radius `0.015`, full `v_around`) and Arc 2 Core (radius `0.025`, `60%` of `v_around`) cover the *same physical around-strand width* by Phase 3q construction (`2π × 0.015 × 1.0 = 2π × 0.025 × 0.6 = 0.0942 BU`). They share the same physical V rate and therefore should share K_u. The fallback into the gating math reads from `PW U - Sec Core Slope` (not `PW U - Sec Arc1 Slope`, which is left in the graph but unlinked for revert).
+
+### Arc 2 visual-projection U correction attempt (Phase 10j, reverted)
+
+Equal UV numbers are not enough when Arc 1 and Arc 2 are two offset curved shells; the user is judging a screen-projected registration problem. Phase 10j tried to solve this by adding a `PW VisU - *` top-view projected-axis correction to Arc 2. That attempt was reverted because it distorted the texture: the simple projected-axis model did not match the actual swept shell, perspective/rasterization, and per-face interpolation behavior.
+
+Reverted graph state after Phase 10j:
+
+```text
+PW U - Per Section Multiplier.Value <- PW UV U Add.Value
+no PW VisU - * nodes
+no pw_visual_u_correction attribute
+no pw_u_factor / pw_thread_kind projection stores
+```
+
+Keep this as a caution: a projected-axis branch should be validated as a temporary switch/debug branch first, ideally with a viewport screenshot or small render after each scalar term, not saved as the default path until the visual result is confirmed.
+
+### Arc 2 same-strand U transfer (Phase 10k)
+
+Phase 10k keeps the Phase 10j lesson but changes the implementation. The viewport mismatch was not `UV Random U`; it was Arc 2 using the right deterministic thread-length model on the wrong visible shell. The first nearest-surface preview also failed because an ungrouped sample can hit a neighboring strand where Arc 1 and Arc 2 are close in screen space.
+
+Active graph state:
+
+```text
+Warp curve branch:
+  Curve of Point.Curve Index
+    -> PW StrandID - Store Warp (INT point attribute `pw_strand_id`)
+
+Weft curve branch:
+  Curve of Point.Curve Index
+    -> PW StrandID - Weft Offset (+10000)
+    -> PW StrandID - Store Weft (INT point attribute `pw_strand_id`)
+
+Arc 2 U transfer:
+  PW StrandXferU - Strand ID                         reads `pw_strand_id`
+  PW StrandXferU - Sample Same-Strand Arc1 U         samples PW U - Per Section Multiplier from Arc 1 mesh
+    Mesh                                             <- Reroute.001 (Arc 1/main mesh)
+    Value                                            <- PW U - Per Section Multiplier.Value
+    Group ID / Sample Group ID                       <- pw_strand_id
+    Sample Position                                  <- Position
+  PW StrandXferU - Is Arc2                           reads `is_sub_strand`
+  PW StrandXferU - Use Same-Strand Arc1 U On Arc2    selects sampled Arc 1 U only for Arc 2
+  Combine XYZ.006.X                                  <- PW StrandXferU - Use Same-Strand Arc1 U On Arc2
+```
+
+Only U is transferred. Arc 2 keeps the existing Arc 2 V chain (`Arc 2 Match Arc 1 V Rate` can still be used for visual cell-count matching), and no `PW VisU`, `pw_visual_u_correction`, `pw_u_factor`, or `pw_thread_kind` nodes are active.
+
+### Arc 2 profile is a custom 31-vertex polyline (Phase 10c → 10d)
+
+Up to Phase 10b the Arc 2 profile was the bare `Arc.001` Curve Arc primitive (Resolution = 11). That alignment-by-resolution trick only holds while `arc1/arc2` radius ratio = 0.6 keeps the section boundaries on `0.1`-multiples. Phase 10c replaces the profile with a polyline whose vertices always land exactly on the live `Split Minus / Plus`, regardless of radius ratio:
+
+```
+GeometryNodeMeshLine (Count = 31, Offset = (1/30, 0, 0))
+    │ uniform points in natural_factor ∈ [0, 1]
+    ▼
+Position → Separate XYZ → X = natural_factor
+    │
+    ├── piecewise Map Range (natural → actual factor):
+    │     [0, 0.2] → [0, Split Minus]      (Arc 2 Top)
+    │     [0.2, 0.8] → [Split Minus, Split Plus]   (Arc 2 Core)
+    │     [0.8, 1.0] → [Split Plus, 1.0]   (Arc 2 Bot)
+    │   combined via IsTop / IsCore / IsBot weighted sum
+    │
+    ▼
+PW Profile - Store Natural Factor (Store Named Attribute `pw_profile_natural` = Position.X)
+    │ — Phase 10d: bake the natural factor BEFORE Set Position runs,
+    │   so the fixed profile anchors survive any radial deformation
+    ▼
+PW Profile - Store Actual Factor (Store Named Attribute `pw_profile_actual` = actual factor)
+    │ — Phase 10p: bake the actual source-arc factor too, so v_around
+    │   uses the same split coordinates as the Arc 2 V Map Ranges
+    ▼
+GeometryNodeSampleCurve (Mode = FACTOR) on Arc.001 at `actual` → Position
+    │
+    ▼
+GeometryNodeSetPosition → optional Arc 2 Boundary Inset (Phase 10d)
+    │
+    ▼
+GeometryNodeMeshToCurve → polyline curve → Store Named Attribute.003 (writes v_around = pw_profile_actual)
+    │
+    ▼
+Curve to Mesh.001 (sweeps the strand curves through this profile)
+```
+
+`Spline Parameter Factor` is **no longer the source of v_around** on the Arc 2 profile. Phase 10d introduced the baked natural anchor attribute; Phase 10p adds a baked actual-factor attribute and makes `Store Named Attribute.003.Value` read `pw_profile_actual`. This decouples v_around from post-position arc length while keeping it in the same coordinate system as `PW Band - Split Minus / Plus`.
+
+Why it works for any radius ratio or texture-proportional split: the piecewise Map Range makes within-section segments equal-length on the source arc, so vertex 6 always sits on actual factor = Split Minus and vertex 24 on actual factor = Split Plus. Because `v_around` now stores that actual factor, the V Map Range chain (`PW Band - Arc2 Top/Core/Bot`) and the physical profile boundary agree exactly: natural `0.2` can map to actual/v_around `0.039273`, natural `0.8` can map to actual/v_around `0.945576`, and the halo strips no longer get partially classified as core.
+
+### Arc 2 Boundary Inset (Phase 10d) — tuck boundary behind Arc 1
+
+Interface socket `Arc 2 Boundary Inset` (Surface panel, NodeSocketFloat, default `0.0`, range `[0, 0.025]`). Computes a per-vertex tent weight:
+
+```
+nat = vertex.x   (natural factor 0..1 from the Mesh Line)
+
+dist = min(|nat − 0.2|, |nat − 0.8|)
+weight = max(0, 1 − dist / 0.2)
+         # 1 at boundary vertices, taper to 0 at outer halo edges (nat=0,1)
+         # and into the core (nat=0.4, 0.6)
+
+inset_BU = Arc 2 Boundary Inset × weight
+scale = 1 − inset_BU / arc2_radius
+position_final = sampled_position × scale     (uniform scale toward profile origin)
+```
+
+At inset = `arc2_radius − arc1_radius = 0.010` the boundary vertex sits exactly on Arc 1's silhouette and the section discontinuity (where halo content meets core content in the texture) becomes hidden behind Arc 1. Smaller values give partial tuck.
+
+### Match Section Slopes (Phase 10e) — eliminate the slope discontinuity
+
+Interface socket `Match Section Slopes` (Surface panel, NodeSocketBool, default `False`). When the texture's halo/core V proportions don't match Phase 3q's `0.2 / 0.6 / 0.2` geometric split, the three section slopes (`tex_v / v_around`) differ — by 7% or so on typical yarns, which reads as a tiny cell-aspect band right where the section boundary sits on Arc 2.
+
+When `True`, the global `PW Band - Split Minus / Plus` switch from Phase 3q's geometric ratio to a texture-proportional split derived from Material 1's V values:
+
+```
+M1_Arc1_V_Min_Padded = max(Material 1 Arc 1 V Min − Arc 1 V Padding, Material 1 Arc 2 V Min)
+M1_Arc1_V_Max_Padded = min(Material 1 Arc 1 V Max + Arc 1 V Padding, Material 1 Arc 2 V Max)
+
+top_v   = M1_Arc1_V_Min_Padded − Material 1 Arc 2 V Min
+core_v  = M1_Arc1_V_Max_Padded − M1_Arc1_V_Min_Padded
+bot_v   = Material 1 Arc 2 V Max − M1_Arc1_V_Max_Padded
+total_v = top_v + core_v + bot_v
+
+Tex Split Minus = top_v / total_v
+Tex Split Plus  = (top_v + core_v) / total_v
+```
+
+A pair of `GeometryNodeSwitch` (FLOAT) gated by `Match Section Slopes` picks between Geo Split (Phase 3q) and Tex Split (Phase 3m–style), feeding `PW Band - Split Minus / Plus` — which is consumed by both the V Map Range chain and the polyline natural-anchor chain.
+
+With slopes equal on both sides of every boundary, linear interpolation across the mesh face that spans the boundary produces the correct tex_v automatically, *without* needing per-material polyline rebuilds. The Phase 10 per-section U multiplier becomes a no-op (Section Ratio = 1.0 everywhere). Caveat: the texture-proportional split uses Material 1's V values for the global split — multi-material renders will have exact slope match only for Material 1.
+
+### Arc 2 Edge Angle Mapping (Phase 10f) — cosine-curvature V mapping in Top/Bot
+
+Interface socket `Arc 2 Edge Angle Mapping` (Surface panel boolean, default `False`). When `True`, Arc 2 Top and Arc 2 Bot use a cumulative-`sin(θ)` V mapping instead of linear-in-`v_around`. `θ` is the actual angle of curvature on the source arc (`Arc.001`, start `30°`, sweep `120°`).
+
+The intuition: a polygon at angle `θ` on the cross-section projects to a screen-space size proportional to `sin(θ)` when viewed from `+Z`. Silhouette polygons (`θ ≈ 30°` or `150°`, `sin(θ) ≈ 0.5`) project to half the screen footprint of polygons near the top of the arc (`θ = 90°`, `sin(θ) = 1`). Linear-in-`v_around` allocates the same V band to every polygon, so silhouette polygons end up sampling too much V per screen pixel and read as one stretched cell. Allocating V proportionally to `sin(θ)` (which integrates cumulatively to `cos(θ_start) − cos(θ)`) restores uniform cell size in screen space.
+
+Math (Top section; Bot is symmetric):
+
+```text
+θ(v_around) = THETA_START + v_around × (Split Minus × SWEEP / 0.2)
+norm_top    = (cos(THETA_START) − cos(θ(v_around))) /
+              (cos(THETA_START) − cos(THETA_START + Split Minus × SWEEP))
+tex_v_top   = Arc 2 V Min + norm_top × (Arc 1 V Min Padded − Arc 2 V Min)
+```
+
+Implementation: 22 nodes (`PW EdgeAng - Top *` and `PW EdgeAng - Bot *`); two `GeometryNodeSwitch` (FLOAT, gated by the toggle) feed `PW Band - Top/Bot Weighted.in[0]` from either the existing linear `Map Range.Result` or the new curvature-weighted output. Core mapping is untouched (it spans `θ` near `90°` where `sin(θ) ≈ 1` so linear is already approximately correct).
+
+Recommended pairing: `Match Section Slopes = False` (Phase 3q's `0.2 / 0.8` split keeps Top/Bot wide enough for the cosine remap to operate over a meaningful angular range). With Match `True`, the texture-proportional split shrinks Top/Bot dramatically and the cosine remap's effect becomes negligible.
+
+### Arc 2 Match Arc 1 V Rate (Phase 10g -> 10h) — equalize cell count across the two arcs
+
+Interface socket `Arc 2 Match Arc 1 V Rate` (Surface panel boolean, default `False`). When `True`, the entire Arc 2 piecewise V chain output is replaced with a single linear mapping that samples exactly Arc 1's padded V range:
+
+```text
+mid         = (Arc 1 V Min Padded + Arc 1 V Max Padded) / 2
+span_padded = Arc 1 V Max Padded − Arc 1 V Min Padded
+matched     = span_padded × 1.0                  (radius scaling removed in Phase 10g postscript)
+projected_v = v_around                         # Phase 10g/10h state
+tex_v_arc2(v_around) = mid + (projected_v − 0.5) × matched
+```
+
+Implementation: 11 nodes (`PW MatchScale - *`) compute the matched V, one `GeometryNodeSwitch` (FLOAT, gated by the toggle) replaces `PW Band - Diff.in[0]` from `PW Band - Arc2 V` (piecewise sum) to the matched output. Arc 1's mapping (`PW Band - Arc1 Map`) is untouched.
+
+The `PW MatchScale - Radius Ratio` node is still present for reference/revert, but it is no longer linked into `PW MatchScale - Matched Span`; the multiplier input is hard-set to `1.0`. This matches Arc 2's V range exactly to Arc 1's padded core range, so Arc 1 and Arc 2 have the same cells-per-silhouette count. Earlier drafts used `span x ratio`, which matched physical cell size but read as Arc 2 being denser because its wider cylinder fit more cells.
+
+Why this matched the Phase 10g/10h visual goal: at every shared `v_around`, Arc 1 and Arc 2 sample the same `tex_v`. This is a visual range match, not a physical texel-per-BU match; Arc 2's wider cylinder therefore makes cells physically larger around the outside, but the pattern rows overlap exactly with Arc 1.
+
+With ratio `1.0`, Arc 2 does not sample the outer halo rows when this toggle is on; it samples the padded Arc 1 range by design. Use the original piecewise Arc 2 path when halo content is more important than exact Arc 1/Arc 2 pattern overlap. The Phase 10s saved state does exactly that: the matched branch remains in the node graph for comparison, but `Arc 2 Match Arc 1 V Rate = False`, so `PW MatchScale - Switch Arc2 V.False` passes `PW Band - Arc2 V`.
+
+Phase 10l tested a projected skew inside the matched range. Phase 10m fixed Arc 1's top-view projection and material phase, but it still kept the matched branch active. The user rejected that because Arc 2's extra halo then repeated the same core texture area instead of sampling the yarn outside Arc 1. Phase 10s is the current saved contract:
+
+```text
+projected_v_arc1 = (1 − cos(pi × v_around)) / 2
+tex_v_arc1       = Arc 1 padded map(projected_v_arc1)
+tex_v_arc2       = piecewise Arc 2 Top/Core/Bot V
+phase_offset_v   = 0
+uv_scaled.y      = tex_v + phase_offset_v
+```
+
+The Arc 2 piecewise path preserves the intended texture ownership:
+
+```text
+Top halo:    Arc 2 V Min      -> raw Arc 1 V Min
+Core:        raw Arc 1 V Min  -> raw Arc 1 V Max
+Bottom halo: raw Arc 1 V Max  -> Arc 2 V Max
+```
+
+Why Arc 1 and Arc 2 differ: evaluated mesh sampling from the top camera showed Arc 1's screen-space cross-section is circular/cosine in `v_around`, while Arc 2's generated top-view profile is already handled by its Top/Core/Bot mapping. Applying the matched linear branch to Arc 2 was not full-halo project-from-view; it collapsed Arc 2 onto Arc 1's core range.
+
+Active nodes/links:
+
+```text
+PW MatchProjV - v around x sweep
+PW MatchProjV - theta start plus
+PW MatchProjV - cos theta
+PW MatchProjV - cos start minus cos
+PW MatchProjV - projected factor
+PW MatchProjV - projected minus 0.5
+PW Band - Arc1 Map.Value <- PW MatchProjV - projected factor.Value
+PW MatchScale - Switch Arc2 V.False <- PW Band - Arc2 V.Value
+Arc 2 Match Arc 1 V Rate = False
+PW Band - IsTop threshold <- PW Band - Split Minus
+PW Band - IsBot threshold <- PW Band - Split Plus
+```
+
+The old V phase offset was deliberate for checker-material debugging. With the full Arc 2 halo path active, Arc 2's raw band was `0.46808514..0.53191492`; the checker material uses a `12x` V scale, so `Texture Offset V = 0.031914920` moved Arc 2 to `0.50000006..0.56382984` and kept that checker inside one tile. The 2026-05-19 approved direct-material checkpoint returns the saved/pinned `Texture Offset V` to `0`.
 
 ## Materials — the routing chain
 
@@ -247,15 +498,15 @@ Both use the same script generation (`build_headless_render_script` in [render_j
 
 ## Pinned defaults — Rule 3
 
-These six sockets must stay at their pinned values for scan-driven yarns. The five V-related sockets are **additive deltas**, not absolute overrides, so leaving them at zero/one keeps the main-strand and sub-strand V mappings aligned:
+These six sockets must stay at their pinned values for scan-driven yarns. The 2026-05-19 checkpoint pins the direct-material baseline, with V offset neutral and sub texture V scale at `1`:
 
 ```
 Sub Strand Enable      True      # gates Arc 2 — see is_sub_strand chain above
 Texture Scale V        1.0       # multiplier on V (1 = no scale)
-Texture Offset V       0.0       # constant V shift (0 = no offset)
+Texture Offset V       0.0       # neutral V phase for the approved checkpoint
 Texture Side Flatten   0.0       # cylindrical projection weight (0 = flat ribbon mapping)
-Sub Texture Scale V    0.0       # additive delta on V for sub-strand (0 = aligned with main)
+Sub Texture Scale V    1.0       # approved sub-strand V scale checkpoint value
 Sub Texture Offset V   0.0       # additive offset for sub-strand
 ```
 
-Producer pushes these every time via `PINNED_FOOTGUN_SOCKETS` in [blender_live.py](../../backend/app/blender_live.py). Don't change them without reading lessons.md Rule 3.
+Producer pushes these every time via `PINNED_FOOTGUN_SOCKETS` in [blender_live.py](../../backend/app/blender_live.py). Don't change them without reading lessons.md Rules 3, 34, 35, 37, and the checkpoint doc [../CHECKPOINT_2026-05-19.md](../CHECKPOINT_2026-05-19.md).

@@ -13,7 +13,9 @@ export const DEFAULT_WARP_COLOR = '#f3ede2';
 export const DEFAULT_WEFT_COLOR = '#b85e3c';
 export const STORAGE_KEY = 'weaving-draft-studio/current-draft';
 export const WEAVE_ZOOM_THREAD_LEVELS = [80, 120, 160, 200] as const;
-export const DEFAULT_ARC1_V_PADDING = 0.012;
+export const DEFAULT_ARC1_V_PADDING = 0.008;
+const PHYSICAL_SPACING_MIN = 0.026;
+const PHYSICAL_SPACING_MAX = 0.1;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -108,7 +110,9 @@ function normalizeSpacingControl(
   // unit scale the v2 backend now expects. Once both patternNoise controls
   // are present we trust the value is already on the unit scale.
   if (!hasUnitControls && Number.isFinite(value) && value >= 0.005 && value <= 0.2) {
-    return Math.round(clamp((value - 0.03) / (0.1 - 0.03), 0, 1) * 100) / 100;
+    return Math.round(
+      clamp((value - PHYSICAL_SPACING_MIN) / (PHYSICAL_SPACING_MAX - PHYSICAL_SPACING_MIN), 0, 1) * 100,
+    ) / 100;
   }
 
   return clamp(value, 0, 1);

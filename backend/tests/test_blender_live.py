@@ -32,6 +32,8 @@ class BlenderLiveTests(unittest.TestCase):
 
         self.assertAlmostEqual(entry["core_v_min"], 0.3)
         self.assertAlmostEqual(entry["core_v_max"], 0.6)
+        self.assertAlmostEqual(entry["texture_scale_u"], 0.3)
+        self.assertTrue(entry["texture_scale_u_is_auto"])
 
     def test_build_material_asset_entry_keeps_arc2_bounds_raw_for_blender_padding(self) -> None:
         asset = SimpleNamespace(
@@ -56,7 +58,33 @@ class BlenderLiveTests(unittest.TestCase):
 
     def test_apply_metadata_multiplies_per_material_texture_scale_u_when_requested(self) -> None:
         self.assertIn("_PW_TEXTURE_SCALE_U_MULTIPLIER", blender_live.APPLY_METADATA_PY)
-        self.assertIn("socket_value *= texture_scale_u_multiplier", blender_live.APPLY_METADATA_PY)
+        self.assertEqual(blender_live.AUTO_TEXTURE_SCALE_U_DENOMINATOR, 1.0)
+        self.assertIn("_AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0", blender_live.APPLY_METADATA_PY)
+        self.assertIn("_pw_resolved_texture_scale_u(entry, modifier, node_group) * texture_scale_u_multiplier", blender_live.APPLY_METADATA_PY)
+        self.assertIn("_pw_resolved_texture_scale_u(first, modifier, node_group) * texture_scale_u_multiplier", blender_live.APPLY_METADATA_PY)
+
+    def test_pinned_v_offsets_are_neutral(self) -> None:
+        self.assertIn(("Texture Offset V", 0.0), blender_live.PINNED_FOOTGUN_SOCKETS)
+        self.assertIn(("Sub Texture Scale V", 1.0), blender_live.PINNED_FOOTGUN_SOCKETS)
+        self.assertIn(("Sub Texture Offset V", 0.0), blender_live.PINNED_FOOTGUN_SOCKETS)
+
+    def test_build_material_asset_entry_marks_explicit_texture_scale_u(self) -> None:
+        asset = SimpleNamespace(
+            id="asset-one",
+            label="Asset One",
+            bandMeta={
+                "blender": {
+                    "texture_scale_u": 0.25,
+                    "core_v_min": 0.3,
+                    "core_v_max": 0.6,
+                }
+            },
+        )
+
+        entry = blender_live.build_material_asset_entry(asset)
+
+        self.assertAlmostEqual(entry["texture_scale_u"], 0.25)
+        self.assertFalse(entry["texture_scale_u_is_auto"])
 
 
 if __name__ == "__main__":

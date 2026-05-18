@@ -9,6 +9,7 @@ export const oelsnerStarterPatterns: BookPatternEntry[] = [
     referencePage: 'p. 14',
     summary: 'Starter reconstruction for the plain weave chapter in Oelsner.',
     tags: ['oelsner', 'plain weave', 'starter'],
+    weaveType: 'plain',
     status: 'loadable',
     note: 'Curated starter reconstruction based on the Oelsner plain-weave chapter.',
     draft: normalizeDraft({
@@ -39,6 +40,7 @@ export const oelsnerStarterPatterns: BookPatternEntry[] = [
     referencePage: 'p. 16',
     summary: 'Starter reconstruction for the twill chapter in Oelsner.',
     tags: ['oelsner', 'twill', 'starter'],
+    weaveType: 'twill',
     status: 'loadable',
     note: 'Curated starter reconstruction based on the Oelsner twill chapter.',
     draft: normalizeDraft({
@@ -69,6 +71,7 @@ export const oelsnerStarterPatterns: BookPatternEntry[] = [
     referencePage: 'p. 26',
     summary: 'Starter reconstruction for the satin chapter in Oelsner.',
     tags: ['oelsner', 'satin', 'starter'],
+    weaveType: 'satin',
     status: 'loadable',
     note: 'Curated starter reconstruction based on the Oelsner satin chapter.',
     draft: normalizeDraft({
@@ -100,6 +103,7 @@ export const oelsnerStarterPatterns: BookPatternEntry[] = [
     referencePage: 'p. 43',
     summary: 'Grouped over-under blocks for the basket-weave family in Oelsner.',
     tags: ['oelsner', 'basket', 'starter'],
+    weaveType: 'basket',
     status: 'loadable',
     note: 'Curated starter reconstruction based on the Oelsner basket-weave chapter.',
     draft: normalizeDraft({
@@ -130,6 +134,7 @@ export const oelsnerStarterPatterns: BookPatternEntry[] = [
     referencePage: 'p. 46',
     summary: 'Warp-dominant rib structure from the rib-weave family in Oelsner.',
     tags: ['oelsner', 'rib', 'warp rib'],
+    weaveType: 'rib',
     status: 'loadable',
     note: 'Curated starter reconstruction based on the Oelsner rib-weave chapter.',
     draft: normalizeDraft({
@@ -160,6 +165,7 @@ export const oelsnerStarterPatterns: BookPatternEntry[] = [
     referencePage: 'p. 144',
     summary: 'A herringbone-style pointed twill reconstruction from the Oelsner pointed-twill family.',
     tags: ['oelsner', 'pointed twill', 'herringbone'],
+    weaveType: 'twill',
     status: 'loadable',
     note: 'Curated starter reconstruction based on the Oelsner herringbone or pointed-twill chapter.',
     draft: normalizeDraft({
@@ -190,6 +196,7 @@ export const oelsnerStarterPatterns: BookPatternEntry[] = [
     referencePage: 'p. 82',
     summary: 'A starter broken-twill reconstruction inspired by Oelsner’s reversed and broken twill sections.',
     tags: ['oelsner', 'broken twill', 'reversed twill'],
+    weaveType: 'twill',
     status: 'loadable',
     note: 'Curated starter reconstruction based on the Oelsner broken or reversed twill family.',
     draft: normalizeDraft({

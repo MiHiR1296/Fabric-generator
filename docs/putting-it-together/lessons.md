@@ -52,21 +52,21 @@ Done once in [web/yarn_library.py:save_to_library](../../../web/yarn_library.py)
 
 ## On the Blender file
 
-### Rule 3 — The Arc 2 sub-strand sockets are an additive footgun.
+### Rule 3 — The Arc 2 V sockets are checkpoint footguns.
 
-`Sub Texture Scale V` and `Sub Texture Offset V` on `Parametric Weave knotty` are **additive deltas** applied only when `is_sub_strand = 1`. Setting `Sub Texture Scale V = 1` does NOT mean "use the same V scale as the main strand"; it means "use main scale + 1", which doubles the Arc 2 V mapping and visibly misaligns the fiber bands.
+`Texture Offset V`, `Sub Texture Scale V`, and `Sub Texture Offset V` on `Parametric Weave knotty` can silently change the scan-driven V alignment. Treat them as checkpoint values, not as casual tuning knobs.
 
 **Why**: We're inheriting this from the scan workflow ([fabric-update-node-documentation.md](../../docs/fabric-update-2026-05-09/fabric-update-node-documentation.md) was the warning). The naming feels like an absolute override; the math is additive. Easy to break in a one-line "tweak".
 
-**Rule of practice**: for any scan-driven yarn, keep all five of these at their pinned defaults:
+**Rule of practice**: for any scan-driven yarn, keep all five of these at their pinned values:
 ```
 Texture Scale V       = 1
 Texture Offset V      = 0
 Texture Side Flatten  = 0
-Sub Texture Scale V   = 0
+Sub Texture Scale V   = 1
 Sub Texture Offset V  = 0
 ```
-The consumer (`render_jobs.py`, Phase 3) should push these explicitly even though they're the file's defaults — defensive against someone tweaking the .blend.
+The older non-zero `Texture Offset V = 0.031914920` and `Sub Texture Scale V = 0` state was part of a checker/material phase experiment. The 2026-05-19 visual checkpoint supersedes it; the consumer should push these explicitly even though they're the file's defaults — defensive against someone tweaking the .blend.
 
 ---
 
@@ -233,7 +233,7 @@ Keep root `Texture Scale U = 1.0`; it is global and will make multi-material swa
 
 Scanned yarn strips are photographic inputs. If the generated Blender material uses `Closest`, the live viewport can look pixelated even when the metadata and UVs are correct, especially after the Cycles-safe max-dimension downscale.
 
-Default generated yarn material nodes to `Linear`; only use `Closest` temporarily when inspecting exact texel boundaries.
+Default generated yarn material nodes to `Linear`; only use `Closest` temporarily when inspecting exact texel boundaries. Use `WEAVE_TEXTURE_INTERPOLATION=Closest|Cubic|Smart` for controlled render comparisons instead of manually editing generated nodes in Blender.
 
 ### Rule 19 — Physical scale needs source-scan corroboration.
 
@@ -276,3 +276,78 @@ For current scan-driven yarns, Arc 2 maps to the outer halo rows. Those rows are
 The product needs heavyweight local artifacts: `big-lama.pt`, raw scan uploads, inpaint canvases, detection overlays, Blender autosaves, and render/debug jobs. They are important for development but poisonous in normal Git history.
 
 Keep the raw model outside Git and point the backend at it with `BIG_LAMA_MODEL_PATH` or `LAMA_MODEL`. Keep `runtime/debug/` ignored. Use Git LFS only after the GitHub repository enables it; otherwise use release assets or external storage for any future heavyweight `.blend` / model artifact that truly needs to travel with a branch.
+
+### Rule 25 — When V is implicitly stretched, U must compress by the same factor (uniform aspect) or things look squished.
+
+Once `Arc 1 V Padding` is active, the band that is actually visible is not the raw core span anymore; it is the padded, Arc-2-clamped span. If U is still derived from the raw core while V is rendering the padded range, the along-thread scale drifts from the visible cross-thread scale. The current checkpoint fix is `material_texture_scale_u = (Arc1_V_Max_Padded − Arc1_V_Min_Padded) / AUTO_TEXTURE_SCALE_U_DENOMINATOR`, with `AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0`. The old `ARC1_V_AROUND_SPAN = 0.6` remains geometry/radius provenance, not the active denominator.
+
+But uniform aspect alone shrinks the per-strand repeat count to `~0.18` — each strand only shows ~18% of one texture span, which would look like one slubby chunk repeated identically per strand. The complementary half of the fix is **per-strand U stride**: set `U Stride Per Warp End / Weft Pick = (strand_length / texture_world_width) × material_texture_scale_u` (= repeats per strand) so strand `N+1` starts exactly where strand `N` ended. The result is physically continuous: one yarn spool laid out across all warp ends, one across all weft picks. Across 80 strands of the current swatch this traverses the 45 m yarn scan `~14.7` times.
+
+**Why**: Phase 5 (2026-05-16). The user diagnosed the squish as a uniform-aspect violation, proposed the per-strand spool model (which also retired `UV Random U` as a hack), and asked for both stretches to be derived consistently. Phase 4d–4j's fit/calibration chain produced ~0.5 to 0.125 per-material U values depending on zoom — visibly squished and inconsistent across renders.
+
+**How to apply**: any future change to the V-band mapping (e.g. moving the `ARC1_V_AROUND_SPAN` constant, changing padding semantics, or adding a new Arc 1/Arc 2 match mode) must be paired with a matching update to the per-yarn U scale and the stride derivation in [blender_live.py](../../backend/app/blender_live.py). Producers should ship `bandMeta.blender.texture_scale_u = 1.0` (or omit) — the consumer auto-derives the correct value from the current modifier state. A producer who ships a non-`1.0` override is asserting "I know better" and the consumer respects it; otherwise the visible-span formula wins.
+
+### Rule 26 — Cross-axis cross-section symmetry needs explicit curve normals; default Minimum Twist is axis-dependent.
+
+When the .blend uses `Curve to Mesh` to extrude a shared profile (e.g. an Arc cross-section) along curves running in different directions (Y-aligned warp, X-aligned weft), Blender's default normal calculation derives orientation from each curve's initial tangent. The same `v_around` value on the profile lands at different physical positions on warp vs weft strands. Any V-band feature (Arc 1 V Padding, Arc 2 halo) appears on the camera-visible side of one axis and the hidden side of the other.
+
+**Why**: Phase 5 — high `Arc 1 V Padding` produced visible halo expansion on weft only. Geometry-side fix: insert a `Set Curve Normal (Mode='Z Up')` node on each axis branch right before the Store/Resample chain. Full debugging recipe in [BlenderFixes/lessons.md Rule 24](../BlenderFixes/lessons.md).
+
+**How to apply**: any new strand or hair geometry that uses `Curve to Mesh` with a shared profile and expects axis-symmetric behaviour must explicitly set the curve normal. Don't trust the default — verify by reading the evaluated mesh's `v_around` attribute on top-of-strand vertices for each axis; the distributions must match.
+
+### Rule 27 — A dev-server file watcher reloads routes, not driver constants — restart the backend after backend-driver edits.
+
+`make backend-dev-live` runs uvicorn with `--reload`. Route handlers and the modules they import are re-read on file change, but constants and helpers held by long-lived references (e.g. module-level dicts/tuples in `blender_live.py`, function lookups cached in render orchestration) may not pick up edits depending on the reloader's strategy. After significant changes to push-side code, the visible symptom is: "I fixed it via direct MCP push, but the next render preview from the web UI undid the fix."
+
+**Why**: Phase 5. After live-MCP pushing the new per-material U scale, the user triggered a Render Preview; the dev-server backend with a half-warm module cache pushed the *old* `1.0` back onto the modifier. The user reported "none of the fixes worked." Modifier readback confirmed the overwrite.
+
+**How to apply**: whenever you edit `blender_live.py`, `blender_sync.py`, `render_jobs.py`, or any module that contributes to the per-render socket push, kill and restart the backend before asking the user to test:
+
+```bash
+pgrep -lf "app.main" | awk '{print $1}' | xargs kill
+make backend-dev-live
+```
+
+When you've made direct MCP pushes during debugging and the backend is still running pre-edit code, warn the user that any web-UI render preview will overwrite them until they restart.
+
+### Rule 28 — Measure thread U after Blender's visible curve deformation.
+
+The Blender graph's `Spline Parameter` and `Spline Length` fields are evaluated where the attribute is stored. If `u_along` is stored before the over/under `Set Position` deformation, U still describes the straight draft path while the rendered curve has become longer. The symptom is exactly the red-line checker drift at Arc 1 / Arc 2 boundaries: material scale can be correct, but the thread-length coordinate was measured too early.
+
+Phase 10i moved `Store Warp U` / `Store Weft U` after `PW Warp/Weft Set Position` and added `PW Warp/Weft U Stride Post-Bend Ratio` nodes so the per-strand spool stride is multiplied by the same post-bend length ratio. On the current swatch, evaluated `u_along` now spans `0.0 .. 1.075270`, matching the visible bend's extra path length.
+
+### Rule 29 — Visual Arc 1/Arc 2 registration needs same-strand U transfer.
+
+When Arc 1 and Arc 2 are visible as two offset shells, equal `uv_scaled` values do not guarantee the checker columns overlap in the viewport. Arc 2's larger/deeper surface projects to a different X/Y location than the centerline U model. Phase 10j tried to solve the red-line mismatch by storing `pw_thread_kind` and raw `pw_u_factor`, then adding an Arc 2-only correction:
+
+```text
+(projected_surface_axis - centerline_axis) / straight_length * UScale
+```
+
+That implementation distorted the texture and was reverted. Treat this as a warning, not an active contract: the problem is real, but a simple top-view projected-axis correction is not the correct implementation for the current swept shell.
+
+Phase 10k's working pattern is to write a Blender-internal `pw_strand_id` before the warp/weft curves join, then sample Arc 1's U onto Arc 2 with `Sample Nearest Surface` using both `Group ID` and `Sample Group ID` set to that strand id. The transfer is U-only and gated by `is_sub_strand`; Arc 2's V mapping stays independent. Ungrouped nearest-surface transfer is also unsafe because it can sample neighboring strands.
+
+Phase 10l tested the V-side companion inside the active matched-V branch. The older Top/Bot `Arc 2 Edge Angle Mapping` path is bypassed when `Arc 2 Match Arc 1 V Rate` is ON, so the graph had to touch the active matched factor itself:
+
+```text
+projected_v = (cos(15deg) - cos(15deg + v_around * 150deg)) / (cos(15deg) - cos(165deg))
+```
+
+Phase 10m superseded that saved shape with the actual Arc 1 project-from-view mapping and phase check, but it still kept the matched Arc 2 V branch active:
+
+```text
+projected_v_arc1 = (1 - cos(pi * v_around)) / 2
+projected_v_arc2 = v_around
+Texture Offset V = 0.029408127
+```
+
+Phase 10t/10u is the current saved state for the user's core-plus-halo target:
+
+```text
+Arc 2 Match Arc 1 V Rate = False
+Arc 2 V source = PW Band - Arc2 V  # Top/Core/Bot piecewise path
+Texture Offset V = 0
+```
+
+The old offset moved Arc 2's full halo band to `0.50000006..0.56382984` for checker debugging. The approved direct-material checkpoint returns the phase offset to neutral while keeping the active piecewise masks at `Split Minus/Plus`, so the center R1-equivalent interval maps to raw Arc 1 core rows and the two outer R2 intervals map to Arc 2 top/bottom rows. Producer metadata is unchanged.

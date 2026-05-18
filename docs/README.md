@@ -7,11 +7,12 @@ Read in this order:
 | # | folder/file | what it covers |
 |---|---|---|
 | 1 | [FINAL_HANDOFF.md](FINAL_HANDOFF.md) | The consolidated final doc: what we built, workflow, process, artifact management, features, open items. |
-| 2 | [application-blueprint.md](application-blueprint.md) | The weaving-draft subsystem product spec — what the UI must preserve when ported into the larger app. |
-| 3 | [putting-it-together/](putting-it-together/) | How the app + Blender talk to each other. Read this first for system-level picture: architecture, data contract, full phase log, lessons. |
-| 4 | [BlenderFixes/](BlenderFixes/) | Everything that lives inside the .blend itself + the backend code that drives it. Zoom-in on `Parametric Weave knotty`: node-group structure, Arc 1 / Arc 2 V-band system, socket-rename history, live-render dev mode. |
-| 5 | [WebUIChanges/](WebUIChanges/) | Wizard / FastAPI surface changes — the three state layers (library / runtime asset / color binding), the sync points between them, and every UI-visible behavior fix logged Symptom / Diagnosis / Fix / Verification. |
-| 6 | [WebUIbands/](WebUIbands/) | Yarn band detection (core + fiber halos) — current two-pass setup, the YarnSeamless FWHM port target, and the cut-over plan to run band detection on the assembled alpha post-inpaint. |
+| 2 | [CHECKPOINT_2026-05-19.md](CHECKPOINT_2026-05-19.md) | The visually approved Blender/material baseline: exact socket values, U-scale denominator, backup file, and verification. |
+| 3 | [application-blueprint.md](application-blueprint.md) | The weaving-draft subsystem product spec — what the UI must preserve when ported into the larger app. |
+| 4 | [putting-it-together/](putting-it-together/) | How the app + Blender talk to each other. Read this first for system-level picture: architecture, data contract, full phase log, lessons. |
+| 5 | [BlenderFixes/](BlenderFixes/) | Everything that lives inside the .blend itself + the backend code that drives it. Zoom-in on `Parametric Weave knotty`: node-group structure, Arc 1 / Arc 2 V-band system, socket-rename history, live-render dev mode. |
+| 6 | [WebUIChanges/](WebUIChanges/) | Wizard / FastAPI surface changes — the three state layers (library / runtime asset / color binding), the sync points between them, and every UI-visible behavior fix logged Symptom / Diagnosis / Fix / Verification. |
+| 7 | [WebUIbands/](WebUIbands/) | Yarn band detection (core + fiber halos) — current two-pass setup, the YarnSeamless FWHM port target, and the cut-over plan to run band detection on the assembled alpha post-inpaint. |
 
 External runtime assets are shared here:
 
@@ -23,7 +24,7 @@ https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP
 
 ---
 
-## Current shipping status (2026-05-15)
+## Current shipping status (2026-05-19)
 
 | Area | Status |
 |---|---|
@@ -37,6 +38,7 @@ https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP
 | **Phase 3e** — Arc 2 internal link rewire so the halo region actually renders (4 link swaps inside `Parametric Weave knotty`) | ✓ done |
 | **Phase 3f** — modifier panel reorganization + dead socket removal (5 legacy globals removed; Material Slots + V-Band Mapping panels consolidated) | ✓ done |
 | **Phase 3g** — pin Sub Strand Enable + add `BLENDER_LIVE_RENDER` dev-mode env var (render jobs route to the open Blender session over MCP) | ✓ done |
+| **Phase 10u / Checkpoint 2026-05-19** — visually approved direct web-to-Blender material baseline; `Spacing = 0.026`, `Arc 1 V Padding = 0.008`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`, and auto `Material N Texture Scale U = visible_v_span / 1.0` | ✓ done |
 | **Publish prep** — final handoff doc, debug ignores, external model env-path support, LFS-disabled fallback documented | ✓ done |
 
 ## What we set out to achieve
@@ -53,7 +55,7 @@ In rough priority order — the **bigger** items first.
 
 ### Open scope
 
-- **Arc 2 visual mapping is in live geometry-split review**: Phase 3q now computes the split from Arc 1/Arc 2 profile radii (`0.015 / 0.025 -> 0.6`, splits `0.2 / 0.8`) and stores evaluated debug attributes. Needs viewport approval. Details in [BlenderFixes/README.md](BlenderFixes/README.md).
+- **Protect the 2026-05-19 visual checkpoint**: the current Blender/material baseline is approved and documented in [CHECKPOINT_2026-05-19.md](CHECKPOINT_2026-05-19.md). Future Arc 2, padding, or U-scale experiments should start from a new `.blend` backup and record whether they replace or branch from this checkpoint.
 
 - **Texture World Width BU socket** still doesn't exist on the .blend. Producer publishes `bandMeta.blender.texture_world_width_m`; consumer falls back to legacy `Material N Image Width Px` ÷ `Scanner Pixels Per BU` to derive the same value. Adding the socket would simplify the math and remove a pixel-level intermediate from the wire format. Documented in [putting-it-together/data_contract.md](putting-it-together/data_contract.md).
 
@@ -73,7 +75,7 @@ In rough priority order — the **bigger** items first.
 
 ### Deferred (logged with rationale)
 
-- **Atlas-based MixShader material** (the headless render's `FabricStudioAtlasMaterial`) renders alpha as smooth transparency; the live-bound per-yarn material uses HASHED alpha cutout. Subtle look difference but both are valid; not pursuing parity. See [putting-it-together/phase_log.md](putting-it-together/phase_log.md) Phase 3g.
+- **Atlas fallback path parity** is still lower priority, but the current direct per-yarn material now uses blended alpha for a smoother live preview. Hashed/dithered alpha can still be forced for sorting experiments with `WEAVE_CUTOUT_BLEND_METHOD=HASHED WEAVE_SURFACE_RENDER_METHOD=DITHERED`.
 
 - **SAM2 / ViTMatte single-image flow** from yarnseamless was deliberately not ported (Phase 2b). The yarn workflow doesn't use it. Cost to revisit: small.
 

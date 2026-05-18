@@ -25,6 +25,14 @@ from .blender_sync import send_blender_command
 
 MAX_MATERIAL_SLOTS = 16
 
+# Arc 1's physical-equivalent slice of v_around on the strand cross-section.
+# Currently a constant from the .blend's Phase 3q geometry-owned split
+# (arc1_radius / arc2_radius = 0.015 / 0.025 -> 0.6). Kept as radius/split
+# provenance; the active auto Scale U denominator is separated below so we can
+# test projected/reference-image scaling without changing geometry semantics.
+ARC1_V_AROUND_SPAN = 0.6
+AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0
+
 # Per-Material socket suffix, the matching key inside `bandMeta.blender`, and
 # the safe default to push when the value is missing.
 #
@@ -60,8 +68,8 @@ GLOBAL_SOCKETS: tuple[tuple[str, str, float], ...] = (
 )
 
 # Pinned defaults — Rule 3 in lessons.md. The V-related sockets are additive
-# deltas, NOT absolute overrides; leaving them at zero/one is the only safe
-# shape for scan-driven yarns. We push them defensively even though they're the
+# deltas, NOT absolute overrides; leaving them at zero/one is the safest shape
+# for scan-driven yarns. We push them defensively even though they're the
 # .blend's defaults — protects against someone tweaking the file.
 #
 # Sub Strand Enable is also pinned here because Arc 2's halo mapping is gated
@@ -73,7 +81,7 @@ PINNED_FOOTGUN_SOCKETS: tuple[tuple[str, float | bool], ...] = (
     ("Texture Scale V", 1.0),
     ("Texture Offset V", 0.0),
     ("Texture Side Flatten", 0.0),
-    ("Sub Texture Scale V", 0.0),
+    ("Sub Texture Scale V", 1.0),
     ("Sub Texture Offset V", 0.0),
 )
 
@@ -118,14 +126,31 @@ def build_material_asset_entry(asset: Any) -> dict[str, Any]:
     # uses the strand-silhouette outer extents (Phase 3e). The legacy inner
     # fiber pair is kept in the entry for back-compat (older .blend revisions
     # could re-read them) but the live push code does not currently map them.
+    core_v_min = _coerce_float(blender.get("core_v_min"), 0.0)
+    core_v_max = _coerce_float(blender.get("core_v_max"), 1.0)
+    core_v_span = max(core_v_max - core_v_min, 1e-6)
+    # Uniform-aspect U scale: match U sample density to V's implicit stretch
+    # so texture features look the same size in both directions on the strand.
+    # Producer may still ship an override in blender.texture_scale_u; if absent
+    # (or set to the legacy 1.0 default) the Blender apply step recomputes it
+    # from the current padded V span because Arc 1 V Padding is a modifier
+    # socket, not asset metadata. Keep this raw-core fallback for older scripts
+    # that do not know about texture_scale_u_is_auto yet.
+    explicit_scale_u = blender.get("texture_scale_u")
+    texture_scale_u_is_auto = explicit_scale_u is None or _coerce_float(explicit_scale_u, 1.0) == 1.0
+    if texture_scale_u_is_auto:
+        uniform_scale_u = core_v_span / AUTO_TEXTURE_SCALE_U_DENOMINATOR
+    else:
+        uniform_scale_u = _coerce_float(explicit_scale_u, 1.0)
     return {
         "id": getattr(asset, "id", None) or band_meta.get("library_yarn_id") or "",
         "label": getattr(asset, "label", None) or band_meta.get("name") or "",
         "scanner_pixels_per_bu": _coerce_float(blender.get("scanner_pixels_per_bu"), 1.0),
         "image_width_px": max(1.0, _coerce_float(blender.get("image_width_px"), 1.0)),
-        "texture_scale_u": _coerce_float(blender.get("texture_scale_u"), 1.0),
-        "core_v_min": _coerce_float(blender.get("core_v_min"), 0.0),
-        "core_v_max": _coerce_float(blender.get("core_v_max"), 1.0),
+        "texture_scale_u": uniform_scale_u,
+        "texture_scale_u_is_auto": texture_scale_u_is_auto,
+        "core_v_min": core_v_min,
+        "core_v_max": core_v_max,
         # Outer extents = the strand silhouette's bottommost and topmost V.
         # These land on Material N Arc 2 V Min / Arc 2 V Max sockets.
         "fiber_bot_v_min": _coerce_float(blender.get("fiber_bot_v_min"), 0.0),
@@ -152,6 +177,8 @@ _PER_MATERIAL_SOCKETS = """ + repr(PER_MATERIAL_SOCKETS) + """
 _GLOBAL_SOCKETS = """ + repr(GLOBAL_SOCKETS) + """
 _PINNED_FOOTGUN_SOCKETS = """ + repr(PINNED_FOOTGUN_SOCKETS) + """
 _MAX_MATERIAL_SLOTS = """ + repr(MAX_MATERIAL_SLOTS) + """
+_ARC1_V_AROUND_SPAN = """ + repr(ARC1_V_AROUND_SPAN) + """
+_AUTO_TEXTURE_SCALE_U_DENOMINATOR = """ + repr(AUTO_TEXTURE_SCALE_U_DENOMINATOR) + """
 
 
 def _pw_socket_identifier(node_group, name):
@@ -173,6 +200,40 @@ def _pw_set_socket(modifier, node_group, name, value):
         return True
     except Exception:
         return False
+
+
+def _pw_get_socket(modifier, node_group, name, default=None):
+    ident = _pw_socket_identifier(node_group, name)
+    if ident is None:
+        return default
+    try:
+        return modifier[ident]
+    except Exception:
+        return default
+
+
+def _pw_float(value, default):
+    try:
+        parsed = float(value)
+    except Exception:
+        return default
+    return parsed if parsed == parsed else default
+
+
+def _pw_resolved_texture_scale_u(entry, modifier, node_group):
+    base = _pw_float(entry.get('texture_scale_u'), 1.0)
+    if not entry.get('texture_scale_u_is_auto'):
+        return base
+
+    arc1_padding = _pw_float(_pw_get_socket(modifier, node_group, 'Arc 1 V Padding', 0.0), 0.0)
+    core_v_min = _pw_float(entry.get('core_v_min'), 0.0)
+    core_v_max = _pw_float(entry.get('core_v_max'), 1.0)
+    arc2_v_min = _pw_float(entry.get('fiber_bot_v_min'), 0.0)
+    arc2_v_max = _pw_float(entry.get('fiber_top_v_max'), 1.0)
+    padded_min = max(core_v_min - arc1_padding, arc2_v_min)
+    padded_max = min(core_v_max + arc1_padding, arc2_v_max)
+    visible_span = max(padded_max - padded_min, 1e-6)
+    return visible_span / _AUTO_TEXTURE_SCALE_U_DENOMINATOR
 
 
 def _pw_apply_modifier_material_metadata(modifier, material_assets):
@@ -200,12 +261,42 @@ def _pw_apply_modifier_material_metadata(modifier, material_assets):
             if _pw_set_socket(modifier, node_group, socket_name, float(first.get(key, default))):
                 globals_set += 1
 
+        # Per-strand U stride. Drives the new U Stride sockets so one
+        # continuous yarn spools across warp/weft strands instead of every
+        # strand repeating the same texture chunk identically. The stride must
+        # equal the number of texture U repeats each strand consumes — at the
+        # uniform-aspect material scale that's
+        #   stride = (strand_length / texture_world_width) * material_scale_u
+        # so strand N+1 picks up exactly where strand N left off.
+        try:
+            scanner_pixels_per_bu = float(first.get('scanner_pixels_per_bu', 1.0))
+            image_width_px = float(first.get('image_width_px', 1.0))
+            material_scale_u = _pw_resolved_texture_scale_u(first, modifier, node_group) * texture_scale_u_multiplier
+            texture_world_width_bu = image_width_px / scanner_pixels_per_bu if scanner_pixels_per_bu > 0 else 0.0
+            warp_threads_ident = _pw_socket_identifier(node_group, 'Warp Threads')
+            weft_threads_ident = _pw_socket_identifier(node_group, 'Weft Threads')
+            spacing_ident = _pw_socket_identifier(node_group, 'Spacing')
+            warp_threads = float(modifier[warp_threads_ident]) if warp_threads_ident else 0.0
+            weft_threads = float(modifier[weft_threads_ident]) if weft_threads_ident else 0.0
+            spacing = float(modifier[spacing_ident]) if spacing_ident else 0.0
+            if texture_world_width_bu > 0 and spacing > 0:
+                warp_strand_length = weft_threads * spacing
+                weft_strand_length = warp_threads * spacing
+                u_stride_warp = warp_strand_length / texture_world_width_bu * material_scale_u
+                u_stride_weft = weft_strand_length / texture_world_width_bu * material_scale_u
+                if _pw_set_socket(modifier, node_group, 'U Stride Per Warp End', u_stride_warp):
+                    globals_set += 1
+                if _pw_set_socket(modifier, node_group, 'U Stride Per Weft Pick', u_stride_weft):
+                    globals_set += 1
+        except Exception:
+            pass
+
         for index, entry in enumerate(material_assets[:_MAX_MATERIAL_SLOTS], start=1):
             for suffix, key, default in _PER_MATERIAL_SOCKETS:
                 socket_name = 'Material ' + str(index) + ' ' + suffix
                 socket_value = float(entry.get(key, default))
                 if suffix == 'Texture Scale U':
-                    socket_value *= texture_scale_u_multiplier
+                    socket_value = _pw_resolved_texture_scale_u(entry, modifier, node_group) * texture_scale_u_multiplier
                 if _pw_set_socket(modifier, node_group, socket_name, socket_value):
                     applied += 1
                 else:

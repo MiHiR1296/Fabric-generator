@@ -6,6 +6,7 @@ export const presets: PresetDefinition[] = [
     id: 'plain',
     label: 'Plain Weave',
     summary: 'Balanced over-under repeat with a stable checker drawdown.',
+    weaveType: 'plain',
     document: normalizeDraft({
       version: 1,
       sourceType: 'manual',
@@ -31,6 +32,7 @@ export const presets: PresetDefinition[] = [
     id: 'basket',
     label: 'Basket Weave',
     summary: 'Grouped ends and picks create paired over-under blocks.',
+    weaveType: 'basket',
     document: normalizeDraft({
       version: 1,
       sourceType: 'manual',
@@ -56,6 +58,7 @@ export const presets: PresetDefinition[] = [
     id: 'twill',
     label: '2/2 Twill',
     summary: 'Classic diagonal twill progression across four shafts.',
+    weaveType: 'twill',
     document: normalizeDraft({
       version: 1,
       sourceType: 'manual',
@@ -81,6 +84,7 @@ export const presets: PresetDefinition[] = [
     id: 'satin',
     label: '5-End Satin',
     summary: 'Longer floats with a smoother, more lustrous surface pattern.',
+    weaveType: 'satin',
     document: normalizeDraft({
       version: 1,
       sourceType: 'manual',
@@ -107,6 +111,7 @@ export const presets: PresetDefinition[] = [
     id: 'warp-rib',
     label: 'Warp Rib',
     summary: 'Dense warp grouping with restrained treadling for bold ribs.',
+    weaveType: 'rib',
     document: normalizeDraft({
       version: 1,
       sourceType: 'manual',

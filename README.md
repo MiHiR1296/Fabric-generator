@@ -2,7 +2,7 @@
 
 One repo for the integrated yarn-to-fabric workflow: yarn scan processing, weave draft authoring, Blender preview rendering, and browser-side 3D try-on.
 
-The final project handoff lives in [docs/FINAL_HANDOFF.md](docs/FINAL_HANDOFF.md). Start there when you want the full collaboration summary, feature list, process map, and open-item inventory.
+The final project handoff lives in [docs/FINAL_HANDOFF.md](docs/FINAL_HANDOFF.md). The current visually approved Blender/material baseline is [docs/CHECKPOINT_2026-05-19.md](docs/CHECKPOINT_2026-05-19.md). Start there when you want the full collaboration summary, feature list, process map, open-item inventory, and exact checkpoint values.
 
 External runtime assets live in Google Drive:
 
@@ -30,6 +30,7 @@ The web app is a four-step studio:
 - Per-yarn V-band metadata mapping into Arc 1 / Arc 2 Blender sockets.
 - Cycles-safe texture handling, including downscale fallback and UDIM-style tiling for very wide yarn strips.
 - Render controls for weave zoom, spacing, pattern noise, U scatter, and Arc 1 V padding.
+- Current Blender checkpoint: `Spacing = 0.026`, `Arc 1 V Padding = 0.008`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`, and automatic per-material U scale divided by `1.0`.
 - Unit coverage for backend render payloads, yarn assets, Blender live setup helpers, and frontend draft/project domain logic.
 
 ## Repo Layout

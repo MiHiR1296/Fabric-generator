@@ -65,6 +65,9 @@ class YarnAsset:
     renderAlphaTilePattern: str | None = None
     renderAlphaTileFilenames: list[str] = field(default_factory=list)
     renderAlphaTileUrls: list[str] = field(default_factory=list)
+    renderRgbaTilePattern: str | None = None
+    renderRgbaTileFilenames: list[str] = field(default_factory=list)
+    renderRgbaTileUrls: list[str] = field(default_factory=list)
     renderTileCount: int | None = None
     renderTileWidthPx: int | None = None
     renderTileHeightPx: int | None = None

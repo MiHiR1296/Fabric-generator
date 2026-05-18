@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from app.blender_sync import (  # noqa: E402
     DEFAULT_ARC1_V_PADDING,
-    DEFAULT_TEXTURE_U_CALIBRATION,
+    DEFAULT_SPACING,
     build_blender_sync_code,
     validate_drawdown_matrix,
 )
@@ -70,9 +70,18 @@ class BlenderSyncTests(unittest.TestCase):
         self.assertIn("warp_material_id", code)
         self.assertIn("weft_material_id", code)
         self.assertIn("ensure_draft_colour_id_sampling", code)
+        self.assertIn("ensure_parametric_knotty_draft_contract", code)
+        self.assertIn("('PW Draft Warp Col Mod', 0, 'Curve of Point', 'Curve Index')", code)
+        self.assertIn("('PW Draft Warp Row Mod', 0, 'Curve of Point', 'Index in Curve')", code)
+        self.assertIn("('PW Draft Weft Col Mod', 0, 'Curve of Point.001', 'Index in Curve')", code)
+        self.assertIn("('PW Draft Weft Row Mod', 0, 'Curve of Point.001', 'Curve Index')", code)
+        self.assertIn("('PW Draft Warp Sign', 1, 2.0)", code)
+        self.assertIn("('PW Draft Warp Sign', 2, -1.0)", code)
+        self.assertIn("('PW Draft Weft Sign', 1, -2.0)", code)
+        self.assertIn("('PW Draft Weft Sign', 2, 1.0)", code)
         self.assertIn("warp_material_ids[cols - col - 1]", code)
 
-    def test_parametric_knotty_uses_fit_calibration_on_material_texture_scale_u(self) -> None:
+    def test_parametric_knotty_keeps_isotropic_texture_scale_u(self) -> None:
         code = build_blender_sync_code(
             {
                 "title": "Scale Test",
@@ -85,14 +94,42 @@ class BlenderSyncTests(unittest.TestCase):
         self.assertIn("weave_group.name.startswith('Parametric Weave knotty')", code)
         self.assertIn("root_texture_scale_u = 1.0", code)
         self.assertIn("material_texture_scale_u = 1.0", code)
-        self.assertIn(f"texture_u_calibration = {DEFAULT_TEXTURE_U_CALIBRATION!r}", code)
-        self.assertIn("source_strand_length = float(warp_threads_value) * float(spacing_value)", code)
-        self.assertIn("material_texture_scale_u = (target_length / source_strand_length) * float(texture_u_calibration)", code)
+        # Fit math was retired in favour of per-strand U stride; neither the
+        # target-length divide nor the calibration multiply should remain.
+        self.assertNotIn("target_length / source_strand_length", code)
+        self.assertNotIn("float(texture_u_calibration)", code)
+        # UV Random U default is 0 now; per-strand stride provides variation.
+        self.assertIn(
+            "'UV Random U', pick_value(uv_random_u_override, preserved.get('UV Random U'), 0.0)",
+            code,
+        )
+        self.assertIn(
+            "'Texture Offset V', 0.0",
+            code,
+        )
+        self.assertIn(
+            "'Sub Texture Scale V', 1.0",
+            code,
+        )
+        self.assertIn(
+            "'Sub Texture Offset V', 0.0",
+            code,
+        )
         self.assertIn("'Texture Scale U', root_texture_scale_u", code)
         self.assertIn(
             f"'Arc 1 V Padding', pick_value(arc1_v_padding_override, preserved.get('Arc 1 V Padding'), {DEFAULT_ARC1_V_PADDING!r})",
             code,
         )
+        self.assertIn(
+            f"'Spacing', spacing_value",
+            code,
+        )
+        self.assertIn(
+            f"spacing_value = pick_value(spacing_override, preserved.get('Spacing'), {DEFAULT_SPACING!r})",
+            code,
+        )
+        self.assertEqual(DEFAULT_ARC1_V_PADDING, 0.008)
+        self.assertEqual(DEFAULT_SPACING, 0.026)
 
 
 if __name__ == "__main__":

@@ -89,11 +89,25 @@ export interface DraftCounts {
   picks: number;
 }
 
+export type WeaveType =
+  | 'plain'
+  | 'twill'
+  | 'satin'
+  | 'basket'
+  | 'rib'
+  | 'compound'
+  | 'lace'
+  | 'double'
+  | 'huck'
+  | 'other';
+
 export interface PresetDefinition {
   id: string;
   label: string;
   summary: string;
   document: DraftDocument;
+  weaveType?: WeaveType;
+  previewImage?: string;
 }
 
 export interface BookPatternEntry {
@@ -107,6 +121,8 @@ export interface BookPatternEntry {
   draft?: DraftDocument;
   status: 'loadable' | 'pending';
   note?: string;
+  weaveType?: WeaveType;
+  previewImage?: string;
 }
 
 export interface PatternBook {

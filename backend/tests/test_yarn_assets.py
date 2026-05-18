@@ -135,6 +135,32 @@ class YarnAssetTests(unittest.TestCase):
                 self.assertLessEqual(tile.size[0], 16)
                 self.assertEqual(tile.size[1], 4)
 
+    def test_cycles_tiled_rgba_texture_set_slices_source_rgba_into_udims(self) -> None:
+        rgba_path = self.root / "rgba.png"
+        Image.new("RGBA", (33, 4), (255, 0, 0, 128)).save(rgba_path)
+
+        tiled = yarn_assets.ensure_cycles_tiled_rgba_texture_set(
+            rgba_path,
+            self.root / "cycles_tiled",
+            max_dimension=16,
+        )
+
+        self.assertIsNotNone(tiled)
+        self.assertEqual(tiled["tile_count"], 3)
+        self.assertEqual(tiled["tile_width_px"], 11)
+        self.assertEqual(tiled["tile_height_px"], 4)
+        self.assertEqual(tiled["rgba_pattern"].name, "rgba_<UDIM>.png")
+        self.assertEqual([path.name for path in tiled["rgba_paths"]], [
+            "rgba_1001.png",
+            "rgba_1002.png",
+            "rgba_1003.png",
+        ])
+        for tile_path in tiled["rgba_paths"]:
+            with Image.open(tile_path) as tile:
+                self.assertEqual(tile.mode, "RGBA")
+                self.assertLessEqual(tile.size[0], 16)
+                self.assertEqual(tile.size[1], 4)
+
 
 if __name__ == "__main__":
     unittest.main()

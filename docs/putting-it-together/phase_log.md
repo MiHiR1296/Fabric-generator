@@ -3629,14 +3629,1123 @@ Git staging intentionally excludes `runtime/debug/`, raw model files, `.venv`, `
 
 ---
 
+## Phase 5 — Uniform-aspect U scale + per-strand stride spooling
+
+**Date**: 2026-05-16
+
+### Motivation
+
+Phase 4i's "neutral root + per-material fit calibration" still produced visibly squished textures along U. The user wanted to understand the math, walked through the V-band stretch (texture's 0.033-wide core band mapped to Arc 1's `0.6` slice of `v_around` ≈ 18× stretch), and pointed out that for **uniform aspect** U has to compress by the same factor. They also proposed treating the warp/weft strands as physical spool progressions — strand `N+1` picks up where strand `N` ended — so that `UV Random U` (a hack to mask repetition) could retire in favour of natural variation from real spool position.
+
+### Symptom
+
+- Rendered strands showed `~3.4` repeats of the 45 m yarn scan per `2.4` BU strand. Along-strand features (slubs, twist, colour drift) compressed; the texture looked stretched in V and compressed in U on the strand surface.
+- `Arc 1 V Padding ≥ 0.05` only visibly expanded the halo on weft strands; warp strands looked uniformly textured at the same setting. (Pre-existing graph asymmetry — see [BlenderFixes/phase_log.md](../BlenderFixes/phase_log.md) Phase 5.)
+
+### Diagnosis
+
+- The U formula in [blender_sync.py](../../backend/app/blender_sync.py) plus the per-material scale path landed at `material_texture_scale_u = 1.0` after Phase 4i. That number is "neutral world-width" — each strand consumes `source_strand_length_BU / texture_world_width_BU` ≈ `3.355` repeats. Uniform aspect needs `1 / V_stretch_factor = (core_v_max − core_v_min) / 0.6`, which is `~0.0549` for the current thread001 scan.
+- The padding asymmetry traced to absent `Set Curve Normal` nodes on warp/weft curves — Blender's minimum-twist default oriented the cross-section profile differently per axis. Inspecting the evaluated mesh confirmed warp and weft `v_around` had different distributions on the camera-visible top surface.
+
+### Fix
+
+**Blender (`Codex_ParametricWeave.blend`):**
+
+- Added two interface sockets on `Parametric Weave knotty` (in `Imperfections` panel):
+  - `U Stride Per Warp End` (Socket_245, default `0.0`)
+  - `U Stride Per Weft Pick` (Socket_246, default `0.0`)
+- Inserted per-axis `Multiply(stride × curve_index) → Add(variation UV Offset U + stride*index)` between `PW Warp/Weft Variation.UV Offset U` and the Store Named Attribute for `uv_offset_u`. Strand `N+1` now naturally starts at U = `(N+1) × stride`, picking up where strand `N` ended.
+- Inserted `Set Curve Normal` (`Mode = 'Z Up'`) on both warp and weft branches between `Resample Curve` and `Store Warp/Weft U`. Symmetrizes the profile-arc orientation across axes.
+
+**Backend ([blender_live.py](../../backend/app/blender_live.py)):**
+
+- New constant `ARC1_V_AROUND_SPAN = 0.6` near `MAX_MATERIAL_SLOTS`. Mirrors the Phase 3q geometry-owned split (`arc1_radius / arc2_radius = 0.015 / 0.025 → 0.6`). Move this constant if those radii change.
+- `build_material_asset_entry` auto-computes `texture_scale_u = (core_v_max − core_v_min) / ARC1_V_AROUND_SPAN` per yarn unless the producer supplies an explicit non-`1.0` override.
+- `_pw_apply_modifier_material_metadata` reads `Warp Threads`, `Weft Threads`, `Spacing` off the modifier together with the first material's `image_width_px / scanner_pixels_per_bu / texture_scale_u`, then pushes:
+  ```
+  u_stride_warp = (weft_threads × spacing) / texture_world_width_bu × material_scale_u
+  u_stride_weft = (warp_threads × spacing) / texture_world_width_bu × material_scale_u
+  ```
+
+**Backend ([blender_sync.py](../../backend/app/blender_sync.py)):**
+
+- Dropped the Phase 4i fit-math branch entirely. `material_texture_scale_u = 1.0` in the generated script — the real per-yarn scale lands via `build_material_asset_entry`.
+- `UV Random U` default flipped from `1.0` → `0.0`. Kept as escape-hatch override; per-strand stride now provides natural variation.
+
+**Tests:**
+
+- [backend/tests/test_blender_sync.py](../../backend/tests/test_blender_sync.py)
+  - replaced `test_parametric_knotty_uses_fit_calibration_on_material_texture_scale_u` with `test_parametric_knotty_keeps_isotropic_texture_scale_u`. Asserts no fit-math leftover and the new `UV Random U = 0.0` default.
+
+### Verification
+
+- `make backend-test` — all 32 tests pass.
+- Live MCP readback of evaluated mesh attributes (614 400 vertices on the current `80×80, spacing 0.03` swatch):
+  - `uv_offset_u` range `[0.0, 14.54]`, mean `7.27` — 80 strands × stride `0.184` = `14.72`, matches expected.
+  - Warp and weft top-of-strand `v_around` distributions are now identical (mean `0.5`, range `[0.333, 0.667]`).
+- Top-ortho viewport at `Arc 1 V Padding = 0.15` shows symmetric halo expansion on both axes.
+
+### Numbers for the current thread001 yarn
+
+```
+texture_world_width_BU         = image_width_px / scanner_pixels_per_bu
+                               = 45058 / 62992.16
+                               = 0.7153
+
+V stretch factor               = ARC1_V_AROUND_SPAN / (core_v_max − core_v_min)
+                               = 0.6 / 0.033
+                               = 18.23
+
+material_texture_scale_u       = (core_v_max − core_v_min) / ARC1_V_AROUND_SPAN
+                               = 0.033 / 0.6
+                               = 0.0549
+
+PW U Scale U Auto              = source_strand_length_BU / texture_world_width_BU
+                               = 2.4 / 0.7153
+                               = 3.355
+
+repeats per strand             = PW U Scale U Auto × material_texture_scale_u
+                               = 3.355 × 0.0549
+                               = 0.184
+
+u_stride (warp = weft here)    = 0.184  (same as repeats per strand — continuous spool)
+total repeats across 80 strands = 14.72
+```
+
+### Lesson
+
+Promoted to [lessons.md](lessons.md) as the U-mapping derivation rule (V-stretch sets U scale; stride = repeats-per-strand for continuity). Mirror on [BlenderFixes/lessons.md](../BlenderFixes/lessons.md) for the curve-normal symmetry rule.
+
+### What was NOT done
+
+- Did not boustrophedon-reverse alternate weft picks (the truly-physical model where one weft thread snakes left-to-right then right-to-left). User explicitly chose the simpler "additive offset per pick" model. Add a flip multiplier `(pick_i % 2 ? 1 - U : U)` later if visible seams appear where features cross pick boundaries.
+- Did not expose a per-material U stride. Single value per axis from the first material's properties. If users mix yarns of very different diameters in the same swatch, the stride may not perfectly continue across yarn changes.
+- Did not retire `UV Random U` from the modifier interface. Hidden behind a `0.0` default but still pushable as an override.
+- Did not surface `ARC1_V_AROUND_SPAN` in the web UI. It's a Blender-graph internal that the producer/consumer agree on; exposing it would invite drift.
+
+---
+
+## Phase 6 — Texture interpolation inspection override
+
+**Date**: 2026-05-16
+
+### Motivation
+
+User reported that the Blender texture still looked blurred and suspected another downscale.
+
+### Diagnosis
+
+The current live material was not using the downscaled `cycles_safe` texture. MCP readback showed full-resolution UDIM tiles for the active material:
+
+```text
+runtime/yarn_assets/3879e44f7d1f/cycles_tiled/albedo_<UDIM>.png
+runtime/yarn_assets/3879e44f7d1f/cycles_tiled/alpha_<UDIM>.png
+tile size: 15019 x 395
+interpolation: Linear
+```
+
+The likely remaining softening source is texture filtering: `Linear` interpolation blends neighbouring texels. This is distinct from file downscaling.
+
+### Fix
+
+- [backend/app/render_jobs.py](../../backend/app/render_jobs.py)
+  - added `WEAVE_TEXTURE_INTERPOLATION`;
+  - accepts `Linear`, `Closest`, `Cubic`, and `Smart`;
+  - defaults to `Linear`;
+  - generated material nodes now read `_PW_TEXTURE_INTERPOLATION`.
+- [backend/tests/test_render_jobs.py](../../backend/tests/test_render_jobs.py)
+  - covers the default and the `Closest` override.
+- Live-only diagnostic: set active generated material texture nodes to `Closest` for immediate visual comparison.
+
+### Verification
+
+`WEAVE_TEXTURE_INTERPOLATION=Closest` appears in the generated Blender script as `_PW_TEXTURE_INTERPOLATION = 'Closest'`.
+
+### What was NOT done
+
+- Did not make `Closest` the default. It is useful to prove/inspect texel sharpness, but can look blocky.
+- Did not change alpha policy; low Arc 2 alpha can still make halo regions look faded.
+
+---
+
+## Phase 7 — Flip Arc 2 V Map Range direction for visual review
+
+**Date**: 2026-05-16
+
+### Motivation
+
+User asked whether we could flip the V mapping of Arc 2 during live visual review.
+
+### Diagnosis
+
+The active graph was still using the Phase 3k Arc 2 direction. That direction was continuous and mapped:
+
+```text
+Arc2 Top:  outer top -> core top
+Arc2 Core: core top -> core bottom
+Arc2 Bot:  core bottom -> outer bottom
+```
+
+The requested experiment was to reverse those Map Range output directions without changing the producer metadata contract.
+
+A plain `To Min` / `To Max` swap on all three Map Range nodes is not a valid full flip: it reverses each section locally but breaks the joins between Top/Core and Core/Bot. The correct edit has to reverse the whole stitched path:
+
+```text
+Original:  Arc 2 V Max -> Arc 1 V Max -> Arc 1 V Min -> Arc 2 V Min
+Flipped:   Arc 2 V Min -> Arc 1 V Min -> Arc 1 V Max -> Arc 2 V Max
+```
+
+### Fix
+
+- Snapshots:
+  - `Codex_ParametricWeave.pre-arc2-v-flip-20260516_232528.blend`
+  - `Codex_ParametricWeave.pre-arc2-v-corrective-20260516_233011.blend`
+- In live Blender, rewired the three Arc 2 destination ranges to reverse the full path while preserving split-boundary continuity:
+  - `PW Band - Arc2 Top`: `Arc 2 V Min -> Arc 1 V Min`
+  - `PW Band - Arc2 Core`: `Arc 1 V Min -> Arc 1 V Max`
+  - `PW Band - Arc2 Bot`: `Arc 1 V Max -> Arc 2 V Max`
+- Saved [Codex_ParametricWeave.blend](../../Codex_ParametricWeave.blend).
+- Updated [data_contract.md](data_contract.md) and [../BlenderFixes/architecture.md](../BlenderFixes/architecture.md) to reflect the new current direction.
+
+### Verification
+
+MCP readback confirmed:
+
+```text
+Arc2 Top:  Arc 2 V Min -> Arc 1 V Min
+Arc2 Core: Arc 1 V Min -> Arc 1 V Max
+Arc2 Bot:  Arc 1 V Max -> Arc 2 V Max
+```
+
+Numeric readback for the active yarn confirmed continuity:
+
+```text
+0.369620 -> 0.471544 -> 0.528456 -> 0.637975
+```
+
+### What was NOT done
+
+- Did not change backend socket names or material payloads.
+- Did not add a runtime toggle; this is currently a saved `.blend` state.
+
+---
+
+## Phase 8 — Smooth live texture preview sampling
+
+**Date**: 2026-05-16
+
+### Motivation
+
+User compared `rgba.png` against Blender's `Diffuse_UDIM` image editor preview and saw a chunky/pixelated look in Blender.
+
+### Diagnosis
+
+- The active UDIM tiles are not downscaled: `15019 + 15020 + 15019 = 45058`, matching the source width, with height `395`.
+- Pixel comparison showed `albedo.png` stitched from the three UDIM tiles has max RGB diff `0`; `rgba.png` split into `albedo.png` + `alpha.png` also has max channel diff `0`.
+- The open Blender material still had the temporary diagnostic sampler set to `Closest` on `FabricStudioDiffuseNode` and `FabricStudioAlphaNode`.
+- `Diffuse_UDIM` is raw RGB only. It will show gray/black foreground-solve pixels that `rgba.png` hides through alpha compositing.
+- The generated per-yarn material used `HASHED` / `DITHERED` alpha, which can look grainy in the viewport for soft hair alpha.
+
+### Fix
+
+- Reset live FabricStudio image texture nodes to `Linear` interpolation and saved [Codex_ParametricWeave.blend](../../Codex_ParametricWeave.blend).
+- Switched live FabricStudio materials to `BLEND` / `BLENDED` alpha and saved the `.blend`.
+- Updated [render_jobs.py](../../backend/app/render_jobs.py) so future generated per-yarn materials default to `Linear` texture interpolation plus blended alpha.
+- Added env escape hatches: `WEAVE_TEXTURE_INTERPOLATION`, `WEAVE_CUTOUT_BLEND_METHOD`, and `WEAVE_SURFACE_RENDER_METHOD`.
+
+### Verification
+
+Live readback:
+
+```text
+FabricStudioDiffuseNode interpolation Linear
+FabricStudioAlphaNode   interpolation Linear
+blend_method BLEND
+surface_render_method BLENDED
+```
+
+Backend tests: `python -m unittest tests.test_render_jobs`.
+
+### What was NOT done
+
+- Did not yet switch Blender to RGBA UDIM sampling in this phase; Phase 9 does that.
+
+---
+
+## Phase 9 — Prefer source RGBA UDIM tiles for Blender materials
+
+**Date**: 2026-05-17
+
+### Motivation
+
+User confirmed the right target: build the tiled image from the original imported `rgba.png`, so Blender uses the same source image the Web/Preview inspection uses and does not lose detail through the separate raw-albedo inspection path.
+
+### Diagnosis
+
+The existing `cycles_tiled/albedo_<UDIM>.png` files were full-resolution crops, not `cycles_safe` downscales, but they were RGB-only. Opening raw albedo in Blender hides the alpha/compositing context and makes the texture look harsher/different from `rgba.png`.
+
+### Fix
+
+- Added RGBA UDIM tile generation in [yarn_assets.py](../../backend/app/yarn_assets.py): `ensure_cycles_tiled_rgba_texture_set`.
+- Added `renderRgbaTilePattern` / `renderRgbaTileFilenames` / `renderRgbaTileUrls` fields to [models.py](../../backend/app/models.py).
+- Updated [render_jobs.py](../../backend/app/render_jobs.py) so material payloads prefer `udim_rgba_tiled` when RGBA tiles exist, and the Blender material links:
+
+```text
+RGBA UDIM Color -> Principled Base Color
+RGBA UDIM Alpha -> Principled Alpha
+```
+
+- Kept separate albedo/alpha UDIMs as fallback for older/manual assets.
+- Generated `runtime/yarn_assets/3879e44f7d1f/cycles_tiled/rgba_1001.png` through `rgba_1003.png`, updated that asset's `asset.json`, and pointed the live Blender material at the RGBA UDIM image.
+
+### Verification
+
+```text
+rgba_1001 + rgba_1002 + rgba_1003 width = 45058
+source rgba.png width = 45058
+stitched RGBA tile max channel diff = 0
+```
+
+Live Blender readback:
+
+```text
+FabricStudioDiffuseNode image ..._RGBA_UDIM
+FabricStudioAlphaNode   image ..._RGBA_UDIM
+Principled Alpha link   FabricStudioAlphaNode.Alpha
+```
+
+Backend tests: `python -m unittest discover -s tests` -> 37 tests OK.
+
+---
+
+## Phase 10h — Visible-span U scale for Blender apply path
+
+**Date**: 2026-05-17
+
+### Motivation
+
+The app/backend contract still derived automatic `Material N Texture Scale U` from raw `core_v_max - core_v_min`, but the live Blender graph was rendering the padded Arc 1 range after `Arc 1 V Padding`. That left the thread-length U scale tied to a V range that was no longer the visible one.
+
+### Fix
+
+- [backend/app/blender_live.py](../../backend/app/blender_live.py)
+  - added `texture_scale_u_is_auto` to material entries;
+  - resolves automatic U scale inside `_pw_apply_modifier_material_metadata`, where the current `Arc 1 V Padding` socket is available;
+  - uses the same resolved scale for `U Stride Per Warp End / Weft Pick`.
+- [Codex_ParametricWeave.blend](../../Codex_ParametricWeave.blend)
+  - completed the documented Arc 2 range-match by unlinking `PW MatchScale - Radius Ratio` from `PW MatchScale - Matched Span`;
+  - set the matched-span multiplier to `1.0`;
+  - saved after recalculating live material U/stride sockets.
+- Docs updated in this phase:
+  - [data_contract.md](data_contract.md)
+  - [lessons.md](lessons.md)
+  - [../BlenderFixes/architecture.md](../BlenderFixes/architecture.md)
+  - [../BlenderFixes/phase_log.md](../BlenderFixes/phase_log.md)
+
+### Verification
+
+Live readback:
+
+```text
+Material 1 Texture Scale U = 0.096415
+U Stride Per Warp/Weft     = 0.309788
+Arc 1 evaluated V span     = 0.057849
+Arc 2 evaluated V span     = 0.057849
+```
+
+Backup before edits:
+
+```text
+Codex_ParametricWeave.pre-u-visible-span-fix-20260517_223710.blend
+```
+
+---
+
+## Phase 10i — Blender post-bend U storage
+
+**Date**: 2026-05-17
+
+The user's red-line viewport markup showed Arc 1 / Arc 2 checker columns still drifting after the visible-span U scale fix. `UV Random U` was not the cause.
+
+Diagnosis in the live Geometry Nodes graph: `Store Warp U` / `Store Weft U` were upstream of `PW Warp/Weft Set Position`. The U field used `Spline Parameter × (Spline Length / Straight Length)`, but because it was stored before the visible amplitude bend, it measured the straight/pre-bend curve. The visible curve was then lengthened afterward.
+
+Fix in [Codex_ParametricWeave.blend](../../Codex_ParametricWeave.blend):
+
+- moved `Store Warp U` / `Store Weft U` after `PW Warp/Weft Set Position`;
+- added `PW Warp U Stride Post-Bend Ratio` and `PW Weft U Stride Post-Bend Ratio`;
+- each node multiplies the backend's straight-baseline U stride by the live `Warp/Weft Length Ratio` before `curve_index × stride`;
+- saved the `.blend`.
+
+Backup before this graph edit:
+
+```text
+Codex_ParametricWeave.pre-postbend-u-fix-20260517_225951.blend
+```
+
+Verification:
+
+```text
+u_along span, main/sub = 0.0 .. 1.075270
+pw_section_ratio       = 1.0 in the current matched-range state
+```
+
+Docs updated in this phase:
+
+- [../BlenderFixes/README.md](../BlenderFixes/README.md)
+- [../BlenderFixes/architecture.md](../BlenderFixes/architecture.md)
+- [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md)
+- [../BlenderFixes/phase_log.md](../BlenderFixes/phase_log.md)
+- [data_contract.md](data_contract.md)
+- [lessons.md](lessons.md)
+
+---
+
+## Phase 10j — Arc 2 projected-shell U registration
+
+**Date**: 2026-05-17
+
+**Status**: reverted after visual distortion.
+
+User clarified that the remaining red-line mismatch was the actual goal: Arc 1 and Arc 2 are two screen-projected shells, and the pattern needs to visually register between those shells.
+
+Fix in [Codex_ParametricWeave.blend](../../Codex_ParametricWeave.blend):
+
+- added `pw_thread_kind` (`0` warp, `1` weft);
+- added raw `pw_u_factor` after the bend and before compensated `u_along`;
+- added `PW VisU - *` nodes that compute:
+  ```text
+  projected_axis = Y for warp, X for weft
+  centerline_axis = pw_u_factor × straight_length
+  correction = (projected_axis − centerline_axis) / straight_length × UScale
+  ```
+- gates that correction by `is_sub_strand × Arc 2 Match Arc 1 V Rate`;
+- feeds the corrected value into `PW U - Per Section Multiplier`;
+- stores debug attribute `pw_visual_u_correction`;
+- saved with `Arc 2 Boundary Inset = 0.0` (the earlier inset tweak was diagnostic only).
+
+Backup before this graph edit:
+
+```text
+Codex_ParametricWeave.pre-arc2-projected-u-fix-20260517_233330.blend
+```
+
+Initial verification:
+
+```text
+Arc 1/main correction = 0.0
+Arc 2/sub correction  ≈ -0.18 .. +0.18 U
+pw_visual_u_correction exists on evaluated mesh
+```
+
+Revert after user report:
+
+```text
+Codex_ParametricWeave.failed-arc2-projected-u-fix-20260517_235124.blend
+Codex_ParametricWeave.blend restored from Codex_ParametricWeave.pre-arc2-projected-u-fix-20260517_233330.blend
+```
+
+Live Blender was reloaded from the restored file. Current active graph has no `PW VisU - *` nodes and no `pw_visual_u_correction` store.
+
+Docs updated in this phase:
+
+- [../BlenderFixes/README.md](../BlenderFixes/README.md)
+- [../BlenderFixes/architecture.md](../BlenderFixes/architecture.md)
+- [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md)
+- [../BlenderFixes/phase_log.md](../BlenderFixes/phase_log.md)
+- [data_contract.md](data_contract.md)
+- [lessons.md](lessons.md)
+
+---
+
+## Phase 10k — Same-strand Arc 2 U transfer
+
+**Date**: 2026-05-18 local session
+
+**Status**: active; still part of the Phase 10t saved inspection state.
+
+User asked to continue from the distorted Phase 10j result, take screenshots directly, and fix the secondary U issue. The important distinction was that `UV Random U` was not the source; Arc 2 needed deterministic U registration against the matching Arc 1 strand.
+
+Screenshot iteration found that `Arc 2 Boundary Inset`, Arc 2 Z offsets, and toggle combinations did not solve the red-line mismatch. Ungrouped nearest-surface U transfer also distorted because the sampler could pick a neighboring strand. The saved fix is a same-strand transfer:
+
+```text
+pw_strand_id        = curve index on warp, curve index + 10000 on weft
+Arc 2 sampled U     = Sample Nearest Surface(Arc 1 U, grouped by pw_strand_id)
+uv_scaled.x         = original U on Arc 1, sampled same-strand Arc 1 U on Arc 2
+uv_scaled.y         = existing Arc 1 / Arc 2 V mapping
+```
+
+Backups created:
+
+```text
+Codex_ParametricWeave.pre-self-screenshot-iterate-20260518_000135.blend
+Codex_ParametricWeave.pre-arc2-core-tuck-preview-20260518_001538.blend
+Codex_ParametricWeave.pre-strand-group-u-transfer-save-20260518_005328.blend
+```
+
+Verification:
+
+```text
+runtime/self_iter_strand_group_xfer_full.png
+pw_strand_id exists on evaluated mesh
+uv_scaled.x Arc 1/Arc 2 range ≈ 0.01957 .. 27.53905
+```
+
+Docs updated in this phase:
+
+- [../BlenderFixes/README.md](../BlenderFixes/README.md)
+- [../BlenderFixes/architecture.md](../BlenderFixes/architecture.md)
+- [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md)
+- [../BlenderFixes/phase_log.md](../BlenderFixes/phase_log.md)
+- [data_contract.md](data_contract.md)
+- [lessons.md](lessons.md)
+
+---
+
+## Phase 10l — Projected matched-V skew for Arc 2
+
+**Date**: 2026-05-18 local session
+
+**Status**: superseded by Phase 10m in the saved inspection state.
+
+After Phase 10k fixed U registration, the user marked the remaining V issue: in the extra Arc 2 halo, F/G-like rows consumed too much visible space and looked repeated. The old Phase 10f Top/Bot edge-angle path was not enough because `Arc 2 Match Arc 1 V Rate = True` bypasses the piecewise Arc 2 Top/Bot chain.
+
+Saved fix:
+
+```text
+theta       = 15deg + v_around * 150deg
+projected_v = (cos(15deg) - cos(theta)) / (cos(15deg) - cos(165deg))
+uv_scaled.y = mid_padded + (projected_v - 0.5) * span_padded
+```
+
+This is Blender-internal only. The producer still sends the same Arc 1/Arc 2 band metadata. The remap keeps the same endpoints, stays monotonic/no-repeat, squishes halo-edge rows, and gives the center more V space in top view.
+
+Backup before this branch:
+
+```text
+Codex_ParametricWeave.pre-arc2-v-skew-preview-20260518_001.blend
+```
+
+Verification:
+
+```text
+runtime/self_iter_v_projected_15deg_final.png
+PW MatchScale - Delta <- PW MatchProjV - projected minus 0.5
+Arc 2 V endpoints unchanged: 0.47059184 .. 0.52844101
+```
+
+Docs updated in this phase:
+
+- [../BlenderFixes/README.md](../BlenderFixes/README.md)
+- [../BlenderFixes/architecture.md](../BlenderFixes/architecture.md)
+- [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md)
+- [../BlenderFixes/phase_log.md](../BlenderFixes/phase_log.md)
+- [data_contract.md](data_contract.md)
+- [lessons.md](lessons.md)
+
+---
+
+## Phase 10m — Project-from-view V and checker phase alignment
+
+**Date**: 2026-05-18 local session
+
+**Status**: partially superseded by Phase 10n. Arc 1's projected map remains active; the matched Arc 2 V branch and `0.029408127` offset are no longer the saved inspection state.
+
+The user clarified the real target: use the camera/top-view behavior as the visual truth and make R1/R2 flow through one continuous checker/material band instead of wrapping G/H back to A.
+
+Saved fix:
+
+```text
+projected_v_arc1 = (1 - cos(pi * v_around)) / 2
+projected_v_arc2 = v_around
+Texture Offset V = 0.029408127
+```
+
+Active links:
+
+```text
+PW Band - Arc1 Map.Value    <- PW MatchProjV - projected factor
+PW MatchScale - Delta.Value <- PW MatchScale - v_around - 0.5
+```
+
+Backend persistence:
+
+```text
+backend/app/blender_live.py pins Texture Offset V = 0.029408127069473267
+backend/app/blender_sync.py uses the same fallback when no preserved Texture Offset V exists
+```
+
+The offset moves the matched active band from `0.47059187..0.52844101` to `0.50000000..0.55784911`. With the checker material's `12x` V scale, the visible phase is `0.00..0.694` inside one material tile instead of crossing an integer repeat boundary. Phase 10n supersedes this matched Arc 2 branch because the user's final target needs Arc 2 to sample its extra halo texture.
+
+Backup before this branch:
+
+```text
+Codex_ParametricWeave.pre-camera-projected-v-20260518_001.blend
+```
+
+Verification:
+
+```text
+runtime/self_iter_v_phase10m_final_projected_phase_aligned.png
+Arc 1/R1 v_around 0.0 -> uv_scaled.y 0.500000
+Arc 1/R1 v_around 1.0 -> uv_scaled.y 0.557849
+Arc 2/R2 v_around 0.0 -> uv_scaled.y 0.500000
+Arc 2/R2 v_around 1.0 -> uv_scaled.y 0.557849
+```
+
+Docs updated in this phase:
+
+- [../BlenderFixes/README.md](../BlenderFixes/README.md)
+- [../BlenderFixes/architecture.md](../BlenderFixes/architecture.md)
+- [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md)
+- [../BlenderFixes/phase_log.md](../BlenderFixes/phase_log.md)
+- [data_contract.md](data_contract.md)
+- [lessons.md](lessons.md)
+
+---
+
+## Phase 10n — Full Arc 2 halo V path and phase re-pin
+
+**Date**: 2026-05-18 local session
+
+**Status**: active in [Codex_ParametricWeave.blend](../../Codex_ParametricWeave.blend).
+
+The user clarified the final texture ownership: Arc 1 owns the center/core range, Arc 2's overlapping core should align there, and Arc 2's extra ends must sample the extra yarn/thread texture outside that core. That means `Arc 2 Match Arc 1 V Rate = True` was the wrong active branch because it repeated only the Arc 1 core range across Arc 2.
+
+Saved state:
+
+```text
+Arc 2 Match Arc 1 V Rate = False
+Match Section Slopes = True
+Arc 2 Edge Angle Mapping = True
+Texture Offset V = 0.031914920
+PW Band - Arc1 Map.Value <- PW MatchProjV - projected factor
+PW MatchScale - Switch Arc2 V.False <- PW Band - Arc2 V
+```
+
+The backend pin was updated to the same offset:
+
+```text
+backend/app/blender_live.py pins Texture Offset V = 0.03191491961479187
+backend/app/blender_sync.py uses the same fallback when no preserved Texture Offset V exists
+```
+
+The phase re-pin targets the wider full Arc 2 halo band:
+
+```text
+Arc 2/R2 old offset result: 0.49749321 .. 0.56132299  # checker phase 0.970 -> wrap -> 0.736
+Arc 2/R2 new offset result: 0.50000006 .. 0.56382984  # checker phase 0.000 -> 0.766
+Arc 1/R1 new offset result: 0.50250685 .. 0.56035596  # checker phase 0.030 -> 0.724
+```
+
+Backups:
+
+```text
+Codex_ParametricWeave.pre-arc2-full-halo-v-20260518_032211.blend
+Codex_ParametricWeave.pre-arc2-full-halo-phase-repin-20260518_001.blend
+```
+
+Verification:
+
+```text
+runtime/self_iter_v_full_arc2_piecewise_preview.png
+runtime/self_iter_v_full_arc2_piecewise_phase_repin.png
+```
+
+Docs updated in this phase:
+
+- [../BlenderFixes/README.md](../BlenderFixes/README.md)
+- [../BlenderFixes/architecture.md](../BlenderFixes/architecture.md)
+- [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md)
+- [../BlenderFixes/phase_log.md](../BlenderFixes/phase_log.md)
+- [data_contract.md](data_contract.md)
+- [lessons.md](lessons.md)
+
+---
+
+## Phase 10o — Sync Arc 2 profile boundaries to the canonical split
+
+**Date**: 2026-05-18 local session
+
+User flagged that Arc 2's V mapping looked like it was copying/reusing the wrong section values. The docs already described the intended contract: `PW Band - Split Minus` and `PW Band - Split Plus` are the canonical Top/Core/Bot boundaries for Arc 2.
+
+Live graph readback found the saved `.blend` had drifted:
+
+```text
+PW Band - Arc2 Top/Core/Bot      <- PW Band - Split Minus/Plus
+PW U - Sec * width nodes         <- PW Band - Split Minus/Plus
+PW Profile - Top/Core/Bot Map    <- PW Band - Geo Split Minus/Plus  # stale
+PW Debug Store Arc2 Split Min/Max <- PW Band - Geo Split Minus/Plus # stale
+```
+
+With `Match Section Slopes = True`, the V Map Ranges used the texture-proportional split (`0.039273 / 0.945576` for the active Material 1), while the profile boundary placement/debug attrs still used the old geometry-only split (`0.2 / 0.8`).
+
+Backup created before the edit:
+
+```text
+Codex_ParametricWeave.pre-arc2-split-profile-sync-20260518_035357.blend
+```
+
+Fix applied inside `Codex_ParametricWeave.blend`:
+
+```text
+PW Profile - Top Map.To Max       <- PW Band - Split Minus.Value
+PW Profile - Core Map.To Min      <- PW Band - Split Minus.Value
+PW Profile - Core Map.To Max      <- PW Band - Split Plus.Value
+PW Profile - Bot Map.To Min       <- PW Band - Split Plus.Value
+PW Debug Store Arc2 Split Min     <- PW Band - Split Minus.Value
+PW Debug Store Arc2 Split Max     <- PW Band - Split Plus.Value
+```
+
+Live verification after save:
+
+```text
+arc2_core_split_min = 0.039273
+arc2_core_split_max = 0.945576
+pw_section_ratio    = 1.0
+pw_section_slope    = 0.06383
+```
+
+Arc 2 still uses the Phase 10n full-halo V destination path:
+
+```text
+Arc2 Top:  Arc 2 V Min -> Arc 1 V Min Padded
+Arc2 Core: Arc 1 V Min Padded -> Arc 1 V Max Padded
+Arc2 Bot:  Arc 1 V Max Padded -> Arc 2 V Max
+Arc 2 Match Arc 1 V Rate = false
+```
+
+---
+
+## Phase 10p — Store actual Arc 2 profile factor for `v_around`
+
+**Date**: 2026-05-18 local session
+
+User clarified the Arc 2 target: Top and Bot halo textures should flow from the core seam toward the outside edge, and the polygon strip from core to extreme edge should not look stretched.
+
+Phase 10o synchronized the profile maps with the canonical `PW Band - Split Minus/Plus`, but `v_around` was still being written from the fixed natural anchor attribute. With `Match Section Slopes = True`, the physical profile boundary had moved to the texture-proportional split, while the UV section-test coordinate still carried natural values:
+
+```text
+natural anchor vertex 6  = 0.2
+actual source-arc factor = 0.039273
+Arc 2 V split            = 0.039273
+```
+
+A direct link from `PW Profile - Actual Factor` into `Store Named Attribute.003.Value` was tested, but Blender evaluated that field in the wrong downstream context and collapsed sub-strand `v_around` to roughly `0..0.004`. That intermediate state was immediately replaced.
+
+Backups created:
+
+```text
+Codex_ParametricWeave.pre-arc2-varound-actual-sync-20260518_124555.blend
+Codex_ParametricWeave.pre-arc2-varound-actual-attribute-20260518_124738.blend
+```
+
+Final fix inside `Codex_ParametricWeave.blend`:
+
+```text
+PW Profile - Store Natural Factor.Geometry -> PW Profile - Store Actual Factor.Geometry
+PW Profile - Actual Factor.Value           -> PW Profile - Store Actual Factor.Value
+PW Profile - Store Actual Factor.Geometry  -> PW Profile - Set Position.Geometry
+PW Profile - Read Actual Factor.Attribute  -> Store Named Attribute.003.Value
+```
+
+New named attribute:
+
+```text
+pw_profile_actual = computed actual source-arc factor
+```
+
+`pw_profile_natural` remains as the fixed anchor/debug attribute. Arc 2 `v_around` now reads `pw_profile_actual`, so the physical profile sections and UV section tests use the same split coordinates.
+
+Live verification:
+
+```text
+sub-strand v_around range = 0.0 .. 1.0
+arc2_core_split_min       = 0.039273
+arc2_core_split_max       = 0.945576
+
+natural 0.000000 -> actual/v_around 0.000000 -> uv_y 0.500000
+natural 0.200000 -> actual/v_around 0.039273 -> uv_y 0.502507
+natural 0.800000 -> actual/v_around 0.945576 -> uv_y 0.560356
+natural 1.000000 -> actual/v_around 1.000000 -> uv_y 0.563830
+
+pw_section_ratio = 1.0
+pw_section_slope = 0.06383
+```
+
+This keeps the Phase 10n full-halo Arc 2 destination path while making the UV mapping match the placed section vertices.
+
+---
+
+## Phase 10q — Simple raw-core Arc 2 V mapping
+
+**Date**: 2026-05-18 local session
+
+User clarified that Arc 2 must not look like the same Arc 1 padded core area stretched across the whole Arc 2 shell. Both Arc 2 halo strips should visibly map from the raw core seam outward to the outer silhouette rows.
+
+Current saved state in `Codex_ParametricWeave.blend`:
+
+```text
+Match Section Slopes       = false
+Arc 2 Edge Angle Mapping   = false
+Arc 2 Match Arc 1 V Rate   = false
+
+PW Band - Split Minus      <- PW Band - Geo Split Minus   # 0.2
+PW Band - Split Plus       <- PW Band - Geo Split Plus    # 0.8
+
+PW Band - Arc2 Top.To Max  <- PW Material Core V Min Select 16
+PW Band - Arc2 Core.To Min <- PW Material Core V Min Select 16
+PW Band - Arc2 Core.To Max <- PW Material Core V Max Select 16
+PW Band - Arc2 Bot.To Min  <- PW Material Core V Max Select 16
+```
+
+Arc 1 still uses `Arc 1 V Padding`; Arc 2 does not. Arc 2's stitched path is:
+
+```text
+Top:  Arc 2 V Min -> raw Arc 1 V Min
+Core: raw Arc 1 V Min -> raw Arc 1 V Max
+Bot:  raw Arc 1 V Max -> Arc 2 V Max
+```
+
+Backup:
+
+```text
+Codex_ParametricWeave.pre-arc2-hardwire-geo-split-20260518_133924.blend
+```
+
+Live verification for Material 1 sub-strand:
+
+```text
+split_min = 0.2
+split_max = 0.8
+
+v_around 0.0 -> uv_y 0.500000
+v_around 0.2 -> uv_y 0.514507
+v_around 0.5 -> uv_y 0.531431
+v_around 0.8 -> uv_y 0.548356
+v_around 1.0 -> uv_y 0.563830
+```
+
+This confirms Arc 2 reaches the outer rows and is not collapsed to Arc 1's padded core range.
+
+---
+
+## Phase 10r - Force Arc 1 / Arc 2 equal-scale review mode
+
+**Date**: 2026-05-18 local session
+
+User clarified that the active target is equal-looking scale and UV mapping between Arc 1 and Arc 2. The folded Arc 2 experiment fixed one ownership problem but made Arc 2 visibly use a different V rate.
+
+Current saved review state:
+
+```text
+PW Band - Diff.Value <- PW MatchScale - Matched Arc2 V.Value
+PW U - Per Section Multiplier.input[1] = 1.0  # no PW U - Section Ratio link
+
+Arc 2 Match Arc 1 V Rate = true
+Arc 2 Edge Angle Mapping = false
+Match Section Slopes = false
+```
+
+Backup:
+
+```text
+Codex_ParametricWeave.pre-force-arc2-equal-scale-20260518_153704.blend
+```
+
+Live verification for Material 1:
+
+```text
+Arc 1 main uv_y_span = 0.057849
+Arc 2 sub  uv_y_span = 0.057849
+
+Arc 1 sample U span = 1.195049
+Arc 2 sample U span = 1.195049
+
+Arc 1 v_around 0.0 -> uv_y 0.502507
+Arc 1 v_around 0.5 -> uv_y 0.531431
+Arc 1 v_around 1.0 -> uv_y 0.560356
+
+Arc 2 v_around 0.0 -> uv_y 0.502507
+Arc 2 v_around 0.5 -> uv_y 0.531431
+Arc 2 v_around 1.0 -> uv_y 0.560356
+```
+
+Tests:
+
+```text
+python3 -m unittest backend.tests.test_blender_live backend.tests.test_blender_sync
+8 tests OK
+```
+
+This is intentionally a scale-review state. It prioritizes Arc 1 / Arc 2 parity over sampling the full extra Arc 2 halo range.
+
+---
+
+## Phase 10s - Center Arc 2 core and restore top/bottom halo V
+
+**Date**: 2026-05-18 local session
+
+User clarified the desired Arc 2 mapping: R2 is wider than R1, so Arc 2 must not simply reuse the whole Arc 1 V span. The Arc 1-equivalent core belongs in the center of Arc 2, and the two extra R2 widths above and below that core should sample their own Arc 2 texture rows.
+
+The saved Phase 10r review mode had hidden the real Arc 2 piecewise path:
+
+```text
+PW Band - Diff.Value <- PW MatchScale - Matched Arc2 V.Value
+Arc 2 Match Arc 1 V Rate = true
+```
+
+That made Arc 2 and Arc 1 use the same V span, but it also meant Arc 2 could not sample separate Top/Core/Bot regions. The latent piecewise branch had also drifted during the folded-core experiments: both `PW Band - IsTop` and `PW Band - IsBot` were thresholded against `PW Band - Arc2 Fold Mid`, so the center core was not represented correctly once the piecewise branch became active.
+
+Backup:
+
+```text
+Codex_ParametricWeave.pre-arc2-centered-core-v-20260518_163746.blend
+```
+
+Saved changes in `Codex_ParametricWeave.blend`:
+
+```text
+PW Band - Diff.Value       <- PW MatchScale - Switch Arc2 V.Output
+Arc 2 Match Arc 1 V Rate   = false
+Arc 2 Edge Angle Mapping   = false
+Match Section Slopes       = false
+
+PW Band - IsTop threshold  <- PW Band - Split Minus
+PW Band - IsBot threshold  <- PW Band - Split Plus
+
+Arc2 Top:  0.0 -> Split Minus   maps Arc 2 V Min -> raw Arc 1 V Min
+Arc2 Core: Split Minus -> Plus  maps raw Arc 1 V Min -> raw Arc 1 V Max
+Arc2 Bot:  Split Plus -> 1.0    maps raw Arc 1 V Max -> Arc 2 V Max
+
+PW U - Per Section Multiplier.input[1] <- PW U - Section Ratio.Value
+```
+
+Live verification for Material 1:
+
+```text
+split_min = 0.200000
+split_max = 0.800000
+
+Arc 1 main uv_y_span = 0.057849
+Arc 2 sub  uv_y_span = 0.063830
+
+Arc 2 v_around 0.0 -> uv_y 0.500000
+Arc 2 v_around 0.2 -> uv_y 0.514507
+Arc 2 v_around 0.5 -> uv_y 0.531431
+Arc 2 v_around 0.8 -> uv_y 0.548356
+Arc 2 v_around 1.0 -> uv_y 0.563830
+```
+
+Viewport screenshot:
+
+```text
+runtime/self_iter_arc2_centered_core_v_viewport.png
+```
+
+Tests:
+
+```text
+python3 -m unittest backend.tests.test_blender_live backend.tests.test_blender_sync
+8 tests OK
+```
+
+This is the current full Arc 2 shell mapping: the center R1-equivalent interval has the Arc 1 core, and the two outer R2 intervals carry the top/bottom Arc 2 texture rows.
+
+---
+
+## Phase 10u — Scale U denominator test
+
+**Date**: 2026-05-19
+
+### Motivation
+
+The user observed that direct web-to-Blender material pushes looked slightly squashed along U. Manually lowering root `Texture Scale U` (`ParametricWeave.modifiers["Weave"]["Socket_97"]`) to roughly `0.5..0.6` made the material look closer to the reference, but root Scale U is only a visual test knob and should return to `1.0`.
+
+### Hypothesis
+
+The current automatic per-material Scale U formula divides the padded visible V span by `ARC1_V_AROUND_SPAN = 0.6`:
+
+```text
+Material N Texture Scale U = padded_visible_v_span / 0.6
+```
+
+That `0.6` is the Arc 1 / Arc 2 radius-owned core fraction. It may be too aggressive for the current projected/reference-image judgement. The manual root Scale U value around `0.6` effectively cancels that denominator:
+
+```text
+(padded_visible_v_span / 0.6) * 0.6 = padded_visible_v_span
+```
+
+So this experiment keeps root Scale U at `1.0` and changes only the backend auto denominator to `1.0`:
+
+```text
+Material N Texture Scale U = padded_visible_v_span / 1.0
+```
+
+### Backup
+
+Before code or .blend edits:
+
+```text
+Codex_ParametricWeave.pre-scale-u-denominator-test-20260519_004510.blend
+```
+
+### Fix Applied
+
+- Add a separate backend constant for the auto U denominator so the old geometry constant (`ARC1_V_AROUND_SPAN = 0.6`) remains documented as radius/split provenance.
+- Change only the automatic `texture_scale_u_is_auto` path from `/ 0.6` to `/ 1.0`.
+- Keep `U Stride Per Warp End / Weft Pick` derived from the same final material scale, so spool continuity remains internally consistent.
+- Reset saved root `Texture Scale U` (`Socket_97`) to `1.0` so the manual visual-compensation knob is neutral during the test.
+
+Touched files:
+
+```text
+backend/app/blender_live.py
+backend/tests/test_blender_live.py
+Codex_ParametricWeave.blend
+```
+
+### Verification
+
+Backend tests:
+
+```text
+python3 -m unittest discover backend/tests
+40 tests OK
+```
+
+Blender readback:
+
+```text
+Socket_44  = 0
+Socket_87  = 1
+Socket_88  = 0
+Socket_97  = 1
+Socket_244 = 0.00800000037997961
+```
+
+Formula smoke test using a recent yarn metadata sample:
+
+```text
+AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0
+texture_scale_u_fallback = 0.03384912959381048
+```
+
+### What was NOT done
+
+No Blender node graph topology is changed in this experiment. If the visual still looks wrong, the next suspect is not the denominator but the V-side padding/projection model itself.
+
+---
+
 ## Phase 4 — (next) candidate follow-ups
 
-- **Visually approve Phase 3q's geometry-owned Arc 2 split** in the live viewport. Current evaluated split is `0.2 / 0.8`.
+## Phase 10t - Free-flow Arc 2 halo V from core rate
+
+**Date**: 2026-05-18 local session
+
+User clarified that the `0.0 -> Split Minus`, `Split Minus -> Split Plus`, `Split Plus -> 1.0` geometry split is correct, but the outer Arc 2 top/bottom texture should not be forced to snap to the outer texture edge. The desired behavior is for texture rows to flow outward from the core seam at a natural scale.
+
+Backup:
+
+```text
+Codex_ParametricWeave.pre-arc2-free-halo-v-flow-20260518_170029.blend
+```
+
+Saved changes in `Codex_ParametricWeave.blend`:
+
+```text
+top_outer_v = raw Arc 1 V Min - core_v_slope * Split Minus
+bot_outer_v = raw Arc 1 V Max + core_v_slope * (1 - Split Plus)
+
+Arc2 Top:  top_outer_v -> raw Arc 1 V Min
+Arc2 Core: raw Arc 1 V Min -> raw Arc 1 V Max
+Arc2 Bot:  raw Arc 1 V Max -> bot_outer_v
+```
+
+Live verification for Material 1:
+
+```text
+split_min = 0.200000
+split_max = 0.800000
+
+Arc 2 v_around 0.0 -> uv_y 0.503224
+Arc 2 v_around 0.2 -> uv_y 0.514507
+Arc 2 v_around 0.5 -> uv_y 0.531431
+Arc 2 v_around 0.8 -> uv_y 0.548356
+Arc 2 v_around 1.0 -> uv_y 0.559639
+
+Arc 1 ratio = 1.0
+Arc 2 ratio = 1.0 in Top/Core/Bot
+```
+
+Viewport screenshot:
+
+```text
+runtime/self_iter_arc2_free_halo_v_flow_viewport.png
+```
+
+Tests:
+
+```text
+python3 -m unittest backend.tests.test_blender_live backend.tests.test_blender_sync
+8 tests OK
+```
+
+This is the current Arc 2 shell mapping: the physical core split remains radius-owned, while the top/bottom texture is no longer endpoint-fitted to the Arc 2 outer V metadata.
+
+---
+
+## Checkpoint 2026-05-19 - Approved visual baseline
+
+**Date**: 2026-05-19 local session
+
+The user visually approved the current application test and asked to freeze it as a checkpoint.
+
+Canonical checkpoint doc:
+
+```text
+docs/CHECKPOINT_2026-05-19.md
+```
+
+Frozen values:
+
+```text
+Spacing                 Socket_6   = 0.026
+Texture Offset V        Socket_44  = 0
+Sub Texture Scale V     Socket_87  = 1
+Sub Texture Offset V    Socket_88  = 0
+Texture Scale U         Socket_97  = 1
+Arc 1 V Padding         Socket_244 = 0.008
+AUTO_TEXTURE_SCALE_U_DENOMINATOR   = 1.0
+```
+
+Rollback snapshot:
+
+```text
+Codex_ParametricWeave.pre-scale-u-denominator-test-20260519_004510.blend
+```
+
+Verification already run for the checkpoint:
+
+```text
+python3 -m unittest discover backend/tests
+40 tests OK
+
+npm run test:unit
+passed
+```
+
+This checkpoint supersedes the old active-doc guidance that pinned `Texture Offset V = 0.031914920`, `Sub Texture Scale V = 0`, and `Arc 1 V Padding = 0.012`.
+
+---
+
+## Phase 4 — (next) candidate follow-ups
+
+- **Protect the 2026-05-19 visual checkpoint** before new Arc 2 / padding / U-scale work. Start from a new `.blend` backup and record whether the result replaces or branches from the approved baseline.
 - **Decide between high-res inspection mode and alpha boost.** Phase 3r switched the current live material to full-res files for visual comparison, but the code still defaults to Cycles-safe textures.
 - **Visually approve Phase 4a's UDIM material** in the live viewport, then run a crop render to confirm Cycles samples all three tiles correctly.
 - **Run a V-Ray duplicate-file proof** with V-Ray GPU out-of-core textures enabled and original albedo/alpha maps.
 - **Add the `Texture World Width BU` socket** to `Parametric Weave knotty`. Replace the legacy `Image Width Px ÷ Scanner Pixels Per BU` divide with a direct read. Append `("Texture World Width BU", "texture_world_width_m", 1.0)` to `PER_MATERIAL_SOCKETS` in [blender_live.py](../../backend/app/blender_live.py) — producer side already emits the value.
-- **Separate warp/weft U correction** if non-square targets or asymmetric thread counts become important. Phase 4i still uses one setup-owned U multiplier, applied per material.
+- **Separate warp/weft U correction** if non-square targets or asymmetric thread counts become important. Phase 5 pushes per-axis `U Stride Per Warp End / Weft Pick`, but the per-material U *scale* is still one value across both axes.
 - **Frontend live-render toggle** — a dev-only checkbox in Step 3 that flips `BLENDER_LIVE_RENDER=1` for the current backend session.
 - **Rename internal switch-chain nodes** (`PW Material Core V Min Select N` → `Arc 1 V Min Select N`, etc.) for visual consistency. Cosmetic only.
 - **Port v2's atlas / colour-id chain** so multi-yarn drafts render the correct material per cell (Phase 4 candidate).

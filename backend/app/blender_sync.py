@@ -8,7 +8,8 @@ from typing import Any
 
 
 DEFAULT_TEXTURE_U_CALIBRATION = 0.1
-DEFAULT_ARC1_V_PADDING = 0.012
+DEFAULT_ARC1_V_PADDING = 0.008
+DEFAULT_SPACING = 0.026
 
 
 @dataclass(frozen=True)
@@ -146,11 +147,14 @@ def build_blender_sync_code(
 
     warp_threads_override = maybe_int("warpThreads")
     weft_threads_override = maybe_int("weftThreads")
-    spacing_override = map_unit_setting("spacing", 0.03, 0.1)
+    spacing_override = map_unit_setting("spacing", DEFAULT_SPACING, 0.1)
     pattern_noise_x_override = map_unit_setting("patternNoiseX", 0.0, 0.03)
     pattern_noise_y_override = map_unit_setting("patternNoiseY", 0.0, 0.03)
-    # Per-strand U-shift in raw units. Pushed straight to 'UV Random U';
-    # 'UV Random V' is pinned to 0 (user direction: U axis only).
+    # Per-strand U-shift in raw units. Default is now 0 because the per-strand
+    # U stride sockets (U Stride Per Warp End / Weft Pick) provide natural
+    # along-strand variation by spooling one continuous yarn across strands —
+    # the random scatter was a hack to break visible repetition and is no
+    # longer needed. Kept as an escape-hatch override.
     uv_random_u_override = maybe_float("uvRandomU")
     amplitude_override = maybe_float("amplitude")
     texture_scale_v_override = maybe_float("textureScaleV")
@@ -420,6 +424,84 @@ def ensure_draft_colour_id_sampling(group):
     links.new(weft_index_math.outputs['Value'], weft_sample.inputs['Index'])
     links.new(weft_sample.outputs['Value'], store_weft_colour_id.inputs['Value'])
 
+def link_single_input(group, target_node_name, input_index, source_node_name, source_socket_name):
+    nodes = group.nodes
+    links = group.links
+    target = nodes.get(target_node_name)
+    source = nodes.get(source_node_name)
+    if target is None or source is None:
+        return False
+    try:
+        target_socket = target.inputs[int(input_index)]
+        source_socket = source.outputs[source_socket_name]
+    except Exception:
+        return False
+    if (
+        len(target_socket.links) == 1
+        and target_socket.links[0].from_node == source
+        and target_socket.links[0].from_socket == source_socket
+    ):
+        return True
+    clear_input_links(links, target_socket)
+    links.new(source_socket, target_socket)
+    return True
+
+def set_unlinked_input_default(group, node_name, input_index, value):
+    node = group.nodes.get(node_name)
+    if node is None:
+        return False
+    try:
+        socket = node.inputs[int(input_index)]
+    except Exception:
+        return False
+    if socket.is_linked:
+        return False
+    try:
+        socket.default_value = value
+        return True
+    except Exception:
+        return False
+
+def ensure_parametric_knotty_draft_contract(group):
+    if group.name != 'Parametric Weave knotty':
+        return
+    # Current web draft convention is matrix[row=pick][col=warp end].
+    # Warp strands therefore sample col from Curve Index and row from Index in Curve;
+    # weft strands do the opposite. Older graph revisions had these four links
+    # crossed, which transposed the woven structure and made yarn assignments look
+    # swapped between warp and weft.
+    expected_links = (
+        ('PW Draft Warp Col Mod', 0, 'Curve of Point', 'Curve Index'),
+        ('PW Draft Warp Col Mod', 1, 'PW Draft Input', 'Draft Columns'),
+        ('PW Draft Warp Row Mod', 0, 'Curve of Point', 'Index in Curve'),
+        ('PW Draft Warp Row Mod', 1, 'PW Draft Input', 'Draft Rows'),
+        ('PW Draft Weft Col Mod', 0, 'Curve of Point.001', 'Index in Curve'),
+        ('PW Draft Weft Col Mod', 1, 'PW Draft Input', 'Draft Columns'),
+        ('PW Draft Weft Row Mod', 0, 'Curve of Point.001', 'Curve Index'),
+        ('PW Draft Weft Row Mod', 1, 'PW Draft Input', 'Draft Rows'),
+    )
+    verified = []
+    for target_node_name, input_index, source_node_name, source_socket_name in expected_links:
+        if link_single_input(group, target_node_name, input_index, source_node_name, source_socket_name):
+            verified.append(target_node_name)
+    sign_defaults = (
+        ('PW Draft Warp Sign', 1, 2.0),
+        ('PW Draft Warp Sign', 2, -1.0),
+        ('PW Draft Weft Sign', 1, -2.0),
+        ('PW Draft Weft Sign', 2, 1.0),
+    )
+    for node_name, input_index, value in sign_defaults:
+        node = group.nodes.get(node_name)
+        if node is not None:
+            try:
+                node.operation = 'MULTIPLY_ADD'
+            except Exception:
+                pass
+        if set_unlinked_input_default(group, node_name, input_index, value):
+            verified.append(node_name)
+    if verified:
+        print('[sync] verified Parametric Weave knotty draft contract:', ', '.join(sorted(set(verified))))
+
 draft_collection = ensure_collection(draft_collection_name)
 draft_obj = create_or_update_pattern_object(draft_object_name, matrix, draft_collection)
 
@@ -437,6 +519,7 @@ weave_group = (
 )
 if weave_group is None:
     raise RuntimeError("Blender is missing both 'Parametric Weave knotty' and 'Weave From Draft' geometry-node groups.")
+ensure_parametric_knotty_draft_contract(weave_group)
 if warp_material_ids is not None and weft_material_ids is not None:
     ensure_draft_colour_id_sampling(weave_group)
 
@@ -484,7 +567,7 @@ set_modifier_input(weave_mod, weave_group, 'Draft Columns', cols)
 set_modifier_input(weave_mod, weave_group, 'Draft Rows', rows)
 warp_threads_value = int(round(pick_value(warp_threads_override, preserved.get('Warp Threads'), default_warp_threads)))
 weft_threads_value = int(round(pick_value(weft_threads_override, preserved.get('Weft Threads'), default_weft_threads)))
-spacing_value = pick_value(spacing_override, preserved.get('Spacing'), 0.03)
+spacing_value = pick_value(spacing_override, preserved.get('Spacing'), {repr(DEFAULT_SPACING)})
 set_modifier_input(weave_mod, weave_group, 'Warp Threads', warp_threads_value)
 set_modifier_input(weave_mod, weave_group, 'Weft Threads', weft_threads_value)
 set_modifier_input(weave_mod, weave_group, 'Spacing', spacing_value)
@@ -499,7 +582,7 @@ except KeyError:
 # Per-strand U scatter. Default 1 unit if neither override nor preserved value
 # is present. V scatter is force-pinned to 0 (user direction: U axis only).
 try:
-    set_modifier_input(weave_mod, weave_group, 'UV Random U', pick_value(uv_random_u_override, preserved.get('UV Random U'), 1.0))
+    set_modifier_input(weave_mod, weave_group, 'UV Random U', pick_value(uv_random_u_override, preserved.get('UV Random U'), 0.0))
 except KeyError:
     pass
 try:
@@ -518,24 +601,22 @@ maybe_set_modifier_input(weave_mod, weave_group, 'Ply Radius', preserved.get('Pl
 maybe_set_modifier_input(weave_mod, weave_group, 'Twist Amount', preserved.get('Twist Amount') if preserved.get('Twist Amount') is not None else 16.0)
 maybe_set_modifier_input(weave_mod, weave_group, 'Ply Resolution', preserved.get('Ply Resolution') if preserved.get('Ply Resolution') is not None else 5)
 if weave_group.name.startswith('Parametric Weave knotty'):
+    # Per-strand U stride (set later in the apply-metadata pass) spools one
+    # continuous yarn across warp/weft strands. With that in place we sample
+    # the texture at its natural world width, so both axis multipliers stay
+    # at 1.0 — no fit math, no calibration. The strand-stride math lives in
+    # blender_live._pw_apply_modifier_material_metadata where the first
+    # material's image_width_px / scanner_pixels_per_bu is available.
     root_texture_scale_u = 1.0
     material_texture_scale_u = 1.0
-    fit_target = bpy.data.objects.get(fit_target_name)
-    try:
-        source_strand_length = float(warp_threads_value) * float(spacing_value)
-        fill_ratio_value = float(pick_value(fill_ratio_override, None, 1.0))
-        if fit_target is not None and source_strand_length > 0:
-            target_length = max(float(fit_target.dimensions.x), float(fit_target.dimensions.y)) * fill_ratio_value
-            if target_length > 0:
-                material_texture_scale_u = (target_length / source_strand_length) * float(texture_u_calibration)
-    except Exception:
-        material_texture_scale_u = 1.0
 else:
     root_texture_scale_u = preserved.get('Texture Scale U') if preserved.get('Texture Scale U') is not None else 8.0
     material_texture_scale_u = 1.0
 maybe_set_modifier_input(weave_mod, weave_group, 'Texture Scale U', root_texture_scale_u)
 maybe_set_modifier_input(weave_mod, weave_group, 'Texture Scale V', pick_value(texture_scale_v_override, preserved.get('Texture Scale V'), 0.5))
-maybe_set_modifier_input(weave_mod, weave_group, 'Texture Offset V', preserved.get('Texture Offset V') if preserved.get('Texture Offset V') is not None else 0.0)
+maybe_set_modifier_input(weave_mod, weave_group, 'Texture Offset V', 0.0)
+maybe_set_modifier_input(weave_mod, weave_group, 'Sub Texture Scale V', 1.0)
+maybe_set_modifier_input(weave_mod, weave_group, 'Sub Texture Offset V', 0.0)
 maybe_set_modifier_input(weave_mod, weave_group, 'Texture Side Flatten', preserved.get('Texture Side Flatten') if preserved.get('Texture Side Flatten') is not None else 0.7)
 maybe_set_modifier_input(weave_mod, weave_group, 'Lump Strength', preserved.get('Lump Strength') if preserved.get('Lump Strength') is not None else 0.0015)
 maybe_set_modifier_input(weave_mod, weave_group, 'Lump Scale', preserved.get('Lump Scale') if preserved.get('Lump Scale') is not None else 6.0)

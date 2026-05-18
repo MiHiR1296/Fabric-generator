@@ -20,7 +20,11 @@ from .fabric_project import (
     validate_project_bindings,
 )
 from .runtime_paths import BLEND_FILE_PATH, PROJECTS_ROOT, RENDER_JOBS_ROOT, YARN_ASSETS_ROOT, ensure_runtime_dirs
-from .yarn_assets import ensure_cycles_tiled_texture_set, get_ready_yarn_assets_lookup
+from .yarn_assets import (
+    ensure_cycles_tiled_rgba_texture_set,
+    ensure_cycles_tiled_texture_set,
+    get_ready_yarn_assets_lookup,
+)
 
 
 def _is_live_render_mode() -> bool:
@@ -37,6 +41,12 @@ DEFAULT_RUNTIME_ROOT = RENDER_JOBS_ROOT
 MAX_DIRECT_PREVIEW_MATERIALS = 16
 DEFAULT_PREVIEW_RENDER_RESOLUTION = 3200
 DEFAULT_PREVIEW_RENDER_SAMPLES = 96
+DEFAULT_TEXTURE_INTERPOLATION = "Linear"
+TEXTURE_INTERPOLATION_MODES = {"Linear", "Closest", "Cubic", "Smart"}
+DEFAULT_CUTOUT_BLEND_METHOD = "BLEND"
+DEFAULT_SURFACE_RENDER_METHOD = "BLENDED"
+CUTOUT_BLEND_METHODS = {"OPAQUE", "CLIP", "HASHED", "BLEND"}
+SURFACE_RENDER_METHODS = {"DITHERED", "BLENDED"}
 
 
 @dataclass(frozen=True)
@@ -95,6 +105,16 @@ def _int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
     return min(maximum, max(minimum, value))
 
 
+def _texture_interpolation_env() -> str:
+    value = os.environ.get("WEAVE_TEXTURE_INTERPOLATION", DEFAULT_TEXTURE_INTERPOLATION)
+    return value if value in TEXTURE_INTERPOLATION_MODES else DEFAULT_TEXTURE_INTERPOLATION
+
+
+def _enum_env(name: str, default: str, allowed: set[str]) -> str:
+    value = os.environ.get(name, default).upper()
+    return value if value in allowed else default
+
+
 def validate_headless_blender_config(config: HeadlessBlenderConfig) -> None:
     if not config.blender_binary.exists():
         raise FileNotFoundError(f"Blender binary not found at {config.blender_binary}")
@@ -126,10 +146,16 @@ def build_headless_render_script(
     normalized_material_assets: list[dict[str, Any]] = []
     for entry in material_assets or []:
         normalized = dict(entry)
-        for path_key in ("diffuse_path", "alpha_path", "diffuse_tile_pattern", "alpha_tile_pattern"):
+        for path_key in (
+            "diffuse_path",
+            "alpha_path",
+            "diffuse_tile_pattern",
+            "alpha_tile_pattern",
+            "rgba_tile_pattern",
+        ):
             if normalized.get(path_key) is not None:
                 normalized[path_key] = str(normalized[path_key])
-        for path_list_key in ("diffuse_tile_paths", "alpha_tile_paths"):
+        for path_list_key in ("diffuse_tile_paths", "alpha_tile_paths", "rgba_tile_paths"):
             if normalized.get(path_list_key):
                 normalized[path_list_key] = [str(path) for path in normalized[path_list_key]]
         normalized_material_assets.append(normalized)
@@ -155,6 +181,17 @@ def build_headless_render_script(
         DEFAULT_PREVIEW_RENDER_SAMPLES,
         minimum=1,
         maximum=4096,
+    )
+    texture_interpolation = _texture_interpolation_env()
+    cutout_blend_method = _enum_env(
+        "WEAVE_CUTOUT_BLEND_METHOD",
+        DEFAULT_CUTOUT_BLEND_METHOD,
+        CUTOUT_BLEND_METHODS,
+    )
+    surface_render_method = _enum_env(
+        "WEAVE_SURFACE_RENDER_METHOD",
+        DEFAULT_SURFACE_RENDER_METHOD,
+        SURFACE_RENDER_METHODS,
     )
     modifier_name_json = json.dumps(weave_modifier_name)
     sync_code = build_blender_sync_code(
@@ -263,18 +300,18 @@ def configure_texture_node(texture_node, extension='REPEAT'):
     except Exception:
         pass
     try:
-        texture_node.interpolation = 'Linear'
+        texture_node.interpolation = _PW_TEXTURE_INTERPOLATION
     except Exception:
         pass
 
 def configure_cutout_material(material):
     try:
-        material.blend_method = 'HASHED'
+        material.blend_method = _PW_CUTOUT_BLEND_METHOD
     except Exception:
         pass
     if hasattr(material, 'surface_render_method'):
         try:
-            material.surface_render_method = 'DITHERED'
+            material.surface_render_method = _PW_SURFACE_RENDER_METHOD
         except Exception:
             pass
     try:
@@ -306,6 +343,11 @@ def ensure_texture_preview_material(asset_entry, index):
     shader.inputs['Roughness'].default_value = 0.72
     shader.inputs['Alpha'].default_value = 1.0
 
+    use_rgba_tiled = (
+        asset_entry.get('texture_mode') == 'udim_rgba_tiled'
+        and asset_entry.get('rgba_tile_pattern')
+        and int(asset_entry.get('texture_tile_count') or 0) > 1
+    )
     use_tiled = (
         asset_entry.get('texture_mode') == 'udim_tiled'
         and asset_entry.get('diffuse_tile_pattern')
@@ -319,7 +361,19 @@ def ensure_texture_preview_material(asset_entry, index):
     alpha_tex = nodes.new('ShaderNodeTexImage')
     alpha_tex.name = 'FabricStudioAlphaNode'
     alpha_tex.location = (80, -160)
-    if use_tiled:
+    if use_rgba_tiled:
+        tile_count = int(asset_entry.get('texture_tile_count') or 1)
+        rgba_image = ensure_udim_image(
+            f"{material_name}_RGBA_UDIM",
+            asset_entry['rgba_tile_pattern'],
+            tile_count,
+            'sRGB',
+        )
+        diffuse_tex.image = rgba_image
+        alpha_tex.image = rgba_image
+        configure_texture_node(diffuse_tex, 'CLIP')
+        configure_texture_node(alpha_tex, 'CLIP')
+    elif use_tiled:
         tile_count = int(asset_entry.get('texture_tile_count') or 1)
         diffuse_tex.image = ensure_udim_image(
             f"{material_name}_Diffuse_UDIM",
@@ -349,7 +403,7 @@ def ensure_texture_preview_material(asset_entry, index):
     except Exception:
         pass
 
-    if use_tiled:
+    if use_rgba_tiled or use_tiled:
         uv_sep = nodes.new('ShaderNodeSeparateXYZ')
         uv_sep.location = (-220, 20)
         u_fract = nodes.new('ShaderNodeMath')
@@ -379,7 +433,8 @@ def ensure_texture_preview_material(asset_entry, index):
         links.new(mapping.outputs['Vector'], diffuse_tex.inputs['Vector'])
         links.new(mapping.outputs['Vector'], alpha_tex.inputs['Vector'])
     links.new(diffuse_tex.outputs['Color'], shader.inputs['Base Color'])
-    links.new(alpha_tex.outputs['Color'], shader.inputs['Alpha'])
+    alpha_output = alpha_tex.outputs['Alpha'] if use_rgba_tiled else alpha_tex.outputs['Color']
+    links.new(alpha_output, shader.inputs['Alpha'])
     links.new(shader.outputs['BSDF'], output.inputs['Surface'])
 
     configure_cutout_material(material)
@@ -438,12 +493,8 @@ def apply_modifier_material_slots(modifier, node_group, materials, warp_ids, wef
             summary['bandMeta'] = {'error': str(exc)}
 
     try:
-        if node_group.name == 'Parametric Weave knotty':
-            apply_material_cycle_inputs(modifier, node_group, 'Warp', weft_ids)
-            apply_material_cycle_inputs(modifier, node_group, 'Weft', warp_ids)
-        else:
-            apply_material_cycle_inputs(modifier, node_group, 'Warp', warp_ids)
-            apply_material_cycle_inputs(modifier, node_group, 'Weft', weft_ids)
+        apply_material_cycle_inputs(modifier, node_group, 'Warp', warp_ids)
+        apply_material_cycle_inputs(modifier, node_group, 'Weft', weft_ids)
     except Exception as exc:
         summary['cycle_error'] = str(exc)
     return summary
@@ -572,11 +623,14 @@ def ensure_atlas_preview_material(name, diffuse_path, alpha_path, rows):
 {atlas_setup}
 {APPLY_METADATA_PY}
 
-_PW_MATERIAL_ASSETS = {material_assets_json}
+_PW_MATERIAL_ASSETS = json.loads({repr(material_assets_json)})
 _PW_MODIFIER_NAME = {modifier_name_json}
 _PW_TEXTURE_SCALE_U_MULTIPLIER = float(globals().get('material_texture_scale_u', 1.0))
 _PW_PREVIEW_RENDER_RESOLUTION = {repr(preview_render_resolution)}
 _PW_PREVIEW_RENDER_SAMPLES = {repr(preview_render_samples)}
+_PW_TEXTURE_INTERPOLATION = {repr(texture_interpolation)}
+_PW_CUTOUT_BLEND_METHOD = {repr(cutout_blend_method)}
+_PW_SURFACE_RENDER_METHOD = {repr(surface_render_method)}
 
 scene = bpy.context.scene
 try:
@@ -660,6 +714,7 @@ def build_project_material_payloads(ordered_assets: list[Any]) -> tuple[list[dic
     for asset in ordered_assets:
         if not asset.diffuseFilename or not asset.alphaFilename:
             raise ValueError(f"Yarn asset {asset.label} is missing processed outputs.")
+        source_rgba_path = YARN_ASSETS_ROOT / asset.id / asset.sourceFilename
         source_diffuse_path = YARN_ASSETS_ROOT / asset.id / asset.diffuseFilename
         source_alpha_path = YARN_ASSETS_ROOT / asset.id / asset.alphaFilename
         # Prefer the Cycles-safe downscale (≤ 16384 px). It's the original file
@@ -678,7 +733,7 @@ def build_project_material_payloads(ordered_assets: list[Any]) -> tuple[list[dic
         material_entry = build_material_asset_entry(asset)
         material_entry["diffuse_path"] = str(diffuse_path)
         material_entry["alpha_path"] = str(alpha_path)
-        tile_payload = _material_tile_payload(asset, source_diffuse_path, source_alpha_path)
+        tile_payload = _material_tile_payload(asset, source_diffuse_path, source_alpha_path, source_rgba_path)
         if tile_payload:
             material_entry.update(tile_payload)
         material_assets.append(material_entry)
@@ -728,10 +783,20 @@ def _relative_asset_paths_to_absolute(asset: Any, filenames: list[str] | None) -
     return [YARN_ASSETS_ROOT / asset.id / filename for filename in filenames or [] if filename]
 
 
-def _material_tile_payload(asset: Any, diffuse_path: Path, alpha_path: Path) -> dict[str, Any] | None:
+def _material_tile_payload(
+    asset: Any,
+    diffuse_path: Path,
+    alpha_path: Path,
+    rgba_path: Path | None = None,
+) -> dict[str, Any] | None:
     tile_count = int(getattr(asset, "renderTileCount", 0) or 0)
+    rgba_pattern = getattr(asset, "renderRgbaTilePattern", None)
     diffuse_pattern = getattr(asset, "renderDiffuseTilePattern", None)
     alpha_pattern = getattr(asset, "renderAlphaTilePattern", None)
+    rgba_tile_paths = _relative_asset_paths_to_absolute(
+        asset,
+        getattr(asset, "renderRgbaTileFilenames", None),
+    )
     diffuse_tile_paths = _relative_asset_paths_to_absolute(
         asset,
         getattr(asset, "renderDiffuseTileFilenames", None),
@@ -740,6 +805,21 @@ def _material_tile_payload(asset: Any, diffuse_path: Path, alpha_path: Path) -> 
         asset,
         getattr(asset, "renderAlphaTileFilenames", None),
     )
+
+    if (
+        tile_count > 1
+        and rgba_pattern
+        and len(rgba_tile_paths) == tile_count
+        and all(path.exists() for path in rgba_tile_paths)
+    ):
+        return {
+            "texture_mode": "udim_rgba_tiled",
+            "texture_tile_count": tile_count,
+            "texture_tile_width_px": getattr(asset, "renderTileWidthPx", None),
+            "texture_tile_height_px": getattr(asset, "renderTileHeightPx", None),
+            "rgba_tile_pattern": str(YARN_ASSETS_ROOT / asset.id / rgba_pattern),
+            "rgba_tile_paths": [str(path) for path in rgba_tile_paths],
+        }
 
     if (
         tile_count > 1
@@ -759,6 +839,21 @@ def _material_tile_payload(asset: Any, diffuse_path: Path, alpha_path: Path) -> 
             "diffuse_tile_paths": [str(path) for path in diffuse_tile_paths],
             "alpha_tile_paths": [str(path) for path in alpha_tile_paths],
         }
+
+    if rgba_path and rgba_path.exists():
+        rgba_tiled = ensure_cycles_tiled_rgba_texture_set(
+            rgba_path,
+            YARN_ASSETS_ROOT / asset.id / "cycles_tiled",
+        )
+        if rgba_tiled:
+            return {
+                "texture_mode": "udim_rgba_tiled",
+                "texture_tile_count": int(rgba_tiled["tile_count"]),
+                "texture_tile_width_px": int(rgba_tiled["tile_width_px"]),
+                "texture_tile_height_px": int(rgba_tiled["tile_height_px"]),
+                "rgba_tile_pattern": str(rgba_tiled["rgba_pattern"]),
+                "rgba_tile_paths": [str(path) for path in rgba_tiled["rgba_paths"]],
+            }
 
     if not diffuse_path.exists() or not alpha_path.exists():
         return None

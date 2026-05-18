@@ -13,6 +13,8 @@ We turned the Fabric Generator prototype into a four-step production-shaped stud
 
 The big product change is that users no longer need to juggle separate yarnseamless, draft-builder, and Blender workflows. The app owns the workflow; Blender is treated as the render/setup engine behind the scenes.
 
+Current checkpoint: the 2026-05-19 web-to-Blender visual baseline is approved and recorded in [CHECKPOINT_2026-05-19.md](CHECKPOINT_2026-05-19.md). The important frozen values are `Spacing = 0.026`, `Arc 1 V Padding = 0.008`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`, and automatic `Material N Texture Scale U = visible_v_span / 1.0`.
+
 ## What We Integrated
 
 | Layer | Result |
@@ -172,6 +174,11 @@ Important socket concepts:
 - `Sub Strand Enable` is pinned on so Arc 2 halo mapping actually renders.
 - V-axis footgun sockets are pinned to neutral values to keep scan-driven yarns aligned.
 - `Material N Texture Scale U` receives the fit-aware U correction so the visible repeat matches the render context.
+- `Arc 1 V Padding` (Surface panel) controls how far the core texture band extends into the halo region before the rasterizer sees a section transition. Checkpoint default `0.008`.
+- `Arc 2 Boundary Inset` (Surface panel, Phase 10d) pulls Arc 2 profile vertices near the section boundaries radially inward — `0.010 BU` tucks the section discontinuity exactly behind Arc 1.
+- `Match Section Slopes` (Surface panel boolean, Phase 10e) swaps the geometric section split for a texture-proportional one so all four V slopes match by construction. Default `False`; turn on to eliminate the V-slope-discontinuity band at section boundaries.
+- `Arc 2 Edge Angle Mapping` (Surface panel boolean, Phase 10f) replaces linear-in-`v_around` V mapping with a cumulative-`sin(θ)` curvature-aware mapping in Top and Bot sections, so silhouette polygons sample V proportionally to their projected screen size. Default `False`; turn on to de-stretch cells at the strand silhouette. Best effect with `Match Section Slopes = False` (Phase 3q's wider Top/Bot sections).
+- `Arc 2 Match Arc 1 V Rate` (Surface panel boolean, Phase 10g) replaces Arc 2's entire piecewise V chain with a single linear mapping that samples **exactly Arc 1's padded core V range**, so both arcs show the same cells-per-cross-section visually. Default `False`. Side effect: Arc 2 never samples halo content on its surface (texture outside the padded core V range isn't reached). The Phase 10t saved state keeps this OFF so Arc 2's centered core remains radius-owned and the extra halo/ends can flow outward from the core seam.
 
 ## Feature Inventory
 
@@ -189,6 +196,8 @@ Important socket concepts:
 - Render control surface for artist-tuned preview iteration.
 - Browser-side Try On 3D preview.
 - Backend and frontend tests for the main data contracts.
+- Arc 2 V-mapping integrity chain (Phase 10 → 10e): per-section U scaling for uniform texel aspect, custom polyline profile that places vertices on the live section boundaries for any radius ratio, optional boundary inset to hide the section discontinuity behind Arc 1, and optional texture-proportional split that equalizes section slopes.
+- Phase 10u / 2026-05-19 visual checkpoint: the active direct-material look is approved with neutral root `Texture Scale U`, neutral V offsets, `Sub Texture Scale V = 1`, and auto per-material U scale using `AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0`.
 
 ## Operating The App
 

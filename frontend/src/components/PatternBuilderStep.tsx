@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import ColorBindingGrid from './ColorBindingGrid';
 import DraftBoard from './DraftBoard';
-import ExploreLibrary from './ExploreLibrary';
 import InspectorPanel from './InspectorPanel';
+import PatternPickerPanel from './PatternPickerPanel';
 import StudioToolbar from './StudioToolbar';
 import {
   applyColorSequenceEdit,
@@ -54,7 +54,7 @@ export default function PatternBuilderStep({
   const [activeColor, setActiveColor] = useState(
     draft.warpColors[0] || draft.weftColors[0] || '#f3ede2',
   );
-  const [showExplore, setShowExplore] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
   const [parserStatus, setParserStatus] = useState<ParserStatus>('checking');
   const [busy, setBusy] = useState(false);
   const [pastedText, setPastedText] = useState('');
@@ -150,29 +150,6 @@ export default function PatternBuilderStep({
 
   return (
     <section className="fabric-step-panel" data-testid="pattern-builder-step">
-      {showExplore ? (
-        <div className="studio-explore">
-          <ExploreLibrary
-            presets={presets}
-            onLoadPreset={(presetId) => {
-              handlePresetChange(presetId);
-              setShowExplore(false);
-            }}
-            onLoadDraft={(nextDraft, label) => {
-              setDraft({
-                ...normalizeDraft(nextDraft),
-                title: nextDraft.title || label,
-                sourceLabel: label,
-              });
-              setFocus(null);
-              setImportMessage(`Loaded ${label} from the local book library.`);
-              setShowExplore(false);
-            }}
-            onClose={() => setShowExplore(false)}
-          />
-        </div>
-      ) : null}
-
       <input
         ref={fileInputRef}
         type="file"
@@ -189,9 +166,9 @@ export default function PatternBuilderStep({
           parserStatus={parserStatus}
           presets={presets}
           busy={busy}
-          exploreOpen={showExplore}
+          exploreOpen={showPicker}
           onPresetChange={handlePresetChange}
-          onToggleExplore={() => setShowExplore((current) => !current)}
+          onToggleExplore={() => setShowPicker((current) => !current)}
           onCountsChange={handleCountsChange}
           onImportClick={() => fileInputRef.current?.click()}
           onReset={() => {
@@ -274,6 +251,27 @@ export default function PatternBuilderStep({
           }}
         />
       </div>
+
+      {showPicker ? (
+        <PatternPickerPanel
+          presets={presets}
+          onLoadPreset={(presetId) => {
+            handlePresetChange(presetId);
+            setShowPicker(false);
+          }}
+          onLoadDraft={(nextDraft, label) => {
+            setDraft({
+              ...normalizeDraft(nextDraft),
+              title: nextDraft.title || label,
+              sourceLabel: label,
+            });
+            setFocus(null);
+            setImportMessage(`Loaded ${label} from the local book library.`);
+            setShowPicker(false);
+          }}
+          onClose={() => setShowPicker(false)}
+        />
+      ) : null}
     </section>
   );
 }

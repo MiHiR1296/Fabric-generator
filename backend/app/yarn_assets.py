@@ -89,6 +89,7 @@ def _refresh_asset_urls(asset: YarnAsset) -> YarnAsset:
     asset.renderAlphaUrl = _build_file_url(asset.id, asset.renderAlphaFilename)
     asset.renderDiffuseTileUrls = _build_file_urls(asset.id, asset.renderDiffuseTileFilenames)
     asset.renderAlphaTileUrls = _build_file_urls(asset.id, asset.renderAlphaTileFilenames)
+    asset.renderRgbaTileUrls = _build_file_urls(asset.id, asset.renderRgbaTileFilenames)
     return asset
 
 
@@ -476,6 +477,53 @@ def ensure_cycles_tiled_texture_set(
     }
 
 
+def ensure_cycles_tiled_rgba_texture_set(
+    rgba_path: Path,
+    output_dir: Path,
+    *,
+    max_dimension: int = MAX_CYCLES_TEXTURE_DIMENSION,
+) -> dict | None:
+    """Split an over-wide RGBA yarn strip into full-resolution UDIM U tiles.
+
+    This keeps the render/inspection source as the original imported RGBA file
+    instead of forcing users to compare separate raw albedo and alpha images.
+    """
+    if max_dimension <= 0:
+        return None
+
+    with Image.open(rgba_path) as image:
+        rgba_image = image.convert("RGBA")
+        width, height = rgba_image.size
+        if max(width, height) <= max_dimension:
+            return None
+        if height > max_dimension:
+            return None
+
+        tile_count = (width + max_dimension - 1) // max_dimension
+        if tile_count < 2 or tile_count > 10:
+            return None
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        rgba_tiles: list[Path] = []
+        tile_widths: list[int] = []
+
+        for index, (left, right) in enumerate(_tile_bounds(width, tile_count)):
+            udim = 1001 + index
+            rgba_tile = output_dir / f"{rgba_path.stem}_{udim}{rgba_path.suffix}"
+            tile_widths.append(right - left)
+            if not rgba_tile.exists():
+                rgba_image.crop((left, 0, right, height)).save(rgba_tile)
+            rgba_tiles.append(rgba_tile)
+
+    return {
+        "tile_count": tile_count,
+        "tile_width_px": max(tile_widths),
+        "tile_height_px": height,
+        "rgba_pattern": output_dir / f"{rgba_path.stem}_<UDIM>{rgba_path.suffix}",
+        "rgba_paths": rgba_tiles,
+    }
+
+
 def _build_band_meta_from_library(metadata: dict) -> dict:
     """Shape the library metadata.json into the bandMeta dict the render
     pipeline reads. The pre-computed `blender` block (added by yarnseamless's
@@ -575,6 +623,10 @@ def import_yarn_from_library(yarn_id: str) -> dict:
         alpha_path,
         destination_dir / "cycles_tiled",
     )
+    rgba_tiled = ensure_cycles_tiled_rgba_texture_set(
+        destination_dir / source_name,
+        destination_dir / "cycles_tiled",
+    )
 
     band_meta = _build_band_meta_from_library(metadata)
     label = metadata.get("label") or yarn_id
@@ -589,7 +641,7 @@ def import_yarn_from_library(yarn_id: str) -> dict:
         alphaFilename=_relative_asset_path(asset_id, alpha_path),
         renderDiffuseFilename=_relative_asset_path(asset_id, render_diffuse_path),
         renderAlphaFilename=_relative_asset_path(asset_id, render_alpha_path),
-        renderTextureMode="tiled" if tiled else "single",
+        renderTextureMode="rgba_tiled" if rgba_tiled else ("tiled" if tiled else "single"),
         renderDiffuseTilePattern=_relative_asset_path(asset_id, tiled.get("diffuse_pattern")) if tiled else None,
         renderDiffuseTileFilenames=[
             _relative_asset_path(asset_id, path) or ""
@@ -600,9 +652,14 @@ def import_yarn_from_library(yarn_id: str) -> dict:
             _relative_asset_path(asset_id, path) or ""
             for path in (tiled.get("alpha_paths") if tiled else [])
         ],
-        renderTileCount=int(tiled.get("tile_count")) if tiled else None,
-        renderTileWidthPx=int(tiled.get("tile_width_px")) if tiled else None,
-        renderTileHeightPx=int(tiled.get("tile_height_px")) if tiled else None,
+        renderRgbaTilePattern=_relative_asset_path(asset_id, rgba_tiled.get("rgba_pattern")) if rgba_tiled else None,
+        renderRgbaTileFilenames=[
+            _relative_asset_path(asset_id, path) or ""
+            for path in (rgba_tiled.get("rgba_paths") if rgba_tiled else [])
+        ],
+        renderTileCount=int((rgba_tiled or tiled).get("tile_count")) if (rgba_tiled or tiled) else None,
+        renderTileWidthPx=int((rgba_tiled or tiled).get("tile_width_px")) if (rgba_tiled or tiled) else None,
+        renderTileHeightPx=int((rgba_tiled or tiled).get("tile_height_px")) if (rgba_tiled or tiled) else None,
         bandMeta=band_meta,
         createdAt=_utc_now(),
         updatedAt=_utc_now(),

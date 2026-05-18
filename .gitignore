@@ -18,8 +18,13 @@ backend/vendor/yarn_pipeline/big-lama.pt
 
 *.blend1
 *.pre-*.blend
+*.failed-*.blend
 
 runtime/debug/
+runtime/dev_logs/
+runtime/*.png
+runtime/*.jpg
+runtime/*.jpeg
 runtime/yarn_assets/*
 !runtime/yarn_assets/.gitkeep
 runtime/render_jobs/*

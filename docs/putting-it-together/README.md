@@ -41,7 +41,7 @@ Read in this order:
 
 ---
 
-## Current status (2026-05-15)
+## Current status (2026-05-19)
 
 All planned phases are shipping. See [phase_log.md](phase_log.md) for the full history.
 
@@ -53,13 +53,15 @@ All planned phases are shipping. See [phase_log.md](phase_log.md) for the full h
 - **Phase 3e — Arc 2 internal link rewire**: ✓ done. Four Map Range link swaps inside `Parametric Weave knotty` so the halo region actually renders.
 - **Phase 3f — modifier panel reorganization + dead-socket removal**: ✓ done. 5 legacy global V-band sockets removed; Materials 1-16 picks consolidated in `Material Slots` panel; V-band controls grouped in `V-Band Mapping` panel.
 - **Phase 3g — pin Sub Strand Enable + `BLENDER_LIVE_RENDER` dev mode**: ✓ done. Arc 2 halo now active on the rendered yarn by default; `make backend-dev-live` routes render jobs to the open Blender session via MCP.
+- **Phase 5 — uniform-aspect U + per-strand spool + curve-normal symmetry** (2026-05-16): ✓ done. Texture is no longer squished — per-yarn `Material N Texture Scale U` is auto-derived from the visible padded V span, and the new `U Stride Per Warp End / Weft Pick` sockets spool one continuous yarn across strands (strand `N+1` starts where strand `N` ended). The Phase 4d/4i fit-calibration chain retired; `UV Random U` default flipped to `0.0` since stride provides natural variation. Cross-axis V-padding asymmetry fixed by inserting `Set Curve Normal (Z Up)` on both warp and weft branches. See [../BlenderFixes/phase_log.md](../BlenderFixes/phase_log.md) Phase 5 for the .blend changes and [phase_log.md](phase_log.md) Phase 5 for the backend changes.
+- **Phase 10u / Checkpoint 2026-05-19 — approved Blender/material baseline**: ✓ done. The current checkpoint is [../CHECKPOINT_2026-05-19.md](../CHECKPOINT_2026-05-19.md): `Spacing = 0.026`, `Arc 1 V Padding = 0.008`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`, and `AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0`.
 - **Publish prep**: ✓ done. Local debug/backups ignored, raw `big-lama.pt` can be supplied by `BIG_LAMA_MODEL_PATH` / `LAMA_MODEL`, GitHub's current LFS-disabled state is documented, and [../FINAL_HANDOFF.md](../FINAL_HANDOFF.md) summarizes the final application.
 
 For the in-depth Blender side (node-group structure, socket-rename history, Arc 1 / Arc 2 details, live-render dev mode), see [../BlenderFixes/](../BlenderFixes/).
 
 ## What's remaining
 
-- **Arc 2 visual mapping is in live geometry-split review**: Phase 3q now computes the split from Arc 1/Arc 2 profile radii (`0.015 / 0.025 -> 0.6`, splits `0.2 / 0.8`) and stores evaluated debug attributes. Needs viewport approval. See [../BlenderFixes/README.md](../BlenderFixes/README.md).
+- **Protect the approved 2026-05-19 checkpoint**: any new Arc 2, padding, or U-scale experiment should start from a `.blend` backup and explicitly state whether it supersedes [../CHECKPOINT_2026-05-19.md](../CHECKPOINT_2026-05-19.md) or remains a branch.
 - **`Texture World Width BU` socket** still doesn't exist on the .blend. Producer publishes the value already; consumer uses legacy `Image Width Px ÷ Scanner Pixels Per BU` divide.
 - **Live-render UI toggle** — currently a backend env var, no frontend control.
 - **Internal switch-chain node names** still say "Core" / "Fiber" (interface was renamed in Phase 3d, internals weren't). Cosmetic.
@@ -95,7 +97,7 @@ For live Blender setup, open `Codex_ParametricWeave.blend` in Blender and start 
 | Step 1 library section is empty | Backend log: is `YARN_LIBRARY_ROOT` resolving correctly? `curl /api/yarn/library` directly | [architecture.md](architecture.md) → "Ports" |
 | `image_size_px` doesn't match the actual `rgba.png` | The producer skipped the file open. [web/yarn_library.py:save_to_library](../../../web/yarn_library.py) | [lessons.md](lessons.md) → Rule 1 |
 | Render uses wrong texture scale | `metadata.blender.image_width_px`, `scanner_pixels_per_bu`, and `Material N Texture Scale U` vs the socket values Blender received. | [data_contract.md](data_contract.md) → socket map |
-| Fiber bands look misaligned (Arc 2 strands) | Someone set `Sub Texture Scale V ≠ 0` in the .blend | [lessons.md](lessons.md) → Rule 3 |
+| Fiber bands look misaligned (Arc 2 strands) | Check the pinned footgun values, especially `Texture Offset V = 0`, `Sub Texture Scale V = 1`, and `Sub Texture Offset V = 0` | [lessons.md](lessons.md) → Rule 3 |
 | Backend can't reach Blender | `BLENDER_PORT=9876` vs your MCP addon's listening port | [architecture.md](architecture.md) → "Ports" |
 | Import works but `renderDiffuseUrl` is `cycles_safe/..._max16384.png` | Normal: the source exceeded 16384 px and got auto-downscaled for Cycles | [lessons.md](lessons.md) → Open items, `CYCLES_MAX_TEXTURE_DIM` |
 
