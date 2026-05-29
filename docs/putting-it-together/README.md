@@ -53,6 +53,7 @@ All planned phases are shipping. See [phase_log.md](phase_log.md) for the full h
 - **Phase 3e — Arc 2 internal link rewire**: ✓ done. Four Map Range link swaps inside `Parametric Weave knotty` so the halo region actually renders.
 - **Phase 3f — modifier panel reorganization + dead-socket removal**: ✓ done. 5 legacy global V-band sockets removed; Materials 1-16 picks consolidated in `Material Slots` panel; V-band controls grouped in `V-Band Mapping` panel.
 - **Phase 3g — pin Sub Strand Enable + `BLENDER_LIVE_RENDER` dev mode**: ✓ done. Arc 2 halo now active on the rendered yarn by default; `make backend-dev-live` routes render jobs to the open Blender session via MCP.
+- **Manual Step 3 live setup push**: ✓ done. The Render Preview step has a `Send to Live Blender` button that posts the current draft + color bindings to `/api/blender/push-project-bandmeta`, updates the open MCP Blender scene, and does not start a render.
 - **Phase 5 — uniform-aspect U + per-strand spool + curve-normal symmetry** (2026-05-16): ✓ done. Texture is no longer squished — per-yarn `Material N Texture Scale U` is auto-derived from the visible padded V span, and the new `U Stride Per Warp End / Weft Pick` sockets spool one continuous yarn across strands (strand `N+1` starts where strand `N` ended). The Phase 4d/4i fit-calibration chain retired; `UV Random U` default flipped to `0.0` since stride provides natural variation. Cross-axis V-padding asymmetry fixed by inserting `Set Curve Normal (Z Up)` on both warp and weft branches. See [../BlenderFixes/phase_log.md](../BlenderFixes/phase_log.md) Phase 5 for the .blend changes and [phase_log.md](phase_log.md) Phase 5 for the backend changes.
 - **Phase 10u / Checkpoint 2026-05-19 — approved Blender/material baseline**: ✓ done. The current checkpoint is [../CHECKPOINT_2026-05-19.md](../CHECKPOINT_2026-05-19.md): `Spacing = 0.026`, `Arc 1 V Padding = 0.008`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`, and `AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0`.
 - **Publish prep**: ✓ done. Local debug/backups ignored, raw `big-lama.pt` can be supplied by `BIG_LAMA_MODEL_PATH` / `LAMA_MODEL`, GitHub's current LFS-disabled state is documented, and [../FINAL_HANDOFF.md](../FINAL_HANDOFF.md) summarizes the final application.
@@ -88,7 +89,7 @@ make backend-dev-live       # sets BLENDER_LIVE_RENDER=1 and BLENDER_PORT=9876
 
 Then open **http://localhost:5180/**. Step 1 can process yarns directly, save them into `../yarn_library/`, and auto-import them into the project.
 
-For live Blender setup, open `Codex_ParametricWeave.blend` in Blender and start the `BlenderMCPAddon` socket on port 9876.
+For live Blender setup, open `Codex_ParametricWeave.blend` in Blender and start the `BlenderMCPAddon` socket on port 9876. In Step 3, `Send to Live Blender` pushes the current draft and yarn bindings into that open scene without launching a render job.
 
 ## Where things break — first look
 

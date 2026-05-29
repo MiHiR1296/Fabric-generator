@@ -1,6 +1,16 @@
-# Current band pipeline (2026-05-16)
+# Current band pipeline (updated 2026-05-29)
 
-Two independent passes, two different algorithms.
+This document started as the 2026-05-16 two-pass band map. The assembled export
+still uses post-inpaint/assembled-alpha detection for saved metadata, but the
+per-thread red review bands were repaired on 2026-05-29:
+
+- sub-degree thread rotations are now always corrected before alpha/bands;
+- per-thread `c_band` and `d_band` now use connected thick-core detection in
+  `thread_segmentation.detect_band_quality`;
+- disconnected haze/background rows no longer own the per-thread core bracket;
+- raw FWHM output remains available as `band_quality.raw_fwhm_core`.
+
+Full log: [../YarnScanProcessing/phase_log.md](../YarnScanProcessing/phase_log.md).
 
 ## Pass 1 — pre-inpaint per-thread (Stage 2)
 
@@ -9,25 +19,22 @@ Two independent passes, two different algorithms.
 
 For each detected thread strip `i`:
 
-1. `dual_alpha_pipeline` produces `thread_{i}_alpha.png` (uint8 L mask).
-2. `binary_closing` with a `1 × 100` horizontal structure fills hair-gap
-   dropouts so the per-row coverage doesn't fragment ([yarnseamless_routes.py:636-640](../../backend/app/yarnseamless_routes.py#L636-L640)).
-3. **Core band**: two parallel detectors in
-   [backend/app/yarnseamless/multithread_flow/solid_band.py](../../backend/app/yarnseamless/multithread_flow/solid_band.py):
-   - **Approach C** (`approach_c_longest_run`) — per-row longest True run.
-     Row qualifies if longest run / image-width > `COVERAGE_THRESHOLD = 0.85`.
-     Returns the longest contiguous run of qualifying rows.
-   - **Approach D** (`approach_d_combined_smoothed`) — weighted sum
-     `0.2·mean + 0.2·max + 0.3·coverage + 0.3·run_frac`, smoothed by a
-     5-tap moving average, threshold `SCORE_THRESHOLD = 0.85`.
-   - A and B (coverage fraction, morphological opening) are computed in
-     `solid_band.py` as CLI exploration approaches but **not** called by the
-     web route.
-4. **Fiber extents**: `compute_fiber_extents_y` walks the raw (un-closed)
-   `alpha_arr` outward from the C-band core. A row qualifies as "in strand"
-   when its visible-pixel count is ≥ `max(3, 0.05 × peak_visible_count)`.
-   Same walker is used twice — once seeded from C, once from D.
-5. Visualisations: `thread_{i}_c_visualization.png` (1-px red lines for core)
+1. `alpha_pipeline.preprocess` rotates the raw strip to horizontal and levels
+   every measured nonzero tilt, including sub-degree angles.
+2. `dual_alpha_pipeline` produces `thread_{i}_alpha.png` (uint8 L mask).
+3. `thread_segmentation.segment_thread_alpha` gates noisy alpha through cleaned
+   foreground support and connected visible yarn components.
+4. `thread_segmentation.detect_band_quality` computes the per-thread core band
+   using `connected_core_peak_band_v1`:
+   - seed from high-alpha connected yarn body;
+   - keep visible alpha connected to that body;
+   - score rows by longest connected high-alpha run, high-alpha count, and mean
+     connected alpha;
+   - pick the peak-relative row run around the strongest core row.
+5. `c_band` and `d_band` are intentionally the same connected-core result in
+   the current route; the old raw FWHM core is recorded as diagnostic metadata.
+6. Fiber extents walk connected visible alpha outward from the connected core.
+7. Visualisations: `thread_{i}_c_visualization.png` (1-px red lines for core)
    and `thread_{i}_d_visualization.png`.
 
 **Per-thread output schema** (one entry per thread in `summary.json`):

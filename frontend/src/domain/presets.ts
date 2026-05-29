@@ -1,7 +1,74 @@
-import { normalizeDraft } from './draft';
-import type { PresetDefinition } from './types';
+import { normalizeDraft } from './draft.ts';
+import type { PresetDefinition } from './types.ts';
+
+function repeatColor(color: string, count: number) {
+  return Array.from({ length: count }, () => color);
+}
+
+function plainThreading(length: number) {
+  return Array.from({ length }, (_, index) => (index % 4) + 1);
+}
+
+function plainTreadling(length: number) {
+  return Array.from({ length }, (_, index) => (index % 2) + 1);
+}
+
+const plainTieUp = [
+  [true, false, true, false],
+  [false, true, false, true],
+  [true, false, true, false],
+  [false, true, false, true],
+];
+
+const chequesStripeRepeat = [
+  ...repeatColor('#202625', 10),
+  ...repeatColor('#4f5756', 7),
+  ...repeatColor('#9da7a4', 3),
+  ...repeatColor('#d9dedb', 2),
+  ...repeatColor('#151918', 1),
+  ...repeatColor('#d9dedb', 2),
+  ...repeatColor('#7a8380', 2),
+  ...repeatColor('#d9dedb', 4),
+  ...repeatColor('#151918', 1),
+  ...repeatColor('#d9dedb', 3),
+  ...repeatColor('#aeb7b4', 4),
+  ...repeatColor('#d9dedb', 14),
+  ...repeatColor('#151918', 1),
+  ...repeatColor('#d9dedb', 3),
+  ...repeatColor('#aeb7b4', 2),
+  ...repeatColor('#4f5756', 8),
+  ...repeatColor('#202625', 11),
+  ...repeatColor('#4f5756', 8),
+  ...repeatColor('#9da7a4', 4),
+  ...repeatColor('#d9dedb', 3),
+  ...repeatColor('#151918', 1),
+  ...repeatColor('#d9dedb', 2),
+];
 
 export const presets: PresetDefinition[] = [
+  {
+    id: 'testingv1-cheques',
+    label: 'Testing V1 Cheques',
+    summary: 'Plain-weave plaid reconstructed from the testingv1_cheques fabric scan, with broad dark/white checks and narrow pinstripes.',
+    weaveType: 'plain',
+    document: normalizeDraft({
+      version: 1,
+      sourceType: 'image',
+      shaftCount: 4,
+      treadleCount: 4,
+      threading: plainThreading(chequesStripeRepeat.length),
+      tieUp: plainTieUp,
+      treadling: plainTreadling(chequesStripeRepeat.length),
+      warpColors: chequesStripeRepeat,
+      weftColors: chequesStripeRepeat,
+      parseConfidence: 0.86,
+      warnings: [
+        'Reconstructed from fabric_scan20260527_13591460.png as a colour-order plaid on plain weave.',
+      ],
+      title: 'Testing V1 Cheques',
+      sourceLabel: 'thread_epson_scans/testingv1_cheques',
+    }),
+  },
   {
     id: 'plain',
     label: 'Plain Weave',

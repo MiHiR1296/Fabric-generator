@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import RenderPanel from './RenderPanel';
 import { deriveColorBindingSlots, missingColorBindings } from '../domain/project';
-import type { BlenderRenderJob, ColorBinding, DraftDocument, YarnAsset } from '../domain/types';
+import type { BlenderRenderJob, ColorBinding, DraftDocument, TileRenderOptions, YarnAsset } from '../domain/types';
 
 interface ColorMappingStepProps {
   draft: DraftDocument;
@@ -11,8 +11,15 @@ interface ColorMappingStepProps {
   setColorBindings: Dispatch<SetStateAction<ColorBinding[]>>;
   renderJob: BlenderRenderJob | null;
   renderBusy: boolean;
+  liveBlenderBusy?: boolean;
+  tileJob?: BlenderRenderJob | null;
+  tileBusy?: boolean;
+  activePreviewMode?: 'render' | 'tile';
   renderMessage: string;
+  tileMessage?: string;
   onRenderPreview: () => void;
+  onSendToLiveBlender?: () => void;
+  onRenderTiles?: (options: TileRenderOptions) => void;
   onExportCanonical: () => void;
   onExportBlender: () => void;
   onApplyRenderSettings: (settings: {
@@ -34,8 +41,15 @@ export default function ColorMappingStep({
   setColorBindings,
   renderJob,
   renderBusy,
+  liveBlenderBusy,
+  tileJob,
+  tileBusy,
+  activePreviewMode,
   renderMessage,
+  tileMessage,
   onRenderPreview,
+  onSendToLiveBlender,
+  onRenderTiles,
   onExportCanonical,
   onExportBlender,
   onApplyRenderSettings,
@@ -144,7 +158,13 @@ export default function ColorMappingStep({
           importMessage=""
           renderJob={renderJob}
           renderBusy={renderBusy}
+          liveBlenderBusy={liveBlenderBusy}
+          tileJob={tileJob}
+          tileBusy={tileBusy}
+          activePreviewMode={activePreviewMode}
           onRenderPreview={onRenderPreview}
+          onSendToLiveBlender={onSendToLiveBlender}
+          onRenderTiles={onRenderTiles}
           onExportCanonical={onExportCanonical}
           onExportBlender={onExportBlender}
           onApplyRenderSettings={onApplyRenderSettings}
@@ -152,6 +172,7 @@ export default function ColorMappingStep({
           title="Render Preview"
           summaryText="Render the woven draft in Blender and compare against the drawdown."
           statusMessage={renderMessage}
+          tileStatusMessage={tileMessage}
           renderDisabled={!readyAssets.length || missingBindingsList.length > 0}
         />
       ) : null}

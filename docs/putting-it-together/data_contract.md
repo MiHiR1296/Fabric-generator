@@ -133,11 +133,11 @@ The graph stores these evaluated debug attributes on the output mesh:
 | `arc2_core_split_min` | `0.2` in the current Phase 10t saved inspection state | Canonical Top/Core boundary used by Arc 2 V mapping and the custom Arc 2 profile |
 | `arc2_core_split_max` | `0.8` in the current Phase 10t saved inspection state | Canonical Core/Bot boundary used by Arc 2 V mapping and the custom Arc 2 profile |
 
-The old Phase 3m centered texture-span nodes still exist as visual leftovers, but they no longer drive `PW Band - Split Minus/Plus`. Phase 10t keeps `PW Band - Split Minus/Plus` on the geometry-owned vertex split (`0.2 / 0.8`), routes `PW Band - Diff.Value` through `PW MatchScale - Switch Arc2 V.Output`, and keeps `Arc 2 Match Arc 1 V Rate = False`. Arc 2 therefore uses the Top/Core/Bot path, but the top/bottom outer V values are extrapolated from the raw Arc 1 core seam at the core V rate instead of being endpoint-fit to `Arc 2 V Min/Max`.
+The old Phase 3m centered texture-span leftovers were removed in the 2026-05-27 graph cleanup. Phase 10t keeps `PW Band - Split Minus/Plus` on the geometry-owned vertex split (`0.2 / 0.8`), routes `PW Band - Diff.Value` through `PW MatchScale - Switch Arc2 V.Output`, and keeps `Arc 2 Match Arc 1 V Rate = False`. Arc 2 therefore uses the Top/Core/Bot path, but the top/bottom outer V values are extrapolated from the raw Arc 1 core seam at the core V rate instead of being endpoint-fit to `Arc 2 V Min/Max`.
 
 Globals after Phase 3f cleanup: only `Scanner Pixels Per BU` survives. The five legacy `Image Width Px` / `Image Arc 1 V Min/Max` / `Image Arc 2 V Min/Max` sockets were removed from the .blend on 2026-05-14 once an audit confirmed no Group Input was consuming them — the per-Material V-band sockets are the only path the graph uses now. Producer code ([blender_live.py:GLOBAL_SOCKETS](../../backend/app/blender_live.py)) shrunk to one entry to match.
 
-Pinned, **not** pushed per yarn — these six form the live bandMeta "footgun" set: `Sub Strand Enable = True`, `Texture Scale V = 1`, `Texture Offset V = 0`, `Texture Side Flatten = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`. Producer asserts them on every bandMeta push via `PINNED_FOOTGUN_SOCKETS`. **`Sub Strand Enable` is the critical one** — without it, Arc 2's halo mapping doesn't fire and the rendered yarn loses its silhouette character. `Texture Offset V` is neutral again in the 2026-05-19 checkpoint; the previous non-zero offset was part of a checker/material phase-alignment experiment. Root `Texture Scale U` is no longer in this pinned set; render/setup sync keeps it neutral for scan-driven yarns. See [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md) Rules 3, 11, 14, 34, 35, 36, and 37.
+Pinned, **not** pushed per yarn — these five form the live bandMeta "footgun" set: `Sub Strand Enable = True`, `Texture Scale V = 1`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`. Producer asserts them on every bandMeta push via `PINNED_FOOTGUN_SOCKETS`. **`Sub Strand Enable` is the critical one** — without it, Arc 2's halo mapping doesn't fire and the rendered yarn loses its silhouette character. `Texture Offset V` is neutral again in the 2026-05-19 checkpoint; the previous non-zero offset was part of a checker/material phase-alignment experiment. Root `Texture Scale U` is no longer in this pinned set; render/setup sync keeps it neutral for scan-driven yarns. See [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md) Rules 3, 11, 14, 34, 35, 36, and 37.
 
 ### Per-strand U stride sockets (Phase 5, 2026-05-16)
 
@@ -264,14 +264,13 @@ Per-project, set in the wizard's Step 3 Render Preview controls. Producer-side n
 
 ### 4. Pinned footgun defaults
 
-Asserted by the producer ([blender_live.py:PINNED_FOOTGUN_SOCKETS](../../backend/app/blender_live.py)) on every bandMeta push. The set contains one halo gate plus five V-related controls. In the 2026-05-19 checkpoint, the approved values are neutral V offset, sub texture scale `1`, and sub texture offset `0`. Leave the set at the pinned values unless you are intentionally changing the view-projection/material-phase contract. See [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md) Rules 11, 12, 34, 35, 36, and 37.
+Asserted by the producer ([blender_live.py:PINNED_FOOTGUN_SOCKETS](../../backend/app/blender_live.py)) on every bandMeta push. The set contains one halo gate plus four V-related controls. In the 2026-05-19 checkpoint, the approved values are neutral V offset, sub texture scale `1`, and sub texture offset `0`. Leave the set at the pinned values unless you are intentionally changing the view-projection/material-phase contract. See [../BlenderFixes/lessons.md](../BlenderFixes/lessons.md) Rules 11, 12, 34, 35, 36, and 37.
 
 | Blender socket | Pinned value | What happens if it drifts |
 |---|---|---|
 | `Sub Strand Enable` | `True` *(critical)* | `False` → main-strand geometry only → `is_sub_strand=0` everywhere → `PW Band - Band V` falls back to `Arc1 Map` only → halo never renders. Phase 3g's central fix was pinning this on. |
 | `Texture Scale V` | `1.0` | Drift multiplies the V output, misaligning the entire Arc 1/2 band partition vs the actual yarn V positions in the texture. |
 | `Texture Offset V` | `0` | Neutral V phase for the approved direct-material checkpoint. The old `0.031914920` value was a checker/material phase-alignment experiment. |
-| `Texture Side Flatten` | `0.0` | Drift mixes a cylindrical-projection contribution into the V output. May look good for some yarns; off by default to keep the mapping linear in cross-section. |
 | `Sub Texture Scale V` | `1.0` | Approved checkpoint value for the sub-strand V scale socket. Keep it pinned with `Sub Texture Offset V = 0` unless the Blender graph contract changes. |
 | `Sub Texture Offset V` | `0.0` | Same idea on the offset axis. |
 
@@ -286,8 +285,8 @@ Pushed each render from the [DraftDocument](../../frontend/src/domain/types.ts) 
 | `draft.treadling.length` | `Draft Rows` | Cell count along V | |
 | `renderSettings.warpThreads` | `Warp Threads` | Warp strand count along the swatch | Web UI zoom presets: `80`, `120`, `160`, `200`; frontend floors to `draft.threading.length` when needed |
 | `renderSettings.weftThreads` | `Weft Threads` | Weft strand count along the swatch | Same zoom preset as warp; frontend floors to `draft.treadling.length` when needed |
-| `colorBindings.warp[i].yarnAssetId` *(via cycle compression)* | `Warp Length 1..4` + `Warp Material 1..4` + `Warp Offset` | 4-step warp-material cycle. Backend compresses the binding sequence into run-length pairs `(length, 1-indexed material id)` and pads to 4 entries with `(0, 1)`. | See `compress_runs` in the live-sync helper. |
-| `colorBindings.weft[i].yarnAssetId` *(via cycle compression)* | `Weft Length 1..4` + `Weft Material 1..4` + `Weft Offset` | 4-step weft-material cycle. | |
+| `colorBindings.warp[i].yarnAssetId` | `WebDraft_Live.warp_material_id` attribute | Per-cell warp material selection. | Legacy `Warp Material Cycle` sockets were removed in the 2026-05-27 graph cleanup. |
+| `colorBindings.weft[i].yarnAssetId` | `WebDraft_Live.weft_material_id` attribute | Per-cell weft material selection. | Legacy `Weft Material Cycle` sockets were removed in the 2026-05-27 graph cleanup. |
 | ordered asset list | `Material 1..16` (NodeSocketMaterial inputs in `Material Slots` panel) | Per-slot material picks. Slot index = ordered position of the yarn asset in the project bindings (first-seen first). | Material 1 also link-drives `Set Material.Material` inside the graph; Materials 2-16 feed `PW Set Material 2..16.Material` through `PW Input - Material Slots` Group Input. |
 
 ### 6. Quick alphabetical index — every modifier socket the producer touches
@@ -301,30 +300,24 @@ Helpful when you're staring at the modifier panel trying to figure out where a v
 | Draft Object | (root) | live `WebDraft_Live` mesh | NodeSocketObject |
 | Draft Rows | (root) | `draft.treadling.length` | int |
 | Geometry | (root) | (modifier input from object base mesh) | n/a |
-| Main Strand Radius | (root) | (none — artist default) | float, 0.025 BU |
 | Material 1..16 | Material Slots | ordered asset list | NodeSocketMaterial |
-| Over Count / Under Count | Pattern | (none — artist default) | int |
 | Pattern Noise X | Imperfections | `renderSettings.patternNoiseX` | 0..0.03 (after remap) |
 | Pattern Noise Y | Imperfections | `renderSettings.patternNoiseY` | 0..0.03 (after remap) |
 | Scanner Pixels Per BU | (root) | `bandMeta.blender.scanner_pixels_per_bu` (first asset) | float, ~62992 at 1600 dpi |
 | Seed | General | (none — artist default) | int |
 | Spacing | Pattern | `renderSettings.spacing` | 0.026..0.10 (after remap) |
 | Sub Strand Enable | Sub Strand | **pinned True** | bool |
-| Sub Strand Height / Width | Sub Strand | (artist default) | float |
 | Sub Texture Offset V | Sub Strand | **pinned 0** | float |
 | Sub Texture Scale V | Sub Strand | **pinned 1** | float |
 | Texture Offset V | Texture | **pinned 0** | float |
 | Texture Scale U | (root) | **Pinned `1.0` after Phase 5.** Per-yarn scale lives on `Material N Texture Scale U`; per-strand spool offset lives on `U Stride Per Warp End/Weft Pick`. The Phase 4i fit-math + Phase 4d calibration retired. | float |
 | Texture Scale V | Texture | **pinned 1** | float |
-| Texture Side Flatten | Texture | **pinned 0** | float |
 | Thread Subdivisions | Surface | (artist default) | float |
 | U Stride Per Warp End | Imperfections | derived: `(weft_threads × spacing) / texture_world_width_BU × resolved_material_scale_u` (Phase 10h/10u) | float, ~0.139 typical at checkpoint padding `0.008` and spacing `0.026` |
 | U Stride Per Weft Pick | Imperfections | derived: `(warp_threads × spacing) / texture_world_width_BU × resolved_material_scale_u` (Phase 10h/10u) | float, ~0.139 typical at checkpoint padding `0.008` and spacing `0.026` |
 | UV Random U | Imperfections | `renderSettings.uvRandomU` (default `0.0` since Phase 5; stride provides natural variation) | 0..20 |
 | UV Random V | Imperfections | **forced 0** | float |
-| Warp Length 1..4 / Warp Material 1..4 / Warp Offset | Warp Material Cycle | compressed `colorBindings` (warp scope) | int |
 | Warp Threads | Pattern | `renderSettings.warpThreads` from the Web UI zoom preset | int |
-| Weft Length 1..4 / Weft Material 1..4 / Weft Offset | Weft Material Cycle | compressed `colorBindings` (weft scope) | int |
 | Weft Threads | Pattern | `renderSettings.weftThreads` from the same zoom preset | int |
 | Wobble Amount / Wobble Scale | Imperfections | (artist default) | float |
 | Loose Strand Density / Length / Thickness / Frizz | Loose Strands | (artist default) | float |
@@ -407,7 +400,7 @@ Given the latest web-UI project (id `23bde041afd6`, 2/2 Twill 8×8, both warp+we
    - `Scanner Pixels Per BU = 62992.16`
    - `U Stride Per Warp End ≈ 0.139`, `U Stride Per Weft Pick ≈ 0.139` (Phase 10u spool at checkpoint padding and spacing `0.026`: strand `N+1` starts at U = `(N+1) × resolved_scale`)
    - `Sub Strand Enable = True` (footgun)
-   - `Texture Scale V = 1.0`, `Texture Offset V = 0`, `Texture Side Flatten = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0` (checkpoint footgun pins)
+   - `Texture Scale V = 1.0`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0` (checkpoint footgun pins)
 5. **Render settings push** from the project's `draft.renderSettings = {spacing:0, patternNoiseX:0, patternNoiseY:0, uvRandomU:0}` (Phase 5 default for `uvRandomU` is now `0`):
    - `Spacing = 0.026` (remap of 0 → 0.026)
    - `Pattern Noise X = 0.0`

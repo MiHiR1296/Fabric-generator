@@ -57,6 +57,7 @@ If a change here looks tempting, write it up as a separate follow-up — not par
 | 3b — filters wired (book / weave type / shafts / tags / search) | ✓ done (2026-05-19) |
 | 3c — drawer scroll fix: `position: fixed` + sticky header/search + scrollable `__body` (studio shell is `overflow: hidden`, the drawer must own its own scroll) | ✓ done (2026-05-19) |
 | 3d — generated pattern library: ~370 family reconstructions across 10 books (twills, herringbones, broken twills, satins, baskets, ribs, color-and-weave, huck) | ✓ done (2026-05-19) |
+| 3e — `testingv1_cheques` scan reconstruction + Pattern Builder `Save Pattern` action | ✓ done (2026-05-27) |
 | 4 — layout normalization to v2 toolbar-on-top (optional, last) | deferred |
 | 5 — retire `ExploreLibrary.tsx` once the picker proves out | pending |
 | 6 — literal page transcription / WIF ingest for any single book (out of scope for the current pass; would need OCR or an existing digitized dataset) | not started |
@@ -70,16 +71,20 @@ If a change here looks tempting, write it up as a separate follow-up — not par
 - **2026-05-19** — Drawdown thumbnails are generated client-side via canvas (`PatternPickerPanel.tsx → drawdownToDataUrl`). Memoised per pattern id in a useRef-backed cache so the canvas only runs once per entry per panel open.
 - **2026-05-19** — `inferWeaveTypeFromTags` runs as a fallback for entries that don't yet have `weaveType`. Entries with neither field land in the "Untyped" weave-type bucket — keep them browseable instead of hiding them.
 - **2026-05-19** — Bulk pattern data is generated programmatically rather than transcribed from book scans. The advertised draftCounts on the catalog books range from 128 (Thaller) to 7,000 (Ashenhurst), totaling ~21,000 entries across the shelf. Literal transcription requires OCR or an existing digitized dataset; neither is in scope. Instead, [generatedPatterns.ts](../../frontend/src/domain/generatedPatterns.ts) emits family-taxonomy reconstructions (twills, herringbones, broken twills, satins, baskets, ribs, color-and-weave, huck) and distributes them per book based on the book's published emphasis. Every entry is honestly tagged `'generated'` with a note that it is a structural reconstruction, not a literal page transcription.
+- **2026-05-27** — `thread_epson_scans/testingv1_cheques/fabric_scan20260527_13591460.png` is represented as a plain-weave plaid preset, not as a new weave structure. The image's visual pattern is driven by warp/weft colour order: broad dark and light cheque bands plus narrow pinstripes. The preset uses the same stripe repeat on warp and weft so it appears in Quick Load and in the Pattern Library's starter book.
+- **2026-05-27** — `Save Pattern` writes the current normalized draft into the localStorage-backed `Saved Pattern Drafts` book. This keeps saved patterns inside the existing Explore/Load picker instead of creating a second save surface.
 
 ## Files touched
 
 - [frontend/src/domain/types.ts](../../frontend/src/domain/types.ts) — added `WeaveType` type alias and optional `previewImage` + `weaveType` on `PresetDefinition` and `BookPatternEntry`.
-- [frontend/src/domain/presets.ts](../../frontend/src/domain/presets.ts) — backfilled `weaveType` on all five starter presets.
+- [frontend/src/domain/presets.ts](../../frontend/src/domain/presets.ts) — backfilled `weaveType` on all five starter presets. Later added `Testing V1 Cheques`, reconstructed from the scan as a plain-weave plaid colour-order draft.
+- [frontend/src/domain/bookLibrary.ts](../../frontend/src/domain/bookLibrary.ts) — localStorage helpers for imported books; now also owns `saveDraftAsLocalPattern`, the `Saved Pattern Drafts` book, and a `pattern-library-updated` event so an open picker refreshes after a save.
 - [frontend/src/domain/oelsnerPatterns.ts](../../frontend/src/domain/oelsnerPatterns.ts) — backfilled `weaveType` on all seven Oelsner starter reconstructions.
 - [frontend/src/domain/generatedPatterns.ts](../../frontend/src/domain/generatedPatterns.ts) — new module. Deterministic weave-family generators (`generateTwills`, `generateHerringbones`, `generateBrokenTwills`, `generateSatins`, `generateBaskets`, `generateRibs`, `generateColorAndWeave`, `generateHuck`) and a per-book recipe table. Exports `generatedBookPatterns: Map<bookId, BookPatternEntry[]>` computed once at module load.
 - [frontend/src/domain/exploreCatalog.ts](../../frontend/src/domain/exploreCatalog.ts) — every book's `patterns: []` replaced with `bookPatterns(bookId, curated)`. Curated entries (currently only Oelsner) sit first, generated entries follow. Notes updated on each book to disclaim generated vs. transcribed.
-- [frontend/src/components/PatternPickerPanel.tsx](../../frontend/src/components/PatternPickerPanel.tsx) — new component. Sticky header + search above scrollable `__body` (filters + cards). Filter rail: Books, Weave type, Shafts, Tags, Loadable-only toggle. Pattern cards with canvas-generated drawdown thumbnails. Import book JSON path retained.
-- [frontend/src/components/PatternBuilderStep.tsx](../../frontend/src/components/PatternBuilderStep.tsx) — removed the `showExplore` takeover branch and `ExploreLibrary` import. Renamed state to `showPicker`. Mounts `PatternPickerPanel` as a sibling of `studio-editor`. `ExploreLibrary.tsx` is left on disk for the moment — wired off, not deleted, until phase 5.
+- [frontend/src/components/PatternPickerPanel.tsx](../../frontend/src/components/PatternPickerPanel.tsx) — new component. Sticky header + search above scrollable `__body` (filters + cards). Filter rail: Books, Weave type, Shafts, Tags, Loadable-only toggle. Pattern cards with canvas-generated drawdown thumbnails. Import book JSON path retained. Listens for local pattern-library updates after saves.
+- [frontend/src/components/PatternBuilderStep.tsx](../../frontend/src/components/PatternBuilderStep.tsx) — removed the `showExplore` takeover branch and `ExploreLibrary` import. Renamed state to `showPicker`. Mounts `PatternPickerPanel` as a sibling of `studio-editor`. Added `Save Pattern` handler. `ExploreLibrary.tsx` is left on disk for the moment — wired off, not deleted, until phase 5.
+- [frontend/src/components/StudioToolbar.tsx](../../frontend/src/components/StudioToolbar.tsx) — added the Pattern Builder `Save Pattern` button.
 - [frontend/src/styles/index.css](../../frontend/src/styles/index.css) — appended drawer + chip + pattern-card styles, plus `.fabric-shell` dark-theme overrides. Drawer is `position: fixed`, height `100dvh`, with `__body` as the scrollable region.
 
 ## Pattern counts per book (after phase 3d)
@@ -100,12 +105,13 @@ Generated by the deterministic recipe table at the bottom of `generatedPatterns.
 | Ashenhurst — Album of Textile Designs | 0 | 53 | 53 |
 | **Total reference shelf** | **7** | **374** | **381** |
 
-Plus 5 starter presets in the synthetic "Prototype Starter Drafts" book ⇒ **386 patterns** the picker can show.
+Plus 6 starter presets in the synthetic "Prototype Starter Drafts" book ⇒ **387 patterns** the picker can show.
 
 The advertised `draftCount` field on each book is left untouched — it still reflects the literal page count of the source book, not the current bundle. The picker's footer reads "N patterns · M books" off the actual loaded entries, so the user sees the real count.
 
 ## Verification
 
 - `npx tsc --noEmit` introduces no new errors (pre-existing errors in DraftStudio/RenderPanel/bookLibrary/tests are unchanged).
-- `npm run test:unit` — 13/13 pass after each phase.
-- `npm run build` — succeeds: CSS 64.98 kB, JS 839.20 kB (≈12 kB minified growth from the generator module; the generators run once at module load and produce small structural arrays).
+- `npm run test:unit` — 15/15 pass after Phase 3e.
+- `npm run build` — succeeds. Phase 3e build: CSS 65.76 kB, JS 846.72 kB.
+- Playwright smoke (2026-05-27): load `Testing V1 Cheques` from Quick Load, click `Save Pattern`, accept the prompt, open Explore/Load, search the saved name, and confirm the saved pattern card appears.

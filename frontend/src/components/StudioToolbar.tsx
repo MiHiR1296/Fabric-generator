@@ -11,6 +11,7 @@ interface StudioToolbarProps {
   onPresetChange: (presetId: string) => void;
   onToggleExplore: () => void;
   onCountsChange: (field: keyof DraftCounts, value: number) => void;
+  onSavePattern?: () => void;
   onImportClick: () => void;
   onReset: () => void;
   stepLabel?: string;
@@ -93,6 +94,7 @@ export default function StudioToolbar({
   onPresetChange,
   onToggleExplore,
   onCountsChange,
+  onSavePattern,
   onImportClick,
   onReset,
   stepLabel = 'Step 1',
@@ -131,8 +133,18 @@ export default function StudioToolbar({
             {exploreOpen ? 'Hide Explore / Load' : 'Explore / Load'}
           </button>
 
+          {onSavePattern ? (
+            <button
+              className="button button--accent"
+              onClick={onSavePattern}
+              data-testid="save-pattern-button"
+            >
+              Save Pattern
+            </button>
+          ) : null}
+
           <button
-            className="button button--accent"
+            className="button"
             onClick={onImportClick}
             disabled={busy}
             data-testid="import-file-button"

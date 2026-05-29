@@ -28,8 +28,10 @@ from .render_jobs import (
     build_project_material_payloads,
     get_render_image_path,
     get_render_job,
+    get_tile_source_image_path,
     load_headless_blender_config,
     submit_project_render_job,
+    submit_project_tile_render_job,
     submit_render_job,
 )
 from .yarn_assets import (
@@ -81,6 +83,13 @@ if FastAPI is not None:
         colorBindings: list[dict] = []
         target_object_name: str = "ParametricWeave"
         draft_object_name: str = "WebDraft_Live"
+
+
+    class ProjectTileRenderRequest(ProjectRenderRequest):
+        tileCount: int = 4
+        tileResolution: int = 1200
+        guardThreads: int = 0
+        variationStrength: float = 0.0
 
 
     class PushBandMetaRequest(BaseModel):
@@ -169,6 +178,28 @@ if FastAPI is not None:
                     "draft": request.draft,
                     "yarnAssets": request.yarnAssets,
                     "colorBindings": request.colorBindings,
+                },
+                target_object_name=request.target_object_name,
+                draft_object_name=request.draft_object_name,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+    @app.post("/api/blender/render-project-tiles")
+    async def render_project_tiles(request: ProjectTileRenderRequest):
+        try:
+            return submit_project_tile_render_job(
+                {
+                    "draft": request.draft,
+                    "yarnAssets": request.yarnAssets,
+                    "colorBindings": request.colorBindings,
+                },
+                tile_options={
+                    "tileCount": request.tileCount,
+                    "tileResolution": request.tileResolution,
+                    "guardThreads": request.guardThreads,
+                    "variationStrength": request.variationStrength,
                 },
                 target_object_name=request.target_object_name,
                 draft_object_name=request.draft_object_name,
@@ -266,6 +297,14 @@ if FastAPI is not None:
         if image_path is None:
             raise HTTPException(status_code=404, detail="Render image not found.")
         return FileResponse(image_path, media_type="image/png", filename=f"{job_id}.png")
+
+
+    @app.get("/api/blender/render-jobs/{job_id}/tile-sources/{source_index}")
+    async def render_job_tile_source(job_id: str, source_index: int):
+        image_path = get_tile_source_image_path(job_id, source_index)
+        if image_path is None:
+            raise HTTPException(status_code=404, detail="Tile source image not found.")
+        return FileResponse(image_path, media_type="image/png", filename=f"{job_id}_source_{source_index}.png")
 
 
     @app.post("/api/parser/parse-text")

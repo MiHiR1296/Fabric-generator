@@ -25,6 +25,7 @@ import {
   listYarnLibrary,
   pushProjectBandmeta,
   requestProjectRender,
+  requestProjectTileRender,
   retryYarnAsset,
   uploadYarnAssets,
   type LibraryYarnEntry,
@@ -32,6 +33,7 @@ import {
 } from './utils/parserApi';
 
 type WizardStep = 0 | 1 | 2 | 3;
+type PreviewMode = 'render' | 'tile';
 
 const STEPS: { title: string; eyebrow: string }[] = [
   { eyebrow: 'Step 1', title: 'Yarn Library' },
@@ -39,6 +41,15 @@ const STEPS: { title: string; eyebrow: string }[] = [
   { eyebrow: 'Step 3', title: 'Render Preview' },
   { eyebrow: 'Step 4', title: 'Try On 3D' },
 ];
+
+function buildLivePushSignature(draft: DraftDocument, colorBindings: ColorBinding[]) {
+  return JSON.stringify({
+    w: draft.warpColors,
+    f: draft.weftColors,
+    r: draft.renderSettings,
+    b: colorBindings.map((b) => [b.scope, b.colorHex, b.yarnAssetId]),
+  });
+}
 
 export default function App() {
   const [step, setStep] = useState<WizardStep>(0);
@@ -53,9 +64,16 @@ export default function App() {
   const [colorBindings, setColorBindings] = useState<ColorBinding[]>([]);
   const [renderJob, setRenderJob] = useState<BlenderRenderJob | null>(null);
   const [renderBusy, setRenderBusy] = useState(false);
+  const [liveBlenderBusy, setLiveBlenderBusy] = useState(false);
   const [renderMessage, setRenderMessage] = useState(
     'Assign each warp and weft color slot to a processed yarn asset, then start the Blender preview.',
   );
+  const [tileJob, setTileJob] = useState<BlenderRenderJob | null>(null);
+  const [tileBusy, setTileBusy] = useState(false);
+  const [tileMessage, setTileMessage] = useState(
+    'Build a seam-repaired tile texture after the preview settings feel right.',
+  );
+  const [activePreviewMode, setActivePreviewMode] = useState<PreviewMode>('render');
 
   const slots = useMemo(() => deriveColorBindingSlots(draft), [draft]);
   const readyAssets = useMemo(
@@ -208,6 +226,24 @@ export default function App() {
     return () => window.clearTimeout(timeoutId);
   }, [renderJob]);
 
+  useEffect(() => {
+    if (!tileJob || (tileJob.status !== 'queued' && tileJob.status !== 'running')) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const nextJob = await fetchDraftRenderJob(tileJob.id);
+        setTileJob(nextJob);
+        setTileMessage(nextJob.message);
+      } catch {
+        // keep the current tile state visible if polling fails transiently
+      }
+    }, 1400);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [tileJob]);
+
   // Phase 3f — live-push bandMeta to Blender whenever a complete set of
   // warp+weft yarn bindings exists. The backend's
   // /api/blender/push-project-bandmeta endpoint reuses the same slot ordering
@@ -220,12 +256,7 @@ export default function App() {
   useEffect(() => {
     if (step < 1) return undefined;          // only Pattern Builder onward
     if (!allBindingsAssigned) return undefined;
-    const signature = JSON.stringify({
-      w: draft.warpColors,
-      f: draft.weftColors,
-      r: draft.renderSettings,
-      b: colorBindings.map((b) => [b.scope, b.colorHex, b.yarnAssetId]),
-    });
+    const signature = buildLivePushSignature(draft, colorBindings);
     if (signature === lastPushedSignatureRef.current) return undefined;
     const timeoutId = window.setTimeout(() => {
       lastPushedSignatureRef.current = signature;
@@ -410,8 +441,14 @@ export default function App() {
             setColorBindings={setColorBindings}
             renderJob={renderJob}
             renderBusy={renderBusy}
+            liveBlenderBusy={liveBlenderBusy}
+            tileJob={tileJob}
+            tileBusy={tileBusy}
+            activePreviewMode={activePreviewMode}
             renderMessage={renderMessage}
+            tileMessage={tileMessage}
             onRenderPreview={async () => {
+              setActivePreviewMode('render');
               setRenderBusy(true);
               try {
                 const job = await requestProjectRender(
@@ -425,6 +462,44 @@ export default function App() {
                 );
               } finally {
                 setRenderBusy(false);
+              }
+            }}
+            onSendToLiveBlender={async () => {
+              setActivePreviewMode('render');
+              setLiveBlenderBusy(true);
+              setRenderMessage('Sending the current design draft to live Blender...');
+              try {
+                const result = await pushProjectBandmeta(normalizeDraft(draft), colorBindings);
+                lastPushedSignatureRef.current = buildLivePushSignature(draft, colorBindings);
+                const pushed = Number(result?.pushed ?? 0);
+                const materialLabel = pushed === 1 ? 'material slot' : 'material slots';
+                setRenderMessage(
+                  `Sent the current design draft to live Blender (${pushed} ${materialLabel}) on ${result?.target || 'ParametricWeave'}.`,
+                );
+              } catch (error) {
+                setRenderMessage(
+                  error instanceof Error ? error.message : 'Unable to send the design draft to live Blender.',
+                );
+              } finally {
+                setLiveBlenderBusy(false);
+              }
+            }}
+            onRenderTiles={async (options) => {
+              setActivePreviewMode('tile');
+              setTileBusy(true);
+              try {
+                const job = await requestProjectTileRender(
+                  buildFabricProject(normalizeDraft(draft), yarnAssets, colorBindings),
+                  options,
+                );
+                setTileJob(job);
+                setTileMessage(job.message);
+              } catch (error) {
+                setTileMessage(
+                  error instanceof Error ? error.message : 'Unable to start the tile texture export.',
+                );
+              } finally {
+                setTileBusy(false);
               }
             }}
             onExportCanonical={() => {

@@ -12,7 +12,8 @@ Read in this order:
 | 4 | [putting-it-together/](putting-it-together/) | How the app + Blender talk to each other. Read this first for system-level picture: architecture, data contract, full phase log, lessons. |
 | 5 | [BlenderFixes/](BlenderFixes/) | Everything that lives inside the .blend itself + the backend code that drives it. Zoom-in on `Parametric Weave knotty`: node-group structure, Arc 1 / Arc 2 V-band system, socket-rename history, live-render dev mode. |
 | 6 | [WebUIChanges/](WebUIChanges/) | Wizard / FastAPI surface changes — the three state layers (library / runtime asset / color binding), the sync points between them, and every UI-visible behavior fix logged Symptom / Diagnosis / Fix / Verification. |
-| 7 | [WebUIbands/](WebUIbands/) | Yarn band detection (core + fiber halos) — current two-pass setup, the YarnSeamless FWHM port target, and the cut-over plan to run band detection on the assembled alpha post-inpaint. |
+| 7 | [YarnScanProcessing/](YarnScanProcessing/) | 2026-05-29 yarn-scan processing log: robust thread detection, natural RGBA, background spill removal, sub-degree rotation, connected-core bands, tests, and QA metrics. |
+| 8 | [WebUIbands/](WebUIbands/) | Yarn band detection (core + fiber halos) — historical setup, FWHM post-export detector, and later connected-core refinements. |
 
 External runtime assets are shared here:
 
@@ -24,7 +25,7 @@ https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP
 
 ---
 
-## Current shipping status (2026-05-19)
+## Current shipping status (updated through 2026-05-29)
 
 | Area | Status |
 |---|---|
@@ -40,6 +41,7 @@ https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP
 | **Phase 3g** — pin Sub Strand Enable + add `BLENDER_LIVE_RENDER` dev-mode env var (render jobs route to the open Blender session over MCP) | ✓ done |
 | **Phase 10u / Checkpoint 2026-05-19** — visually approved direct web-to-Blender material baseline; `Spacing = 0.026`, `Arc 1 V Padding = 0.008`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`, and auto `Material N Texture Scale U = visible_v_span / 1.0` | ✓ done |
 | **Publish prep** — final handoff doc, debug ignores, external model env-path support, LFS-disabled fallback documented | ✓ done |
+| **Yarn scan processing repair** — segmentation-first thread detection, natural RGBA export, full-resolution RGBA UDIM tiles, red/background chroma removal from fringe, mandatory sub-degree thread rotation, connected-core red bands | ✓ done |
 
 ## What we set out to achieve
 

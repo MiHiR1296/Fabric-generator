@@ -22,7 +22,7 @@ class BlenderSocketConfig:
 def load_blender_socket_config() -> BlenderSocketConfig:
     return BlenderSocketConfig(
         host=os.environ.get("BLENDER_HOST", "127.0.0.1"),
-        port=int(os.environ.get("BLENDER_PORT", "9875")),
+        port=int(os.environ.get("BLENDER_PORT", "9876")),
         timeout_seconds=float(os.environ.get("BLENDER_TIMEOUT_SECONDS", "30")),
     )
 
@@ -545,7 +545,6 @@ if weave_mod and weave_mod.type == 'NODES' and weave_mod.node_group:
         'Texture Scale U',
         'Texture Scale V',
         'Texture Offset V',
-        'Texture Side Flatten',
         'Lump Strength',
         'Lump Scale',
         'Fiber Density',
@@ -617,7 +616,6 @@ maybe_set_modifier_input(weave_mod, weave_group, 'Texture Scale V', pick_value(t
 maybe_set_modifier_input(weave_mod, weave_group, 'Texture Offset V', 0.0)
 maybe_set_modifier_input(weave_mod, weave_group, 'Sub Texture Scale V', 1.0)
 maybe_set_modifier_input(weave_mod, weave_group, 'Sub Texture Offset V', 0.0)
-maybe_set_modifier_input(weave_mod, weave_group, 'Texture Side Flatten', preserved.get('Texture Side Flatten') if preserved.get('Texture Side Flatten') is not None else 0.7)
 maybe_set_modifier_input(weave_mod, weave_group, 'Lump Strength', preserved.get('Lump Strength') if preserved.get('Lump Strength') is not None else 0.0015)
 maybe_set_modifier_input(weave_mod, weave_group, 'Lump Scale', preserved.get('Lump Scale') if preserved.get('Lump Scale') is not None else 6.0)
 maybe_set_modifier_input(weave_mod, weave_group, 'Fiber Density', preserved.get('Fiber Density') if preserved.get('Fiber Density') is not None else 0.0)

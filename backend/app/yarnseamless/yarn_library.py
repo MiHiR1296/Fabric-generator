@@ -2,7 +2,7 @@
 Yarn library — persistent on-disk catalog of processed yarns.
 
 Each yarn = one folder under `<library_root>/<yarn_id>/` containing:
-    rgba.png         RGB = predicted foreground (assembled_F), A = alpha matte
+    rgba.png         exact stitched scan RGB + natural alpha
     input_thumb.jpg  small JPEG preview of the original scan
     metadata.json    superset of export_metadata.json + bandMeta-shaped fields
 
@@ -272,14 +272,15 @@ def save_to_library(
     if not mf_dir.is_dir():
         raise FileNotFoundError(f"multifragment session dir not found: {mf_dir}")
 
-    rgba_src = mf_dir / "export_assembled_rgba.png"
-    if not rgba_src.exists():
-        raise FileNotFoundError(
-            "export_assembled_rgba.png missing — run Assemble + Regenerate Alpha first."
-        )
-    alpha_src = mf_dir / "export_assembled_alpha.png"
-    if not alpha_src.exists():
+    rgb_src = mf_dir / "export_assembled_final.png"
+    if not rgb_src.exists():
+        raise FileNotFoundError("export_assembled_final.png missing — run Assemble first.")
+    matte_alpha_src = mf_dir / "export_assembled_alpha.png"
+    if not matte_alpha_src.exists():
         raise FileNotFoundError("export_assembled_alpha.png missing.")
+    material_alpha_src = mf_dir / "export_assembled_material_alpha.png"
+    alpha_src = material_alpha_src if material_alpha_src.exists() else matte_alpha_src
+    rgba_src = mf_dir / "export_assembled_rgba.png"
     export_meta_src = mf_dir / "export_metadata.json"
     if not export_meta_src.exists():
         raise FileNotFoundError("export_metadata.json missing — click Export once.")
@@ -289,8 +290,19 @@ def save_to_library(
     yarn_dir = root / yarn_id
     yarn_dir.mkdir(parents=True, exist_ok=False)
 
-    # 1) Copy the canonical RGBA
-    shutil.copy2(rgba_src, yarn_dir / "rgba.png")
+    # 1) Copy canonical RGBA texture. The RGB channels are the exact stitched
+    # scan colour and the alpha channel is the natural matte, with no core boost.
+    if rgba_src.exists():
+        shutil.copy2(rgba_src, yarn_dir / "rgba.png")
+    else:
+        with Image.open(rgb_src) as rgb_im, Image.open(alpha_src) as alpha_im:
+            rgb_pil = rgb_im.convert("RGB")
+            alpha_pil = alpha_im.convert("L")
+            if alpha_pil.size != rgb_pil.size:
+                ac = Image.new("L", rgb_pil.size, 0)
+                ac.paste(alpha_pil, (0, 0))
+                alpha_pil = ac
+            Image.merge("RGBA", (*rgb_pil.split(), alpha_pil)).save(yarn_dir / "rgba.png")
 
     # 2) Thumbnail from the original scan, if we can find one
     src_size = None
@@ -313,13 +325,13 @@ def save_to_library(
     export_meta = _read_json(export_meta_src)
     dpi = float(export_meta.get("dpi") or 1600.0)
 
-    with Image.open(rgba_src) as im:
+    with Image.open(rgb_src) as im:
         image_W, image_H = im.size
-    export_dpi = _read_embedded_dpi(rgba_src)
+    export_dpi = _read_embedded_dpi(rgb_src)
 
     width_meta = dict(export_meta.get("width") or {})
 
-    with Image.open(alpha_src) as alpha_im:
+    with Image.open(matte_alpha_src) as alpha_im:
         alpha_arr = np.asarray(alpha_im.convert("L"))
     bands = detect_bands(alpha_arr)
 
@@ -359,12 +371,10 @@ def save_to_library(
         export_dpi=export_dpi,
         texture_world_width_m=texture_world_width_m,
     )
-    # Phase 3g — Arc 2 V split proportions, driven by ACTUAL band heights so the
-    # texture's hair regions line up with the rendered strand silhouette. The
-    # global geometric `r = main_radius / arc2_radius` produces symmetric splits
-    # that don't match per-yarn band heights. These two fractions feed the new
-    # `Material N Top Halo Frac` / `Material N Bot Halo Frac` modifier sockets
-    # which replace `(1-r)/2` and `1 - (1+r)/2` at the Arc 2 split.
+    # Historical Arc 2 split proportions, driven by actual band heights. The
+    # active cleaned Blender graph now owns its split procedurally, so these are
+    # retained as metadata/debug provenance rather than pushed to modifier
+    # sockets.
     th = bands.get("thickness_px") or {}
     core_h = th.get("core_height")
     top_h = th.get("fiber_top_height")
@@ -404,12 +414,10 @@ def save_to_library(
         # Outer-extent provenance — kept for a future "Strand V Min/Max" socket pair.
         "fiber_bot_v_min": fiber_bot_v[0],
         "fiber_top_v_max": fiber_top_v[1],
-        # Phase 3g — per-yarn Arc 2 split fractions (sum + core_frac == 1.0).
+        # Historical per-yarn Arc 2 split fractions (sum + core_frac == 1.0).
         # `top_halo_frac` = upper-hair height / total strand height,
         # `bot_halo_frac` = lower-hair height / total strand height.
-        # Push targets: `Material N Top Halo Frac` and `Material N Bot Halo Frac`.
-        # Until those sockets exist on the .blend, blender_live._pw_set_socket
-        # silently skips them — safe to emit pre-emptively.
+        # No active cleaned-graph push target; kept for old-file comparison.
         "top_halo_frac": top_halo_frac,
         "bot_halo_frac": bot_halo_frac,
     }
@@ -437,6 +445,8 @@ def save_to_library(
         "joins": export_meta.get("joins") or [],
         "threads_solid_band": export_meta.get("threads_solid_band") or [],
         "files": {
+            "rgb": None,
+            "alpha": None,
             "rgba": "rgba.png",
             "thumbnail": "input_thumb.jpg" if (yarn_dir / "input_thumb.jpg").exists() else None,
             "metadata": "metadata.json",

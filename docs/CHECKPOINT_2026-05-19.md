@@ -57,6 +57,23 @@ These are asserted defensively by the backend and should match the saved `.blend
 
 The previous non-zero `Texture Offset V = 0.031914920` was part of a checker/material phase-alignment experiment. The approved checkpoint returns Offset V to neutral `0`.
 
+### Bugs discovered after this checkpoint
+
+These don't change the approved-2026-05-19 state but are recorded here so the next checkpoint can absorb the fix:
+
+**1. Drawdown row sampling uses MODULO (Rule 38, Phase 10v 2026-05-27).** The strand bend reads the drawdown via:
+
+```text
+PW Draft Warp/Weft Row Mod  = MODULO(Index in Curve, Draft Rows)     <-- WRONG operation
+should be                   = FLOOR(Index in Curve × Draft Rows / curve_point_count)
+```
+
+With wizard defaults (`Weft Threads = 80`, `Draft Rows = 20`) the strand wraps the drawdown 4 times across its length, producing a high-frequency Z square-wave that hides on plain weave (averages out) but shows up as crescent-moon-shaped overlapping Arc 2 silhouettes on 2/2 twill / satin / basket / herringbone / rib. This is the actual "Arc 2 looks wrong on simple twill" complaint. See [BlenderFixes/phase_log.md](BlenderFixes/phase_log.md) Phase 10v and [BlenderFixes/lessons.md](BlenderFixes/lessons.md) Rule 38. Fix is in the node graph and will require a snapshot.
+
+**2. `Over Count` / `Under Count` modifier sockets are dead.** Visible in the Surface panel but disconnected from the active graph. Toggling has zero effect on geometry. Remove from interface in a cleanup pass.
+
+**3. Frontend ships `uvRandomU: 1` against the backend's "default 0" comment.** Cosmetic only — makes the Rule 38 moon-overlap *look louder* by adding per-strand texture-phase noise but does not cause the geometry artifact. Flip [frontend/src/domain/draft.ts](../frontend/src/domain/draft.ts#L155) `uvRandomU: 1` → `0`, optionally add `UV Random U` to `PINNED_FOOTGUN_SOCKETS` in [backend/app/blender_live.py](../backend/app/blender_live.py). An earlier (now retracted) Phase 10v draft mistakenly blamed this as the root cause of (1); it is not.
+
 ## Code Defaults
 
 - `backend/app/blender_sync.py`: `DEFAULT_ARC1_V_PADDING = 0.008`; setup forces Texture Offset V `0`, Sub Texture Scale V `1`, and Sub Texture Offset V `0`.

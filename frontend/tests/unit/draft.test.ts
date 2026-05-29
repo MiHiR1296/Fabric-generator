@@ -11,7 +11,13 @@ import {
   normalizeDraft,
   parseLooseTextDraft,
 } from '../../src/domain/draft.ts';
-import { parsePatternBookJson } from '../../src/domain/bookLibrary.ts';
+import {
+  loadLocalPatternBooks,
+  parsePatternBookJson,
+  PATTERN_LIBRARY_UPDATED_EVENT,
+  saveDraftAsLocalPattern,
+} from '../../src/domain/bookLibrary.ts';
+import { presets } from '../../src/domain/presets.ts';
 
 test('computes a 4-shaft drawdown', () => {
   const drawdown = computeDrawdown(
@@ -195,4 +201,83 @@ test('parses a local pattern-book json into loadable patterns', () => {
   assert.equal(book.patterns.length, 1);
   assert.equal(book.patterns[0].status, 'loadable');
   assert.equal(book.patterns[0].draft?.drawdown[0][3], 1);
+});
+
+test('bundles the testing v1 cheques scan reconstruction as a starter pattern', () => {
+  const preset = presets.find((entry) => entry.id === 'testingv1-cheques');
+
+  assert.ok(preset);
+  assert.equal(preset.weaveType, 'plain');
+  assert.equal(preset.document.title, 'Testing V1 Cheques');
+  assert.equal(preset.document.threading.length, preset.document.treadling.length);
+  assert.equal(new Set(preset.document.warpColors).size >= 5, true);
+});
+
+test('saves the current draft into the local pattern library', () => {
+  const store = new Map<string, string>();
+  const events: string[] = [];
+  const previousLocalStorage = (globalThis as any).localStorage;
+  const previousWindow = (globalThis as any).window;
+  const previousCustomEvent = (globalThis as any).CustomEvent;
+
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, value),
+    },
+  });
+  Object.defineProperty(globalThis, 'CustomEvent', {
+    configurable: true,
+    value: class {
+      type: string;
+      constructor(type: string) {
+        this.type = type;
+      }
+    },
+  });
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      dispatchEvent: (event: { type: string }) => {
+        events.push(event.type);
+        return true;
+      },
+    },
+  });
+
+  try {
+    const { pattern } = saveDraftAsLocalPattern(createBlankDraft(), 'Saved Cheque');
+    const books = loadLocalPatternBooks();
+
+    assert.equal(pattern.title, 'Saved Cheque');
+    assert.equal(books[0].title, 'Saved Pattern Drafts');
+    assert.equal(books[0].patterns[0].title, 'Saved Cheque');
+    assert.deepEqual(events, [PATTERN_LIBRARY_UPDATED_EVENT]);
+  } finally {
+    if (previousLocalStorage === undefined) {
+      delete (globalThis as any).localStorage;
+    } else {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        value: previousLocalStorage,
+      });
+    }
+    if (previousWindow === undefined) {
+      delete (globalThis as any).window;
+    } else {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: previousWindow,
+      });
+    }
+    if (previousCustomEvent === undefined) {
+      delete (globalThis as any).CustomEvent;
+    } else {
+      Object.defineProperty(globalThis, 'CustomEvent', {
+        configurable: true,
+        value: previousCustomEvent,
+      });
+    }
+  }
 });

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { WEAVE_ZOOM_THREAD_LEVELS } from '../domain/draft';
-import type { BlenderRenderJob, DraftDocument, DraftRenderSettings } from '../domain/types';
+import type { BlenderRenderJob, DraftDocument, DraftRenderSettings, TileRenderOptions } from '../domain/types';
 
 // Exposed control surface mirrors v2 (Fabric-generator-codex-fabric-generator-v2/frontend/src/components/RenderPanel.tsx).
 // User-facing controls. Hidden calibration defaults live in buildDefaultRenderSettings.
@@ -26,6 +26,12 @@ const EXPOSED_FIELDS: ExposedField[] = [
 ];
 
 const DEFAULT_WEAVE_ZOOM_THREADS = WEAVE_ZOOM_THREAD_LEVELS[0];
+const TILE_EXPORT_DEFAULTS = {
+  tileCount: 4 as const,
+  tileResolution: 1200,
+  guardThreads: 0,
+  variationStrength: 0,
+};
 
 function nearestWeaveZoomLevel(value: number) {
   return WEAVE_ZOOM_THREAD_LEVELS.find((level) => value <= level)
@@ -45,7 +51,12 @@ interface RenderPanelProps {
   importMessage: string;
   renderJob: BlenderRenderJob | null;
   renderBusy: boolean;
+  tileJob?: BlenderRenderJob | null;
+  tileBusy?: boolean;
+  activePreviewMode?: 'render' | 'tile';
   onRenderPreview: () => void;
+  onSendToLiveBlender?: () => void;
+  onRenderTiles?: (options: TileRenderOptions) => void;
   onExportCanonical: () => void;
   onExportBlender: () => void;
   onApplyRenderSettings: (settings: Partial<DraftRenderSettings>) => void;
@@ -53,7 +64,9 @@ interface RenderPanelProps {
   title?: string;
   summaryText?: string;
   statusMessage?: string;
+  tileStatusMessage?: string;
   renderDisabled?: boolean;
+  liveBlenderBusy?: boolean;
 }
 
 export default function RenderPanel({
@@ -61,7 +74,11 @@ export default function RenderPanel({
   importMessage,
   renderJob,
   renderBusy,
+  tileJob = null,
+  tileBusy = false,
+  activePreviewMode = 'render',
   onRenderPreview,
+  onRenderTiles,
   onExportCanonical,
   onExportBlender,
   onApplyRenderSettings,
@@ -69,7 +86,10 @@ export default function RenderPanel({
   title = 'Render Preview',
   summaryText,
   statusMessage,
+  tileStatusMessage,
   renderDisabled = false,
+  onSendToLiveBlender,
+  liveBlenderBusy = false,
 }: RenderPanelProps) {
   const [stagedFields, setStagedFields] = useState<Record<ExposedField['key'], string>>(() => ({
     spacing: '',
@@ -112,7 +132,9 @@ export default function RenderPanel({
 
   const renderRunning =
     renderBusy || renderJob?.status === 'queued' || renderJob?.status === 'running';
-  const renderActive = renderRunning || renderDisabled;
+  const tileRunning =
+    tileBusy || tileJob?.status === 'queued' || tileJob?.status === 'running';
+  const renderActive = renderRunning || tileRunning || renderDisabled || liveBlenderBusy;
 
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
@@ -169,6 +191,30 @@ export default function RenderPanel({
           >
             {renderRunning ? 'Rendering Preview…' : 'Render Preview'}
           </button>
+          {onSendToLiveBlender ? (
+            <button
+              className="button"
+              onClick={onSendToLiveBlender}
+              disabled={renderActive || liveBlenderBusy}
+              data-testid="send-live-blender-button"
+            >
+              {liveBlenderBusy ? 'Sending to Blender…' : 'Send to Live Blender'}
+            </button>
+          ) : null}
+          {onRenderTiles ? (
+            <button
+              className="button"
+              onClick={() =>
+                onRenderTiles({
+                  ...TILE_EXPORT_DEFAULTS,
+                })
+              }
+              disabled={renderActive}
+              data-testid="render-tiles-button"
+            >
+              {tileRunning ? 'Building Tiles…' : 'Build Tile Texture'}
+            </button>
+          ) : null}
           <button className="button" onClick={onExportCanonical} data-testid="export-canonical-button">
             Export Draft JSON
           </button>
@@ -234,86 +280,166 @@ export default function RenderPanel({
             The preview is rotated to match drawdown reading direction, so it feels closer to the draft
             you just built.
           </p>
+
+          {onRenderTiles ? (
+            <div className="tile-export-settings">
+              <div className="board-section__heading">
+                <div>
+                  <h3>Tile Texture Export</h3>
+                  <p>Build the final repaired texture from the current Blender material.</p>
+                </div>
+              </div>
+
+              <p className="muted">
+                The backend returns the final output image and clears temporary tile files.
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <div className="render-panel__preview">
-          {statusMessage ? (
+          {activePreviewMode === 'render' && statusMessage ? (
             <p className="muted render-panel__status" data-testid="render-status-message">
               {statusMessage}
             </p>
           ) : null}
+          {activePreviewMode === 'tile' && tileStatusMessage ? (
+            <p className="muted render-panel__status" data-testid="tile-render-status-message">
+              {tileStatusMessage}
+            </p>
+          ) : null}
 
-          <div className="render-preview render-preview--panel">
-            {renderJob?.imageUrl ? (
-              <img
-                className="render-preview__image render-preview__image--draft-aligned"
-                src={renderJob.imageUrl}
-                alt={`Rendered preview of ${renderJob.draftTitle || 'the current draft'}`}
-              />
-            ) : (
-              <div className="render-preview__placeholder">
-                <strong>{renderRunning ? 'Working…' : 'No preview yet'}</strong>
-                <span>
-                  {renderRunning
-                    ? 'The image will appear automatically as soon as Blender finishes.'
-                    : 'The next successful headless render will appear here.'}
-                </span>
-              </div>
-            )}
-
-            {renderRunning ? (
-              <div
-                className="render-progress render-progress--overlay"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(progress)}
-                aria-valuetext={`Rendering ${Math.round(progress)}%`}
-                data-testid="render-progress"
-              >
-                <div className="render-progress__label">
-                  <span>
-                    {renderJob?.status === 'queued'
-                      ? 'Queued for Blender…'
-                      : 'Blender is generating your preview…'}
-                  </span>
-                  <span className="render-progress__elapsed">
-                    {Math.round(progress)}% · {formatElapsed(elapsed)}
-                  </span>
-                </div>
-                <div className="render-progress__track">
-                  <div
-                    className="render-progress__bar"
-                    style={{ width: `${progress}%` }}
+          {activePreviewMode === 'render' ? (
+            <>
+              <div className="render-preview render-preview--panel">
+                {renderJob?.imageUrl ? (
+                  <img
+                    className="render-preview__image render-preview__image--draft-aligned"
+                    src={renderJob.imageUrl}
+                    alt={`Rendered preview of ${renderJob.draftTitle || 'the current draft'}`}
                   />
+                ) : (
+                  <div className="render-preview__placeholder">
+                    <strong>{renderRunning ? 'Working…' : 'No preview yet'}</strong>
+                    <span>
+                      {renderRunning
+                        ? 'The image will appear automatically as soon as Blender finishes.'
+                        : 'The next successful headless render will appear here.'}
+                    </span>
+                  </div>
+                )}
+
+                {renderRunning ? (
+                  <div
+                    className="render-progress render-progress--overlay"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(progress)}
+                    aria-valuetext={`Rendering ${Math.round(progress)}%`}
+                    data-testid="render-progress"
+                  >
+                    <div className="render-progress__label">
+                      <span>
+                        {renderJob?.status === 'queued'
+                          ? 'Queued for Blender…'
+                          : 'Blender is generating your preview…'}
+                      </span>
+                      <span className="render-progress__elapsed">
+                        {Math.round(progress)}% · {formatElapsed(elapsed)}
+                      </span>
+                    </div>
+                    <div className="render-progress__track">
+                      <div
+                        className="render-progress__bar"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              {renderJob ? (
+                <div className="inspector__facts inspector__facts--render">
+                  <div>
+                    <span>Status</span>
+                    <strong>{renderJob.status}</strong>
+                  </div>
+                  <div>
+                    <span>Target</span>
+                    <strong>{renderJob.targetObjectName}</strong>
+                  </div>
+                  <div>
+                    <span>Draft</span>
+                    <strong>{renderJob.draftTitle}</strong>
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </div>
+              ) : null}
 
-          {renderJob ? (
-            <div className="inspector__facts inspector__facts--render">
-              <div>
-                <span>Status</span>
-                <strong>{renderJob.status}</strong>
+              {renderJob?.logTail?.length ? (
+                <details className="render-preview__logs">
+                  <summary>Recent Blender Log</summary>
+                  <pre>{renderJob.logTail.join('\n')}</pre>
+                </details>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div className="render-preview render-preview--panel">
+                {tileJob?.imageUrl ? (
+                  <img
+                    className="render-preview__image"
+                    src={tileJob.imageUrl}
+                    alt={`Stitched tile texture of ${tileJob.draftTitle || 'the current draft'}`}
+                  />
+                ) : (
+                  <div className="render-preview__placeholder">
+                    <strong>{tileRunning ? 'Building texture…' : 'No tile texture yet'}</strong>
+                    <span>
+                      {tileRunning
+                        ? 'Blender is rendering the tile set; the stitched result will appear here.'
+                        : 'Build a tile texture when you want a larger stitched output.'}
+                    </span>
+                  </div>
+                )}
               </div>
-              <div>
-                <span>Target</span>
-                <strong>{renderJob.targetObjectName}</strong>
-              </div>
-              <div>
-                <span>Draft</span>
-                <strong>{renderJob.draftTitle}</strong>
-              </div>
-            </div>
-          ) : null}
 
-          {renderJob?.logTail?.length ? (
-            <details className="render-preview__logs">
-              <summary>Recent Blender Log</summary>
-              <pre>{renderJob.logTail.join('\n')}</pre>
-            </details>
-          ) : null}
+              {tileJob?.tileSourceImageUrls?.length ? (
+                <div className="tile-source-strip" aria-label="Blender source tile renders">
+                  {tileJob.tileSourceImageUrls.map((url, index) => (
+                    <figure className="tile-source-strip__item" key={url}>
+                      <img src={url} alt={`Blender source render ${index + 1}`} />
+                      <figcaption>{index + 1}</figcaption>
+                    </figure>
+                  ))}
+                </div>
+              ) : null}
+
+              {tileJob ? (
+                <div className="inspector__facts inspector__facts--render">
+                  <div>
+                    <span>Tile Status</span>
+                    <strong>{tileJob.status}</strong>
+                  </div>
+                  <div>
+                    <span>Job</span>
+                    <strong>{tileJob.id}</strong>
+                  </div>
+                  <div>
+                    <span>Output</span>
+                    <strong>{tileJob.imageUrl ? 'ready' : 'pending'}</strong>
+                  </div>
+                </div>
+              ) : null}
+
+              {tileJob?.logTail?.length ? (
+                <details className="render-preview__logs">
+                  <summary>Recent Blender Log</summary>
+                  <pre>{tileJob.logTail.join('\n')}</pre>
+                </details>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
     </section>

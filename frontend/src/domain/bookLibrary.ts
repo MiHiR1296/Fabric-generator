@@ -1,7 +1,9 @@
 import { normalizeDraft } from './draft.ts';
-import type { BookPatternEntry, PatternBook } from './types.ts';
+import type { BookPatternEntry, DraftDocument, PatternBook } from './types.ts';
 
 const BOOK_LIBRARY_STORAGE_KEY = 'weaving-draft-studio/local-pattern-books';
+const SAVED_PATTERNS_BOOK_ID = 'saved-pattern-drafts';
+export const PATTERN_LIBRARY_UPDATED_EVENT = 'pattern-library-updated';
 
 function slugify(value: string) {
   return value
@@ -83,6 +85,9 @@ export function loadLocalPatternBooks() {
 
 export function saveLocalPatternBooks(books: PatternBook[]) {
   localStorage.setItem(BOOK_LIBRARY_STORAGE_KEY, JSON.stringify(books, null, 2));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(PATTERN_LIBRARY_UPDATED_EVENT));
+  }
 }
 
 export function upsertLocalPatternBook(book: PatternBook) {
@@ -93,4 +98,44 @@ export function upsertLocalPatternBook(book: PatternBook) {
   ];
   saveLocalPatternBooks(nextBooks);
   return nextBooks;
+}
+
+export function saveDraftAsLocalPattern(draft: DraftDocument, title: string) {
+  const cleanedTitle = title.trim() || draft.title?.trim() || 'Untitled Pattern';
+  const now = new Date().toISOString();
+  const normalizedDraft = normalizeDraft({
+    ...draft,
+    title: cleanedTitle,
+    sourceType: 'manual',
+    sourceLabel: 'Saved Pattern Drafts',
+  });
+  const pattern: BookPatternEntry = {
+    id: `${slugify(cleanedTitle) || 'saved-pattern'}-${Date.now().toString(36)}`,
+    title: cleanedTitle,
+    summary: `Saved from Pattern Builder on ${now.slice(0, 10)}.`,
+    tags: ['saved', 'local', 'pattern-builder'],
+    draft: normalizedDraft,
+    status: 'loadable',
+    weaveType: 'other',
+  };
+  const books = loadLocalPatternBooks();
+  const existingBook = books.find((book) => book.id === SAVED_PATTERNS_BOOK_ID);
+  const savedBook: PatternBook = {
+    id: SAVED_PATTERNS_BOOK_ID,
+    title: 'Saved Pattern Drafts',
+    summary: 'Patterns saved directly from the Pattern Builder.',
+    sourceLabel: 'Pattern Builder',
+    access: 'local',
+    tags: ['saved', 'local', 'pattern-builder'],
+    note: 'Created by the Pattern Builder Save Pattern button.',
+    patterns: [pattern, ...(existingBook?.patterns ?? [])],
+  };
+  savedBook.draftCount = savedBook.patterns.length;
+
+  const nextBooks = [
+    savedBook,
+    ...books.filter((book) => book.id !== SAVED_PATTERNS_BOOK_ID),
+  ];
+  saveLocalPatternBooks(nextBooks);
+  return { book: savedBook, pattern, books: nextBooks };
 }

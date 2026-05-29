@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -160,6 +161,53 @@ class YarnAssetTests(unittest.TestCase):
                 self.assertEqual(tile.mode, "RGBA")
                 self.assertLessEqual(tile.size[0], 16)
                 self.assertEqual(tile.size[1], 4)
+
+    def test_import_library_yarn_prefers_rgba_udims(self) -> None:
+        library_root = self.root / "library"
+        yarn_id = "20260529_010203_abcd"
+        yarn_dir = library_root / yarn_id
+        yarn_dir.mkdir(parents=True)
+        Image.new("RGB", (20000, 4), (30, 60, 180)).save(yarn_dir / "rgb.png")
+        Image.new("L", (20000, 4), 128).save(yarn_dir / "alpha.png")
+        Image.new("RGBA", (20000, 4), (30, 60, 180, 128)).save(yarn_dir / "rgba.png")
+        (yarn_dir / "metadata.json").write_text(
+            json.dumps({
+                "id": yarn_id,
+                "label": "Blue thread",
+                "files": {"rgb": "rgb.png", "alpha": "alpha.png", "rgba": "rgba.png"},
+                "image_size_px": [20000, 4],
+            }),
+            encoding="utf-8",
+        )
+
+        with patch.object(yarn_assets, "YARN_LIBRARY_ROOT", library_root):
+            imported = yarn_assets.import_yarn_from_library(yarn_id)
+
+        asset_dir = self.assets_root / imported["id"]
+        self.assertEqual(imported["renderTextureMode"], "rgba_tiled")
+        self.assertEqual(imported["sourceFilename"], "rgba.png")
+        self.assertIsNone(imported["diffuseFilename"])
+        self.assertIsNone(imported["alphaFilename"])
+        self.assertIsNone(imported["renderDiffuseFilename"])
+        self.assertIsNone(imported["renderAlphaFilename"])
+        self.assertEqual(
+            imported["renderDiffuseTileFilenames"],
+            [],
+        )
+        self.assertEqual(
+            imported["renderAlphaTileFilenames"],
+            [],
+        )
+        self.assertEqual(
+            imported["renderRgbaTileFilenames"],
+            ["cycles_tiled/rgba_1001.png", "cycles_tiled/rgba_1002.png"],
+        )
+        self.assertFalse((asset_dir / "rgb.png").exists())
+        self.assertFalse((asset_dir / "alpha.png").exists())
+        self.assertTrue((asset_dir / "rgba.png").exists())
+        self.assertFalse((asset_dir / "cycles_tiled" / "rgb_1001.png").exists())
+        self.assertFalse((asset_dir / "cycles_tiled" / "alpha_1001.png").exists())
+        self.assertTrue((asset_dir / "cycles_tiled" / "rgba_1001.png").exists())
 
 
 if __name__ == "__main__":

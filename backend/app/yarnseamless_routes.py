@@ -63,6 +63,7 @@ except ImportError:  # pragma: no cover
 from . import yarnseamless  # noqa: F401 — keep import for side effects
 from .yarnseamless import band_detect as _band_detect
 from .yarnseamless import dual_alpha_pipeline as _dap
+from .yarnseamless import thread_segmentation as _seg
 from .yarnseamless import yarn_library as _yarn_library
 from .yarnseamless.multithread_flow import alpha_pipeline as _ap
 from .yarnseamless.multithread_flow import solid_band as _sb
@@ -224,13 +225,155 @@ def _trim_and_pad_no_wraparound(src_path: str, out_path: str, *, strip_w: int) -
     Image.fromarray(out_arr).save(out_path)
 
 
-def _build_export_set(sdir: Path, strip_w: int) -> dict[str, str]:
+def _estimate_background_linear_for_export(
+    rgb_u8: np.ndarray,
+    alpha_u8: np.ndarray,
+    fallback_b_lin: np.ndarray | None = None,
+) -> np.ndarray | None:
+    if fallback_b_lin is not None:
+        arr = np.asarray(fallback_b_lin, dtype=np.float64)
+        if arr.shape == (3,) and np.isfinite(arr).all():
+            return arr
+
+    rgb = np.asarray(rgb_u8, dtype=np.uint8)
+    alpha = np.asarray(alpha_u8, dtype=np.uint8)
+    non_canvas = rgb.max(axis=2) > 20
+    candidates = (alpha <= 2) & non_canvas
+    if int(candidates.sum()) < 256:
+        candidates = (alpha <= 24) & non_canvas
+    if int(candidates.sum()) < 256:
+        return None
+    bg_srgb = np.median(rgb[candidates].reshape(-1, 3), axis=0).astype(np.float64) / 255.0
+    return _dap.srgb_to_linear(bg_srgb)
+
+
+def _smoothstep(edge0: float, edge1: float, x: np.ndarray) -> np.ndarray:
+    denom = max(1e-6, float(edge1 - edge0))
+    t = np.clip((x - edge0) / denom, 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _desaturate_background_spill_rgb(
+    rgb_pil: Image.Image,
+    alpha_pil: Image.Image,
+    *,
+    background_linear: np.ndarray | None = None,
+) -> Image.Image:
+    """Desaturate scan-card coloured spill while preserving yarn RGB detail.
+
+    This is intentionally much narrower than foreground recovery: it estimates
+    the scan-card colour, builds a hue/chroma family for lighter and darker
+    variants of that colour, then subtracts only that background-colour chroma
+    from fringe pixels. High-alpha yarn pixels keep the original scan RGB.
+    """
+    rgb_u8 = np.asarray(rgb_pil.convert("RGB"), dtype=np.uint8)
+    alpha_u8 = np.asarray(alpha_pil.convert("L"), dtype=np.uint8)
+    b_lin = _estimate_background_linear_for_export(rgb_u8, alpha_u8, background_linear)
+    if b_lin is None:
+        return Image.fromarray(rgb_u8, mode="RGB")
+
+    try:
+        bg_srgb = (_dap.linear_to_srgb(np.asarray(b_lin, dtype=np.float64)) * 255.0).clip(0, 255)
+        rgb = rgb_u8.astype(np.float32)
+        alpha = alpha_u8.astype(np.float32)
+
+        # Exact-ish colour range around the card/background. This catches the
+        # actual card pixels plus simple darker/lighter scanner variants.
+        dist = np.linalg.norm(rgb - bg_srgb.astype(np.float32)[None, None, :], axis=2)
+        close_to_bg = 1.0 - _smoothstep(12.0, 145.0, dist)
+
+        # Broader hue family around the background. By comparing chroma after
+        # removing luma, light red, dark red, and red-tinted yarn fringe all
+        # map back to the same card-colour direction without catching blue/green
+        # yarns.
+        luma_scalar = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
+        rgb_chroma = rgb - luma_scalar[..., None]
+        bg_luma = float(0.2126 * bg_srgb[0] + 0.7152 * bg_srgb[1] + 0.0722 * bg_srgb[2])
+        bg_chroma = bg_srgb.astype(np.float32) - bg_luma
+        bg_chroma_norm = max(1e-6, float(np.linalg.norm(bg_chroma)))
+        chroma_norm = np.linalg.norm(rgb_chroma, axis=2)
+        bg_chroma_3 = bg_chroma.astype(np.float32)[None, None, :]
+        hue_alignment = (
+            np.sum(rgb_chroma * bg_chroma_3, axis=2)
+            / np.maximum(1e-6, chroma_norm * bg_chroma_norm)
+        )
+        hue_family = (
+            _smoothstep(-0.12, 0.58, hue_alignment)
+            * _smoothstep(0.3, 22.0, chroma_norm)
+        )
+
+        bg_red_excess = float(bg_srgb[0] - max(bg_srgb[1], bg_srgb[2]))
+        if bg_red_excess > 20.0:
+            red_excess = rgb[..., 0] - np.maximum(rgb[..., 1], rgb[..., 2])
+            hue_like_bg = _smoothstep(1.5, max(14.0, bg_red_excess * 0.42), red_excess)
+            colour_gate = np.maximum.reduce((close_to_bg, hue_family, hue_like_bg * 0.95))
+        else:
+            colour_gate = np.maximum(close_to_bg, hue_family)
+
+        # Keep cleanup strong through the whole transparent/semitransparent
+        # fringe and fade only right before opaque yarn. The center/core remains
+        # untouched, but red card spill in fine strands is removed completely.
+        edge_gate = 1.0 - _smoothstep(236.0, 252.0, alpha)
+        strength = np.clip(colour_gate * edge_gate * 1.45, 0.0, 1.0)
+
+        projection = np.maximum(0.0, np.sum(rgb_chroma * bg_chroma_3 / bg_chroma_norm, axis=2))
+        chroma_clean = (
+            rgb_chroma
+            - (bg_chroma_3 / bg_chroma_norm) * projection[..., None] * strength[..., None]
+        )
+        out = luma_scalar[..., None] + chroma_clean
+
+        # If a pixel is almost exactly the card family, a tiny final neutral mix
+        # removes residual red without deleting the strand alpha.
+        neutral_strength = np.clip(close_to_bg * edge_gate * 0.35, 0.0, 0.35)
+        luma = luma_scalar[..., None]
+        out = out * (1.0 - neutral_strength[..., None]) + luma * neutral_strength[..., None]
+        return Image.fromarray(out.clip(0, 255).astype(np.uint8), mode="RGB")
+    except Exception as exc:
+        print(f"[rgba-export] background spill desaturation skipped: {exc}")
+        return Image.fromarray(rgb_u8, mode="RGB")
+
+
+def _summary_background_linear(summary: dict[str, Any] | None) -> np.ndarray | None:
+    if not isinstance(summary, dict):
+        return None
+    raw = summary.get("B_red_linear")
+    if raw is None:
+        return None
+    try:
+        arr = np.asarray(raw, dtype=np.float64)
+    except Exception:
+        return None
+    if arr.shape != (3,) or not np.isfinite(arr).all():
+        return None
+    return arr
+
+
+def _material_alpha_from_matte(alpha_pil: Image.Image) -> Image.Image:
+    """Alpha used by Blender materials: preserve the natural matte."""
+    alpha = np.asarray(alpha_pil.convert("L"), dtype=np.uint8)
+    material = alpha.copy()
+    # Only remove numerical dust from nominally transparent pixels. Do not boost
+    # the yarn core to 255: that hard binary alpha was the visible edited slab in
+    # zoomed previews and Blender.
+    material[material < 4] = 0
+    return Image.fromarray(material.astype(np.uint8), mode="L")
+
+
+def _build_export_set(
+    sdir: Path,
+    strip_w: int,
+    *,
+    background_linear: np.ndarray | None = None,
+    make_rgba: bool = True,
+) -> dict[str, str]:
     """Run _trim_and_pad_no_wraparound for all four assembled outputs that exist,
     plus build the merged RGBA. Returns {kind: filename}."""
     out: dict[str, str] = {}
     for name in (
         "assembled_final.png",
         "assembled_alpha.png",
+        "assembled_material_alpha.png",
         "assembled_F.png",
         "assembled_dark_blue.png",
     ):
@@ -244,16 +387,35 @@ def _build_export_set(sdir: Path, strip_w: int) -> dict[str, str]:
             out[base] = dst.name
         except Exception as e:
             print(f"[export-set] {base} failed: {e}")
-    # Build merged RGBA from the post-trim F + alpha.
+    ea = sdir / "export_assembled_alpha.png"
+    ema = sdir / "export_assembled_material_alpha.png"
+    if ea.exists():
+        try:
+            material_alpha = _material_alpha_from_matte(Image.open(ea).convert("L"))
+            material_alpha.save(ema)
+            out["material_alpha"] = ema.name
+        except Exception as exc:
+            print(f"[export-set] material alpha failed: {exc}")
+
+    # Canonical material preview/export: stitched scan RGB plus natural matte.
+    # Keep yarn pixels unprocessed; only neutralize low-alpha background-colour spill.
+    ergb = sdir / "export_assembled_final.png"
     ef = sdir / "export_assembled_F.png"
     ea = sdir / "export_assembled_alpha.png"
-    if ef.exists() and ea.exists():
-        f_pil = Image.open(ef).convert("RGB")
-        a_pil = Image.open(ea).convert("L")
+    alpha_src = ema if ema.exists() else ea
+    rgb_src = ergb if ergb.exists() else ef
+    if make_rgba and rgb_src.exists() and alpha_src.exists():
+        f_pil = Image.open(rgb_src).convert("RGB")
+        a_pil = Image.open(alpha_src).convert("L")
         if a_pil.size != f_pil.size:
             ac = Image.new("L", f_pil.size, 0)
             ac.paste(a_pil, (0, 0))
             a_pil = ac
+        f_pil = _desaturate_background_spill_rgb(
+            f_pil,
+            a_pil,
+            background_linear=background_linear,
+        )
         rgba = Image.merge(
             "RGBA", (f_pil.split()[0], f_pil.split()[1], f_pil.split()[2], a_pil)
         )
@@ -395,9 +557,9 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
         try:
             n_threads = int(raw_nt)
         except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="n_threads must be an integer 2..16 or 'auto'")
-        if n_threads < 2 or n_threads > 16:
-            raise HTTPException(status_code=400, detail="n_threads must be between 2 and 16")
+            raise HTTPException(status_code=400, detail="n_threads must be an integer 1..16 or 'auto'")
+        if n_threads < 1 or n_threads > 16:
+            raise HTTPException(status_code=400, detail="n_threads must be between 1 and 16")
 
     dpi = float(payload.get("dpi", 1600))
     if not (50 <= dpi <= 12800):
@@ -482,11 +644,15 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
                 raise HTTPException(status_code=422, detail=str(e))
         timings["sample_b_and_align"] = round(time.time() - t, 2)
 
-        # Stage 1: split
+        # Stage 1: segmentation-first split
         t = time.time()
-        peaks, _profile = _split_threads.detect_thread_columns(img_arr, n_threads)
+        layout = _split_threads.detect_thread_layout(img_arr, n_threads)
+        if getattr(layout, "failure_reason", None):
+            raise HTTPException(status_code=422, detail=layout.failure_reason)
+        layout_peaks = layout["peaks"] if isinstance(layout, dict) else layout.peaks
+        peaks = np.asarray(layout_peaks, dtype=int)
         if n_threads is None:
-            if len(peaks) < 2:
+            if len(peaks) < 1:
                 raise HTTPException(
                     status_code=422,
                     detail=(f"Auto-detect found only {len(peaks)} thread(s). "
@@ -505,6 +671,14 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
         _split_threads.save_detection_overlay(
             img_arr, peaks, strips, str(work_dir / "detection_overlay.png")
         )
+        segmentation_debug_files: dict[str, str] = {}
+        segmentation_summary: dict[str, Any] | None = None
+        if hasattr(layout, "to_json"):
+            segmentation_summary = layout.to_json()
+            try:
+                segmentation_debug_files = _seg.save_detection_debug_images(img_arr, layout, work_dir)
+            except Exception as _e:
+                print(f"[multithread/process] segmentation debug save skipped: {_e}")
         raw_dir = work_dir / "raw_strips"
         raw_dir.mkdir(parents=True, exist_ok=True)
         timings["detect_split"] = round(time.time() - t, 2)
@@ -519,6 +693,8 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
             "dpi": dpi,
             "two_image": img2_arr is not None,
         }
+        if segmentation_summary is not None:
+            summary["segmentation"] = segmentation_summary
         if B_cyan_lin is not None:
             summary["B_cyan_linear"] = B_cyan_lin.tolist()
         if registration_shift_xy_px is not None:
@@ -582,6 +758,8 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
             t = time.time()
             alpha_path = work_dir / f"thread_{i}_alpha.png"
             leveled_rgb_1 = np.asarray(Image.open(leveled_path).convert("RGB"))
+            F_rgb_thread = leveled_rgb_1.copy()
+
             if img2_arr is not None:
                 strip2_arr = strips2[i][2]
                 detected_orient = preprocess_meta.get("orientation", "horizontal")
@@ -600,23 +778,21 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
                     leveled_rgb_2 = leveled_rgb_2[:h_min, :w_min]
                 alpha_arr_u8 = _dap.closed_form_alpha_dual(
                     leveled_rgb_1, leveled_rgb_2, B_red_lin, B_cyan_lin)
-                _a_unused, f_lin = _dap.closed_form_alpha_and_f(leveled_rgb_1, B_red_lin)
-                f_srgb = (_dap.linear_to_srgb(f_lin) * 255).clip(0, 255).astype(np.uint8)
-                F_rgb_thread = np.stack([f_srgb, f_srgb, f_srgb], axis=-1)
                 thread_B_lab_mean = None
                 thread_B_lab_cov = None
             else:
                 try:
-                    alpha_arr_u8, F_rgb_thread, thread_B_lab_mean, thread_B_lab_cov = (
-                        _dap.closed_form_alpha_and_f_lab_gated(
-                            leveled_rgb_1, return_cluster=True,
-                            fallback_B_lin=B_red_lin))
+                    alpha_arr_u8, thread_B_lab_mean, thread_B_lab_cov = (
+                        _dap.closed_form_alpha_hybrid_lab_luma(
+                            leveled_rgb_1,
+                            B_red_lin,
+                            return_cluster=True,
+                        )
+                    )
                 except Exception as _ek:
                     print(f"[multithread/process] thread {i} Method K failed ({_ek}); falling back to Method A")
-                    a_lin, f_lin = _dap.closed_form_alpha_and_f(leveled_rgb_1, B_red_lin)
+                    a_lin, _f_lin = _dap.closed_form_alpha_and_f(leveled_rgb_1, B_red_lin)
                     alpha_arr_u8 = (a_lin * 255).round().astype(np.uint8)
-                    f_srgb = (_dap.linear_to_srgb(f_lin) * 255).clip(0, 255).astype(np.uint8)
-                    F_rgb_thread = np.stack([f_srgb, f_srgb, f_srgb], axis=-1)
                     thread_B_lab_mean = None
                     thread_B_lab_cov = None
             black_fill = (
@@ -627,6 +803,26 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
             if black_fill.any():
                 alpha_arr_u8[black_fill] = 0
                 F_rgb_thread[black_fill] = 0
+            alpha_seg_quality: dict[str, Any] | None = None
+            alpha_seg_debug_files: dict[str, str] = {}
+            try:
+                alpha_seg = _seg.segment_thread_alpha(
+                    leveled_rgb_1,
+                    alpha_arr_u8,
+                    horizontal=True,
+                )
+                alpha_arr_u8 = alpha_seg.alpha_u8
+                if black_fill.any():
+                    alpha_arr_u8[black_fill] = 0
+                    F_rgb_thread[black_fill] = 0
+                alpha_seg_quality = alpha_seg.quality
+                alpha_seg_debug_files = _seg.save_thread_alpha_debug(
+                    alpha_seg,
+                    work_dir,
+                    f"thread_{i}",
+                )
+            except Exception as _e_seg:
+                print(f"[multithread/process] thread {i} segmentation alpha cleanup skipped: {_e_seg}")
             Image.fromarray(alpha_arr_u8, mode="L").save(alpha_path)
             try:
                 Image.fromarray(F_rgb_thread).save(work_dir / f"thread_{i}_F.png")
@@ -644,13 +840,9 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
             t = time.time()
             alpha_arr = np.asarray(Image.open(alpha_path).convert("L"))
             leveled_arr = np.asarray(Image.open(leveled_path).convert("RGB"))
-            from scipy import ndimage as _ndimage  # local import — heavy
-            binary_thread = alpha_arr >= 100
-            binary_filled = _ndimage.binary_closing(
-                binary_thread, structure=np.ones((1, 100), dtype=bool))
-            alpha_for_bands = (binary_filled.astype(np.uint8)) * 255
-            c_res = _sb.approach_c_longest_run(alpha_for_bands)
-            d_res = _sb.approach_d_combined_smoothed(alpha_for_bands)
+            band_result = _seg.detect_band_quality(alpha_arr)
+            c_res = band_result["c_band"]
+            d_res = band_result["d_band"]
             _sb.save_visualization(
                 f"thread_{i}", c_res["top_y"], c_res["bottom_y"], leveled_arr,
                 out_dir=str(work_dir), line_width=1, suffix="_c_visualization",
@@ -659,16 +851,8 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
                 f"thread_{i}", d_res["top_y"], d_res["bottom_y"], leveled_arr,
                 out_dir=str(work_dir), line_width=1, suffix="_d_visualization",
             )
-            # Phase 3g — walk the grayscale alpha outward from the C-band core to
-            # find the outer fibre extents. These two extra rows make MTI's review
-            # screen show all 4 lines (red core + amber extents) and let the
-            # producer emit top_halo_frac / bot_halo_frac for the Arc 2 V split.
-            fiber_top_y_c, fiber_bot_y_c = _sb.compute_fiber_extents_y(
-                alpha_arr, c_res["top_y"], c_res["bottom_y"],
-            )
-            fiber_top_y_d, fiber_bot_y_d = _sb.compute_fiber_extents_y(
-                alpha_arr, d_res["top_y"], d_res["bottom_y"],
-            )
+            fiber_top_y_c, fiber_bot_y_c = c_res["fiber_top_y"], c_res["fiber_bot_y"]
+            fiber_top_y_d, fiber_bot_y_d = d_res["fiber_top_y"], d_res["fiber_bot_y"]
             tt["band_detect"] = round(time.time() - t, 2)
             tt["total"] = round(sum(v for v in tt.values() if isinstance(v, (int, float))), 2)
             per_thread_timings.append(tt)
@@ -676,7 +860,7 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
             def _band_dict(res, fty, fby):
                 tv, bv = res["top_y"], res["bottom_y"]
                 return {"top_y": tv, "bottom_y": bv,
-                        "height": (bv - tv) if bv >= 0 else -1,
+                        "height": int(res.get("height", bv - tv if bv >= 0 else -1)),
                         "fiber_top_y": int(fty), "fiber_bot_y": int(fby)}
 
             H_t, W_t = alpha_arr.shape
@@ -697,6 +881,25 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
                         "width_mm": width_mm,
                     })
 
+            selected_candidates = getattr(layout, "candidates", []) if not isinstance(layout, dict) else []
+            split_quality = None
+            if i < len(selected_candidates):
+                cand = selected_candidates[i]
+                split_quality = {
+                    "x_center": int(cand.x_center),
+                    "x0": int(cand.x0),
+                    "x1": int(cand.x1),
+                    "score": float(cand.score),
+                    "peak_score": float(cand.peak_score),
+                    "peak_density": float(cand.peak_density),
+                    "continuity": float(cand.continuity),
+                }
+            failure_reason = None
+            if alpha_seg_quality and alpha_seg_quality.get("failure_reason"):
+                failure_reason = alpha_seg_quality.get("failure_reason")
+            if band_result["quality"].get("failure_reason"):
+                failure_reason = band_result["quality"].get("failure_reason")
+
             thread_entry = {
                 "index": i,
                 "x_range": [x0, x1],
@@ -709,6 +912,17 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
                 "c_band": _band_dict(c_res, fiber_top_y_c, fiber_bot_y_c),
                 "d_band": _band_dict(d_res, fiber_top_y_d, fiber_bot_y_d),
                 "width_samples": width_samples,
+                "segmentation_quality": {
+                    "split": split_quality,
+                    "alpha": alpha_seg_quality,
+                },
+                "band_quality": band_result["quality"],
+                "foreground_separation": (
+                    alpha_seg_quality.get("foreground_separation")
+                    if alpha_seg_quality else None
+                ),
+                "failure_reason": failure_reason,
+                "qa_files": alpha_seg_debug_files,
                 "timings": tt,
             }
             if thread_B_lab_mean is not None and thread_B_lab_cov is not None:
@@ -738,6 +952,8 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
         "detection_overlay": f"{base_url}/detection_overlay.png",
         "input": f"{base_url}/input{ext}",
     }
+    for key, filename in segmentation_debug_files.items():
+        summary["urls"][key] = f"{base_url}/{filename}"
     for t_entry in summary.get("threads", []):
         i = t_entry["index"]
         t_entry["urls"] = {
@@ -746,6 +962,8 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
             "c_viz":   f"{base_url}/thread_{i}_c_visualization.png",
             "d_viz":   f"{base_url}/thread_{i}_d_visualization.png",
         }
+        for key, filename in (t_entry.get("qa_files") or {}).items():
+            t_entry["urls"][key] = f"{base_url}/{filename}"
     summary["elapsed_seconds"] = elapsed
     return summary
 
@@ -1152,18 +1370,18 @@ async def multithread_regenerate_alpha(payload: dict = Body(default_factory=dict
                             if legacy.shape == (fullH_j, fullW_j) and rx1 > rx0 and ry1 > ry0:
                                 join_alpha[ry0:ry1, rx0:rx1] = legacy[ry0:ry1, rx0:rx1]
                         else:
-                            a_lin, f_lin = _dap.closed_form_alpha_and_f(sub, B_use)
+                            a_lin, _f_lin = _dap.closed_form_alpha_and_f(sub, B_use)
                             a_u8 = (a_lin * 255).astype(np.uint8)
                             cf = sub.max(axis=2) <= 15
                             a_u8[cf] = 0
                             a_u8[a_u8 < 50] = 0
                             join_alpha[ry0:ry1, rx0:rx1] = a_u8
-                            f_srgb_local = (_dap.linear_to_srgb(f_lin) * 255).clip(0, 255).astype(np.uint8)
-                            F_local = np.stack([f_srgb_local, f_srgb_local, f_srgb_local], axis=-1)
+                            F_local = sub.copy()
+                            F_local[cf] = 0
                             F_full[ry0:ry1, rx0:rx1] = F_local
                     except Exception as _e:
                         traceback.print_exc()
-                        print(f"[regen-alpha] join {i} achromatic-F step failed: {_e}")
+                        print(f"[regen-alpha] join {i} alpha refresh step failed: {_e}")
 
             Image.fromarray(F_full).save(sdir / f"join_{i}_F.png")
             Image.fromarray(join_alpha, mode="L").save(out_path)
@@ -1247,6 +1465,8 @@ async def multithread_regenerate_alpha(payload: dict = Body(default_factory=dict
                     x += jaim.width
 
             alpha_canvas.save(sdir / "assembled_alpha.png", "PNG")
+            material_alpha_canvas = _material_alpha_from_matte(alpha_canvas)
+            material_alpha_canvas.save(sdir / "assembled_material_alpha.png", "PNG")
             assembled_alpha_url = f"/api/multifragment/file/{sid}/assembled_alpha.png"
             print(f"[regen-alpha] composite alpha {out_w}x{out_h} in {round(time.time()-t0,2)}s")
 
@@ -1310,36 +1530,46 @@ async def multithread_regenerate_alpha(payload: dict = Body(default_factory=dict
             if make_rgba:
                 t1 = time.time()
                 rgb_path = sdir / "assembled_final.png"
-                if F_assembled is not None:
-                    F_pil = Image.fromarray(F_assembled, mode="RGB")
-                    if F_pil.size != alpha_canvas.size:
-                        ac = Image.new("L", F_pil.size, 0)
-                        ac.paste(alpha_canvas, (0, 0))
-                        alpha_for_merge = ac
-                    else:
-                        alpha_for_merge = alpha_canvas
-                    rgba = Image.merge(
-                        "RGBA",
-                        (F_pil.split()[0], F_pil.split()[1], F_pil.split()[2], alpha_for_merge),
-                    )
-                    rgba.save(sdir / "assembled_rgba.png", "PNG")
-                    assembled_rgba_url = f"/api/multifragment/file/{sid}/assembled_rgba.png"
-                    print(f"[regen-alpha] RGBA composite (F-corrected) in {round(time.time()-t1,2)}s")
-                elif rgb_path.exists():
+                if rgb_path.exists():
                     rgb = Image.open(rgb_path).convert("RGB")
-                    if rgb.size != alpha_canvas.size:
+                    if material_alpha_canvas.size != rgb.size:
                         ac = Image.new("L", rgb.size, 0)
-                        ac.paste(alpha_canvas, (0, 0))
+                        ac.paste(material_alpha_canvas, (0, 0))
                         alpha_for_merge = ac
                     else:
-                        alpha_for_merge = alpha_canvas
+                        alpha_for_merge = material_alpha_canvas
+                    rgb = _desaturate_background_spill_rgb(
+                        rgb,
+                        alpha_for_merge,
+                        background_linear=B_red_lin,
+                    )
                     rgba = Image.merge(
                         "RGBA",
                         (rgb.split()[0], rgb.split()[1], rgb.split()[2], alpha_for_merge),
                     )
                     rgba.save(sdir / "assembled_rgba.png", "PNG")
                     assembled_rgba_url = f"/api/multifragment/file/{sid}/assembled_rgba.png"
-                    print(f"[regen-alpha] RGBA composite (fallback, no F) in {round(time.time()-t1,2)}s")
+                    print(f"[regen-alpha] RGBA composite (source RGB + fringe spill cleanup + material alpha) in {round(time.time()-t1,2)}s")
+                elif F_assembled is not None:
+                    F_pil = Image.fromarray(F_assembled, mode="RGB")
+                    if material_alpha_canvas.size != F_pil.size:
+                        ac = Image.new("L", F_pil.size, 0)
+                        ac.paste(material_alpha_canvas, (0, 0))
+                        alpha_for_merge = ac
+                    else:
+                        alpha_for_merge = material_alpha_canvas
+                    F_pil = _desaturate_background_spill_rgb(
+                        F_pil,
+                        alpha_for_merge,
+                        background_linear=B_red_lin,
+                    )
+                    rgba = Image.merge(
+                        "RGBA",
+                        (F_pil.split()[0], F_pil.split()[1], F_pil.split()[2], alpha_for_merge),
+                    )
+                    rgba.save(sdir / "assembled_rgba.png", "PNG")
+                    assembled_rgba_url = f"/api/multifragment/file/{sid}/assembled_rgba.png"
+                    print(f"[regen-alpha] RGBA composite (fallback RGB + fringe spill cleanup + material alpha) in {round(time.time()-t1,2)}s")
         except Exception as e:
             traceback.print_exc()
             print(f"[regen-alpha] composite failed: {e}")
@@ -1353,8 +1583,15 @@ async def multithread_regenerate_alpha(payload: dict = Body(default_factory=dict
             alpha_path = sdir / "assembled_alpha.png"
             f_src_path = F_path if F_path.exists() else rgb_path
             if f_src_path.exists() and alpha_path.exists():
-                F_for_comp = np.asarray(Image.open(f_src_path).convert("RGB")).astype(np.float32)
-                a = np.asarray(Image.open(alpha_path).convert("L")).astype(np.float32) / 255.0
+                f_src_pil = Image.open(rgb_path if rgb_path.exists() else f_src_path).convert("RGB")
+                material_alpha_path = sdir / "assembled_material_alpha.png"
+                a_pil = Image.open(material_alpha_path if material_alpha_path.exists() else alpha_path).convert("L")
+                if a_pil.size != f_src_pil.size:
+                    a_tmp = Image.new("L", f_src_pil.size, 0)
+                    a_tmp.paste(a_pil, (0, 0))
+                    a_pil = a_tmp
+                F_for_comp = np.asarray(f_src_pil).astype(np.float32)
+                a = np.asarray(a_pil).astype(np.float32) / 255.0
                 if a.shape != F_for_comp.shape[:2]:
                     a_pil = Image.fromarray((a * 255).astype(np.uint8))
                     a = np.asarray(a_pil.resize((F_for_comp.shape[1], F_for_comp.shape[0]), Image.NEAREST)).astype(np.float32) / 255.0
@@ -1371,7 +1608,12 @@ async def multithread_regenerate_alpha(payload: dict = Body(default_factory=dict
 
     export_urls = {}
     try:
-        built = _build_export_set(sdir, strip_w)
+        built = _build_export_set(
+            sdir,
+            strip_w,
+            background_linear=B_red_lin,
+            make_rgba=make_rgba,
+        )
         for kind, fname in built.items():
             export_urls[kind] = f"/api/multifragment/file/{sid}/{fname}"
     except Exception as e:
@@ -1418,17 +1660,22 @@ async def multithread_export(payload: dict = Body(default_factory=dict)) -> dict
         if not mt_dir.is_dir():
             raise HTTPException(status_code=404, detail=f"multithread session not found: {mt_sid}")
 
-        export_urls: dict[str, str] = {}
-        if not metadata_only:
-            built = _build_export_set(sdir, strip_w)
-            for kind, fname in built.items():
-                export_urls[kind] = f"/api/multifragment/file/{sid}/{fname}"
-
         summary = None
         sp = mt_dir / "summary.json"
         if sp.exists():
             with open(sp) as f:
                 summary = json.load(f)
+
+        export_urls: dict[str, str] = {}
+        if not metadata_only:
+            built = _build_export_set(
+                sdir,
+                strip_w,
+                background_linear=_summary_background_linear(summary),
+                make_rgba=bool(payload.get("make_rgba", True)),
+            )
+            for kind, fname in built.items():
+                export_urls[kind] = f"/api/multifragment/file/{sid}/{fname}"
 
         # Width measurement now comes from the post-inpaint detector running on
         # the assembled alpha (export_assembled_alpha.png). The pre-inpaint

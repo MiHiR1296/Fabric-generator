@@ -21,6 +21,9 @@ backend/vendor/yarn_pipeline/big-lama.pt
 *.failed-*.blend
 
 runtime/debug/
+runtime/dev-services/
+runtime/logs/
+runtime/mplconfig/
 runtime/dev_logs/
 runtime/*.png
 runtime/*.jpg

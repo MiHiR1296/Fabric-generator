@@ -4,6 +4,39 @@ Append new entries **at the top**. One entry per edit. Date format = YYYY-MM-DD.
 
 ---
 
+## 2026-05-29 — Connected-core per-thread bands + sub-degree rotation
+
+The yarn scan processing repair is documented in full at
+[../YarnScanProcessing/phase_log.md](../YarnScanProcessing/phase_log.md).
+Band-specific summary:
+
+- `alpha_pipeline.level_and_crop` no longer skips sub-degree tilt. Default
+  `min_rotate_deg` changed from `1.0` to `0.0`, with a tiny `1e-6` guard so
+  exactly zero does not resample.
+- `dual_alpha_pipeline.apply_level_transform` now mirrors the first scan's
+  rotate/crop with `BICUBIC` resampling for two-background processing.
+- `thread_segmentation.detect_band_quality` now uses
+  `connected_core_peak_band_v1` for per-thread `c_band` / `d_band`.
+- The new core detector seeds from high-alpha connected yarn body, scores rows
+  by longest connected run + count + mean alpha, and selects the peak-relative
+  core run around the strongest row.
+- Raw FWHM output is still preserved in `band_quality.raw_fwhm_core` for
+  debugging, but it no longer owns the red review bracket when disconnected
+  haze/background rows are stronger than the real core.
+
+Regression tests added:
+
+- `test_level_and_crop_rotates_subdegree_tilt`
+- `test_band_quality_uses_connected_thick_core_not_disconnected_haze_band`
+
+Sample reprocess:
+
+- source session: `20260529_035408_350`
+- new session: `20260529_130625_379`
+- corrected tilts: `0.561`, `0.120`, `0.488` degrees
+- new bands: `197-216`, `241-258`, `272-287`
+- QA sheet: `/tmp/rotation_band_fix_old_vs_new.jpg`
+
 ## 2026-05-16 — Phase A + B + C landed
 
 Single FWHM detector now owns post-inpaint bands end-to-end. Pre-inpaint

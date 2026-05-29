@@ -586,9 +586,12 @@ def delete_library_yarn(yarn_id: str) -> dict:
 
 
 def import_yarn_from_library(yarn_id: str) -> dict:
-    """Copy `<library>/<yarn_id>/rgba.png` into this project's runtime, split
-    into albedo+alpha, produce Cycles-safe downscales, and persist a runtime
-    YarnAsset with bandMeta wired up. Returns the asset's dict."""
+    """Copy a library yarn into runtime assets and persist a YarnAsset.
+
+    Library yarns prefer the single `rgba.png` material texture so the file is
+    easy to inspect and Blender samples the same exact RGB + alpha channels.
+    Split `rgb.png` + `alpha.png` remains a fallback for older/in-flight entries.
+    Returns the asset's dict."""
     ensure_runtime_dirs()
     load_yarn_assets()
     yarn_dir = _library_dir(yarn_id)
@@ -599,74 +602,108 @@ def import_yarn_from_library(yarn_id: str) -> dict:
     if not meta_path.exists():
         raise FileNotFoundError(f"metadata.json missing for {yarn_id}")
     metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-    rgba_src = yarn_dir / (metadata.get("files", {}).get("rgba") or "rgba.png")
-    if not rgba_src.exists():
-        raise FileNotFoundError(f"rgba.png missing for {yarn_id}")
+    files_meta = metadata.get("files", {}) or {}
+    rgb_src = yarn_dir / (files_meta.get("rgb") or "rgb.png")
+    alpha_src = yarn_dir / (files_meta.get("alpha") or "alpha.png")
+    rgba_src = yarn_dir / (files_meta.get("rgba") or "rgba.png")
+    has_split = rgb_src.exists() and alpha_src.exists()
+    has_rgba = rgba_src.exists()
+    if not has_rgba and not has_split:
+        raise FileNotFoundError(f"rgb.png/alpha.png or rgba.png missing for {yarn_id}")
 
     asset_id = uuid.uuid4().hex[:12]
     destination_dir = _asset_dir(asset_id)
     destination_dir.mkdir(parents=True, exist_ok=True)
 
-    # Provenance copy — keep the library RGBA in the runtime asset folder.
-    source_name = "rgba.png"
-    shutil.copy2(rgba_src, destination_dir / source_name)
-
-    albedo_path = destination_dir / "albedo.png"
-    alpha_path = destination_dir / "alpha.png"
-    _split_rgba(destination_dir / source_name, albedo_path, alpha_path)
-
-    cycles_dir = destination_dir / "cycles_safe"
-    render_diffuse_path = _ensure_cycles_safe_texture(albedo_path, cycles_dir)
-    render_alpha_path = _ensure_cycles_safe_texture(alpha_path, cycles_dir)
-    tiled = ensure_cycles_tiled_texture_set(
-        albedo_path,
-        alpha_path,
-        destination_dir / "cycles_tiled",
-    )
-    rgba_tiled = ensure_cycles_tiled_rgba_texture_set(
-        destination_dir / source_name,
-        destination_dir / "cycles_tiled",
-    )
-
     band_meta = _build_band_meta_from_library(metadata)
     label = metadata.get("label") or yarn_id
 
-    asset = YarnAsset(
-        id=asset_id,
-        label=label,
-        status="ready",
-        sourceFilename=source_name,
-        sourceUrl="",
-        diffuseFilename=_relative_asset_path(asset_id, albedo_path),
-        alphaFilename=_relative_asset_path(asset_id, alpha_path),
-        renderDiffuseFilename=_relative_asset_path(asset_id, render_diffuse_path),
-        renderAlphaFilename=_relative_asset_path(asset_id, render_alpha_path),
-        renderTextureMode="rgba_tiled" if rgba_tiled else ("tiled" if tiled else "single"),
-        renderDiffuseTilePattern=_relative_asset_path(asset_id, tiled.get("diffuse_pattern")) if tiled else None,
-        renderDiffuseTileFilenames=[
-            _relative_asset_path(asset_id, path) or ""
-            for path in (tiled.get("diffuse_paths") if tiled else [])
-        ],
-        renderAlphaTilePattern=_relative_asset_path(asset_id, tiled.get("alpha_pattern")) if tiled else None,
-        renderAlphaTileFilenames=[
-            _relative_asset_path(asset_id, path) or ""
-            for path in (tiled.get("alpha_paths") if tiled else [])
-        ],
-        renderRgbaTilePattern=_relative_asset_path(asset_id, rgba_tiled.get("rgba_pattern")) if rgba_tiled else None,
-        renderRgbaTileFilenames=[
-            _relative_asset_path(asset_id, path) or ""
-            for path in (rgba_tiled.get("rgba_paths") if rgba_tiled else [])
-        ],
-        renderTileCount=int((rgba_tiled or tiled).get("tile_count")) if (rgba_tiled or tiled) else None,
-        renderTileWidthPx=int((rgba_tiled or tiled).get("tile_width_px")) if (rgba_tiled or tiled) else None,
-        renderTileHeightPx=int((rgba_tiled or tiled).get("tile_height_px")) if (rgba_tiled or tiled) else None,
-        bandMeta=band_meta,
-        createdAt=_utc_now(),
-        updatedAt=_utc_now(),
-    )
-    _refresh_asset_urls(asset)
-    _persist_asset(asset)
-    with _LOCK:
-        _ASSETS[asset_id] = asset
+    if has_rgba:
+        source_name = "rgba.png"
+        shutil.copy2(rgba_src, destination_dir / source_name)
 
-    return asset.to_dict()
+        rgba_tiled = ensure_cycles_tiled_rgba_texture_set(
+            destination_dir / source_name,
+            destination_dir / "cycles_tiled",
+        )
+
+        asset = YarnAsset(
+            id=asset_id,
+            label=label,
+            status="ready",
+            sourceFilename=source_name,
+            sourceUrl="",
+            diffuseFilename=None,
+            alphaFilename=None,
+            renderDiffuseFilename=None,
+            renderAlphaFilename=None,
+            renderTextureMode="rgba_tiled" if rgba_tiled else "rgba_single",
+            renderDiffuseTilePattern=None,
+            renderDiffuseTileFilenames=[],
+            renderAlphaTilePattern=None,
+            renderAlphaTileFilenames=[],
+            renderRgbaTilePattern=_relative_asset_path(asset_id, rgba_tiled.get("rgba_pattern")) if rgba_tiled else None,
+            renderRgbaTileFilenames=[
+                _relative_asset_path(asset_id, path) or ""
+                for path in (rgba_tiled.get("rgba_paths") if rgba_tiled else [])
+            ],
+            renderTileCount=int(rgba_tiled.get("tile_count")) if rgba_tiled else None,
+            renderTileWidthPx=int(rgba_tiled.get("tile_width_px")) if rgba_tiled else None,
+            renderTileHeightPx=int(rgba_tiled.get("tile_height_px")) if rgba_tiled else None,
+            bandMeta=band_meta,
+            createdAt=_utc_now(),
+            updatedAt=_utc_now(),
+        )
+        _refresh_asset_urls(asset)
+        _persist_asset(asset)
+        with _LOCK:
+            _ASSETS[asset_id] = asset
+        return asset.to_dict()
+
+    if has_split:
+        source_name = "rgb.png"
+        shutil.copy2(rgb_src, destination_dir / "rgb.png")
+        shutil.copy2(alpha_src, destination_dir / "alpha.png")
+        tiled = ensure_cycles_tiled_texture_set(
+            destination_dir / "rgb.png",
+            destination_dir / "alpha.png",
+            destination_dir / "cycles_tiled",
+        )
+
+        asset = YarnAsset(
+            id=asset_id,
+            label=label,
+            status="ready",
+            sourceFilename=source_name,
+            sourceUrl="",
+            diffuseFilename="rgb.png",
+            alphaFilename="alpha.png",
+            renderDiffuseFilename=None,
+            renderAlphaFilename=None,
+            renderTextureMode="split_tiled" if tiled else "split_single",
+            renderDiffuseTilePattern=_relative_asset_path(asset_id, tiled.get("diffuse_pattern")) if tiled else None,
+            renderDiffuseTileFilenames=[
+                _relative_asset_path(asset_id, path) or ""
+                for path in (tiled.get("diffuse_paths") if tiled else [])
+            ],
+            renderAlphaTilePattern=_relative_asset_path(asset_id, tiled.get("alpha_pattern")) if tiled else None,
+            renderAlphaTileFilenames=[
+                _relative_asset_path(asset_id, path) or ""
+                for path in (tiled.get("alpha_paths") if tiled else [])
+            ],
+            renderRgbaTilePattern=None,
+            renderRgbaTileFilenames=[],
+            renderTileCount=int(tiled.get("tile_count")) if tiled else None,
+            renderTileWidthPx=int(tiled.get("tile_width_px")) if tiled else None,
+            renderTileHeightPx=int(tiled.get("tile_height_px")) if tiled else None,
+            bandMeta=band_meta,
+            createdAt=_utc_now(),
+            updatedAt=_utc_now(),
+        )
+        _refresh_asset_urls(asset)
+        _persist_asset(asset)
+        with _LOCK:
+            _ASSETS[asset_id] = asset
+        return asset.to_dict()
+
+    raise FileNotFoundError(f"rgb.png/alpha.png or rgba.png missing for {yarn_id}")

@@ -14,20 +14,21 @@ Read in this order:
 
 | # | file | what it covers |
 |---|---|---|
-| 1 | [current_pipeline.md](current_pipeline.md) | Today's flow: 4 approaches A/B/C/D in `solid_band.py` running PRE-inpaint per-thread, plus `compute_fiber_bands` walking POST-inpaint on assembled alpha. Code paths and call-graph. |
-| 2 | [target_pipeline.md](target_pipeline.md) | Where we're going: single FWHM-density `detect_bands` running POST-inpaint on the assembled alpha. Pre-inpaint per-thread bands only kept for alignment and per-thread review overlays. |
+| 1 | [current_pipeline.md](current_pipeline.md) | Today's flow after the 2026-05-29 repairs: connected-core per-thread bands for review/alignment, plus assembled-alpha export bands for saved Blender metadata. |
+| 2 | [target_pipeline.md](target_pipeline.md) | Historical cut-over plan for the single FWHM-density detector. Kept for context; later work added connected-core refinements for per-thread red bands. |
 | 3 | [yarnseamless_reference.md](yarnseamless_reference.md) | The reference implementation from `/Users/mihirbotle/Desktop/Impetus/3D Fabric/YarnSeamless/yarnseamless/band_segmenter.py:detect_bands` — what makes it better than the current C/D approaches. |
 | 4 | [change_log.md](change_log.md) | One entry per edit. Append at the top. |
 
 ## TL;DR
 
-**Current (2026-05-16):**
+**Current (updated 2026-05-29):**
 
 ```
 Stage 2 (multithread/process) — PRE-INPAINT, per-thread:
-  alpha_arr → binary_closing(1×100) → approach_c_longest_run / approach_d_combined_smoothed
-            → c_band/d_band   (core top/bottom Y)
-            → compute_fiber_extents_y (alpha visible-pixel walk)
+  alpha_arr → thread_segmentation.segment_thread_alpha
+            → connected thick-core row scoring
+            → c_band/d_band   (same connected-core top/bottom Y)
+            → connected visible-fiber walk
             → c_band.fiber_top_y / fiber_bot_y
   Used by: MTI yOffset alignment, /export width_meta, save-to-library width
            field, blender_uv_remap inputs (indirectly via core_top/bottom).
@@ -40,7 +41,7 @@ POST-INPAINT (save-to-library):
                top_halo_frac, bot_halo_frac}
 ```
 
-Two issues this doc tracks:
+Historical issues this doc tracks:
 
 1. **Core boundaries come from pre-inpaint per-thread approach C** (rigid 0.85
    coverage threshold). On a noisy / wide / multi-thread scan, C frequently
@@ -54,14 +55,15 @@ Two issues this doc tracks:
    core, `compute_fiber_bands` owns the fibers. They don't agree on density
    semantics (binary > threshold vs visible-pixel walk with peak%-of-floor).
 
-**Target:** one FWHM density walk (ported from yarnseamless `band_segmenter.detect_bands`)
-runs once on the final assembled alpha and returns `{core, fiber_top, fiber_bot}`
-in one pass. Pre-inpaint C/D stay only as **alignment helpers** for MTI (yOffsets
-need *some* band-centre estimate before the user can review). The save-to-library
-fiber walk is replaced by the new detector; the unified width field in
-`export_metadata` is recomputed against the new core too.
+**Current target:** assembled-alpha metadata remains measured on the final export,
+while per-thread red review bands use connected-core detection so disconnected
+haze or background rows cannot steal the visible core-thickness bracket.
 
 See `target_pipeline.md` for the cut-over plan.
+
+For the full 2026-05-29 yarn scan processing log, including RGBA/background
+cleanup and rotation changes, read
+[../YarnScanProcessing/phase_log.md](../YarnScanProcessing/phase_log.md).
 
 ## How to update these docs
 

@@ -138,6 +138,70 @@ def closed_form_alpha_and_f(I_srgb_u8, B_lin):
     return a, f
 
 
+def recover_rgb_foreground_from_alpha(
+    I_srgb_u8,
+    alpha_u8,
+    B_lin,
+    *,
+    min_alpha: float = 1.0 / 255.0,
+    fill_thresh: int = 15,
+    stabilize_low_alpha: bool = True,
+    stabilize_below_u8: int = 96,
+    core_alpha_u8: int = 180,
+    source_blend_start_u8: int | None = None,
+    preserve_source_above_u8: int | None = None,
+):
+    """Recover a chromatic foreground using an already-computed alpha matte.
+
+    The alpha solvers in this module intentionally assume an achromatic
+    foreground for stability, but the exported RGBA should preserve the yarn's
+    actual colour. Given I = alpha * F + (1-alpha) * B, solve F per RGB channel.
+    """
+    I = srgb_to_linear(I_srgb_u8.astype(np.float64) / 255.0)
+    B = np.asarray(B_lin, dtype=np.float64).reshape(3)
+    alpha = np.asarray(alpha_u8, dtype=np.float64)
+    if alpha.max(initial=0.0) > 1.0:
+        alpha = alpha / 255.0
+    alpha = np.clip(alpha, 0.0, 1.0)
+
+    denom = np.maximum(alpha[..., None], float(min_alpha))
+    F_lin = (I - (1.0 - alpha[..., None]) * B) / denom
+    F_lin = np.clip(F_lin, 0.0, 1.0)
+    F_u8 = (linear_to_srgb(F_lin) * 255).clip(0, 255).astype(np.uint8)
+
+    if stabilize_low_alpha:
+        alpha_u8_arr = (alpha * 255.0).round().astype(np.uint8)
+        core = alpha_u8_arr >= int(core_alpha_u8)
+        low = (alpha_u8_arr > int(round(min_alpha * 255.0))) & (alpha_u8_arr < int(stabilize_below_u8))
+        if core.any() and low.any():
+            core_rgb = np.median(F_u8[core].reshape(-1, 3), axis=0).astype(np.float32)
+            w = np.clip(alpha_u8_arr.astype(np.float32) / float(max(1, stabilize_below_u8)), 0.0, 1.0)
+            w = (w ** 4)[..., None]
+            mixed = F_u8.astype(np.float32) * w + core_rgb[None, None, :] * (1.0 - w)
+            F_u8[low] = mixed[low].clip(0, 255).astype(np.uint8)
+
+    if preserve_source_above_u8 is not None:
+        alpha_u8_arr = (alpha * 255.0).round().astype(np.uint8)
+        source_rgb = np.asarray(I_srgb_u8, dtype=np.uint8)
+        high = alpha_u8_arr >= int(preserve_source_above_u8)
+        F_u8[high] = source_rgb[high]
+        if source_blend_start_u8 is not None:
+            start = int(source_blend_start_u8)
+            stop = int(preserve_source_above_u8)
+            if stop > start:
+                mid = (alpha_u8_arr >= start) & (alpha_u8_arr < stop)
+                if mid.any():
+                    w = ((alpha_u8_arr.astype(np.float32) - float(start)) / float(stop - start))
+                    w = np.clip(w, 0.0, 1.0)[..., None]
+                    mixed = F_u8.astype(np.float32) * (1.0 - w) + source_rgb.astype(np.float32) * w
+                    F_u8[mid] = mixed[mid].clip(0, 255).astype(np.uint8)
+
+    transparent = alpha <= float(min_alpha)
+    canvas_fill = I_srgb_u8.max(axis=2) <= int(fill_thresh)
+    F_u8[transparent | canvas_fill] = 0
+    return F_u8
+
+
 def sample_local_B_from_borders(I_srgb_u8, band: int = 6, fill_thresh: int = 15):
     """Sample the bg colour from the top + bottom band rows of the crop.
     Excludes canvas-fill pixels (rgb_max ≤ fill_thresh). Returns linear-RGB
@@ -190,8 +254,11 @@ _LAB_DELTA = 6.0 / 29.0
 
 def srgb_u8_to_lab(arr_u8):
     """sRGB u8 (H, W, 3) → CIELab D65 via XYZ. Manual; no skimage dependency."""
-    rgb_lin = srgb_to_linear(arr_u8.astype(np.float64) / 255.0)
-    xyz = rgb_lin @ _LAB_M.T
+    rgb = np.clip(arr_u8.astype(np.float64) / 255.0, 0.0, 1.0)
+    rgb_lin = srgb_to_linear(rgb)
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        xyz = rgb_lin @ _LAB_M.T
+    xyz = np.nan_to_num(xyz, nan=0.0, posinf=1.0, neginf=0.0)
     xyz_n = xyz / np.array([_LAB_XN, _LAB_YN, _LAB_ZN])
     fT = np.where(xyz_n > _LAB_DELTA ** 3,
                   np.cbrt(xyz_n),
@@ -340,6 +407,48 @@ def closed_form_alpha_and_f_lab_gated(
     return alpha_u8, F_rgb_u8
 
 
+def closed_form_alpha_hybrid_lab_luma(
+    leveled_u8,
+    B_lin,
+    *,
+    luma_floor: int = 100,
+    return_cluster: bool = False,
+):
+    """Single-scan matte robust to background-card colour changes.
+
+    Method K is chroma-driven, which is excellent for coloured yarn on a
+    coloured card but weak for black/grey yarn on grey cards where the signal
+    is mostly luminance.  Add only the strong closed-form luminance core so
+    band detection has a continuous body row without admitting low-level
+    background fog into the saved alpha.
+    """
+    alpha_lab_u8, _F_unused, B_lab_mean, B_lab_cov = (
+        closed_form_alpha_and_f_lab_gated(
+            leveled_u8,
+            return_cluster=True,
+            fallback_B_lin=B_lin,
+        )
+    )
+    try:
+        a_luma, _f_unused = closed_form_alpha_and_f(leveled_u8, B_lin)
+        if not np.isfinite(a_luma).all():
+            raise FloatingPointError("non-finite luminance alpha")
+        alpha_luma_u8 = (a_luma * 255).round().astype(np.uint8)
+    except Exception as e:
+        print(f"[hybrid-alpha] luminance fallback skipped ({e})")
+        alpha_luma_u8 = np.zeros_like(alpha_lab_u8, dtype=np.uint8)
+
+    alpha_luma_u8 = np.where(
+        alpha_luma_u8 >= int(luma_floor),
+        alpha_luma_u8,
+        0,
+    ).astype(np.uint8)
+    alpha_u8 = np.maximum(alpha_lab_u8, alpha_luma_u8)
+    if return_cluster:
+        return alpha_u8, B_lab_mean, B_lab_cov
+    return alpha_u8
+
+
 # === Closed-form achromatic-F (dual scan) ===
 def closed_form_alpha_dual(I_red_srgb_u8, I_cyan_srgb_u8, B_red_lin, B_cyan_lin):
     """Dual-scan matting: 6 equations / 2 unknowns under achromatic F.
@@ -437,7 +546,7 @@ def apply_level_transform(img_arr, angle_deg, bbox):
     its `level_meta` dict — see multithread_flow/alpha_pipeline.py:209-284."""
     if abs(angle_deg) > 1e-3:
         pil = Image.fromarray(img_arr).rotate(
-            angle_deg, resample=Image.BILINEAR, expand=True, fillcolor=(0, 0, 0)
+            angle_deg, resample=Image.BICUBIC, expand=True, fillcolor=(0, 0, 0)
         )
         img_arr = np.asarray(pil)
     if bbox is not None:

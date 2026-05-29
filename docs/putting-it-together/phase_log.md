@@ -4752,6 +4752,64 @@ This checkpoint supersedes the old active-doc guidance that pinned `Texture Offs
 
 ---
 
+## Phase 4a — manual live Blender draft send button
+
+**Date**: 2026-05-27
+
+### Motivation
+
+The app already had a debounced live push after yarn bindings became complete, but there was no visible control for the user to deliberately send the exact current design draft to the open Blender session. The user asked for a frontend button that sends the draft live to Blender over MCP.
+
+### Symptom
+
+Step 3 exposed `Render Preview`, `Build Tile Texture`, and export buttons. A designer who wanted to update the live Blender viewport without starting a render had to rely on hidden auto-sync timing or trigger a render path.
+
+### Diagnosis
+
+The backend route already existed: `POST /api/blender/push-project-bandmeta` validates `draft + colorBindings`, resolves ready yarn assets, builds the same setup script used by render-project with `render_still=False`, and sends that script to Blender via `BlenderMCPAddon.execute_code` on port 9876. The missing piece was explicit UI plumbing and status feedback.
+
+### Fix
+
+- [frontend/src/components/RenderPanel.tsx](../../frontend/src/components/RenderPanel.tsx): added the `Send to Live Blender` action beside `Render Preview`, with a busy label and shared disable state while Blender work is active.
+- [frontend/src/components/ColorMappingStep.tsx](../../frontend/src/components/ColorMappingStep.tsx): threaded the optional live-send handler and busy state through to the render panel.
+- [frontend/src/App.tsx](../../frontend/src/App.tsx): added `liveBlenderBusy`, the manual `pushProjectBandmeta(normalizeDraft(draft), colorBindings)` handler, success/error status text, and shared the live-push signature builder with the existing debounced auto-sync.
+- [docs/putting-it-together/architecture.md](architecture.md): documented the manual live setup request flow.
+- [docs/putting-it-together/README.md](README.md): noted the new Step 3 operator action.
+
+### Verification
+
+```text
+cd frontend && npm run build
+✓ built in 1.25s
+
+cd frontend && npm run test:unit
+13 tests passed
+
+Playwright smoke at http://127.0.0.1:5180/studio.html
+Step 3 button text: Send to Live Blender
+disabled=true before yarn bindings are complete
+
+PYTHONPATH=backend python3 - <<'PY'
+from app.blender_sync import send_blender_command
+print(send_blender_command('get_scene_info'))
+PY
+status: success; scene contains ParametricWeave and WebDraft_Live
+```
+
+Socket note: the app and docs use Blender MCP port `9876`, which was open and returned scene info. The generic Blender MCP tool in this Codex session was pointed at `9875` and failed there, so app-level verification used the backend's configured socket helper.
+
+### Lesson
+
+Manual live setup push is not the same as the `BLENDER_LIVE_RENDER` executor toggle. The button updates the currently open Blender scene; it does not decide whether render jobs run headless or live.
+
+### What was NOT done
+
+- No backend route change was needed.
+- No `.blend` socket or node change was made.
+- The dev-only `BLENDER_LIVE_RENDER` frontend toggle remains a separate open item.
+
+---
+
 ## Template for new phases
 
 ```

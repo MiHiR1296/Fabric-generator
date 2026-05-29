@@ -1248,7 +1248,10 @@ export default function MultiFragmentEditor({
       if (exp[expKey]) return exp[expKey] + cacheBust;
       return wrapUrl ? wrapUrl + cacheBust : null;
     };
-    setAssembledAlphaDataUrl(pick('alpha', data.assembled_alpha_url));
+    const alphaUrl = exp.material_alpha
+      ? exp.material_alpha + cacheBust
+      : (exp.alpha ? exp.alpha + cacheBust : (data.assembled_alpha_url ? data.assembled_alpha_url + cacheBust : null));
+    setAssembledAlphaDataUrl(alphaUrl);
     setAssembledRgbaDataUrl(pick('rgba', data.assembled_rgba_url));
     setAssembledDarkBlueDataUrl(pick('dark_blue', data.assembled_dark_blue_url));
     // Also swap the top RGB viewer to the no-wraparound version.
@@ -1324,12 +1327,10 @@ export default function MultiFragmentEditor({
     }
   }
 
-  // Compose F · α + customBg · (1−α) client-side and trigger a download.
-  // Uses the already-loaded assembled_F + assembled_alpha (so no extra
-  // server roundtrip beyond what we already did to load them).
+  // Compose exact RGB · α + customBg · (1−α) client-side from split outputs.
   async function downloadCustomBgComposite(rgbHex) {
-    if (!assembledRgbaDataUrl) {
-      setError('Need assembled outputs first');
+    if (!assembledDataUrl || !assembledAlphaDataUrl) {
+      setError('Need assembled RGB + alpha first');
       return;
     }
     try {
@@ -1338,24 +1339,43 @@ export default function MultiFragmentEditor({
       const g = parseInt(hex.slice(2, 4), 16);
       const b = parseInt(hex.slice(4, 6), 16);
 
-      // We compose from assembled_rgba (which already has F as RGB + α as alpha)
-      // because that's the canonical "thread on transparent" image. comp = F·α + bg·(1−α).
-      const im = await new Promise((res, rej) => {
+      const rgbIm = await new Promise((res, rej) => {
         const x = new Image();
         x.crossOrigin = 'anonymous';
         x.onload = () => res(x);
         x.onerror = rej;
-        x.src = assembledRgbaDataUrl;
+        x.src = assembledDataUrl;
+      });
+      const alphaIm = await new Promise((res, rej) => {
+        const x = new Image();
+        x.crossOrigin = 'anonymous';
+        x.onload = () => res(x);
+        x.onerror = rej;
+        x.src = assembledAlphaDataUrl;
       });
       const cv = document.createElement('canvas');
-      cv.width = im.width; cv.height = im.height;
+      cv.width = rgbIm.width; cv.height = rgbIm.height;
       const cctx = cv.getContext('2d');
-      // Fill bg first, then composite the RGBA on top — browser does the
-      // standard F · α + bg · (1−α) for us via drawImage with default
-      // composite op.
       cctx.fillStyle = `rgb(${r},${g},${b})`;
       cctx.fillRect(0, 0, cv.width, cv.height);
-      cctx.drawImage(im, 0, 0);
+
+      const rgbaCv = document.createElement('canvas');
+      rgbaCv.width = cv.width; rgbaCv.height = cv.height;
+      const rgbaCtx = rgbaCv.getContext('2d');
+      rgbaCtx.drawImage(rgbIm, 0, 0, cv.width, cv.height);
+      const rgbData = rgbaCtx.getImageData(0, 0, cv.width, cv.height);
+
+      const alphaCv = document.createElement('canvas');
+      alphaCv.width = cv.width; alphaCv.height = cv.height;
+      const alphaCtx = alphaCv.getContext('2d');
+      alphaCtx.drawImage(alphaIm, 0, 0, cv.width, cv.height);
+      const alphaData = alphaCtx.getImageData(0, 0, cv.width, cv.height).data;
+
+      for (let i = 0; i < rgbData.data.length; i += 4) {
+        rgbData.data[i + 3] = alphaData[i];
+      }
+      rgbaCtx.putImageData(rgbData, 0, 0);
+      cctx.drawImage(rgbaCv, 0, 0);
 
       // Trigger download
       const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
@@ -1396,9 +1416,7 @@ export default function MultiFragmentEditor({
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `Server error ${r.status}`);
 
-      // Slimmed: Export now downloads only the RGBA (no-bg cutout) + metadata JSON.
-      // For the other formats (RGB, α, dark-blue, custom-bg), the user has
-      // dedicated buttons in the lower toolbar.
+      // Export the canonical RGBA texture: exact RGB + natural alpha.
       const cacheBust = `?t=${Date.now()}`;
       const triggers = [];
       const order = ['rgba', 'metadata'];
@@ -1409,7 +1427,7 @@ export default function MultiFragmentEditor({
           url: url + cacheBust,
           filename: key === 'metadata'
             ? 'export_metadata.json'
-            : `export_assembled_${key}.png`,
+            : 'export_assembled_rgba.png',
         });
       }
       // Programmatic anchor-clicks; small stagger so the browser doesn't drop any.
@@ -1813,7 +1831,7 @@ export default function MultiFragmentEditor({
                 width: `${dispW}px`,
                 height: `${dispH}px`,
                 cursor: tool === 'drag' ? 'ns-resize' : 'crosshair',
-                imageRendering: zoom > 2 ? 'pixelated' : 'auto',
+                imageRendering: 'auto',
               }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
@@ -2016,7 +2034,7 @@ function ResultCanvas({
 
   return (
     <div className="rounded border border-gray-700 overflow-auto bg-black max-w-full" style={{ maxHeight }}>
-      <canvas ref={ref} className="block" style={{ imageRendering: 'pixelated' }} />
+      <canvas ref={ref} className="block" style={{ imageRendering: 'auto' }} />
     </div>
   );
 }
@@ -2031,7 +2049,7 @@ function ImageWithJoinLines({ src, alt, imgDims, joinXCenters, joinUsage, showJo
   return (
     <div className="rounded border border-gray-700 overflow-auto bg-black max-w-full" style={{ maxHeight: `${maxHeight}px` }}>
       <div className="relative inline-block">
-        <img src={src} alt={alt} className="block max-w-none" style={{ imageRendering: 'pixelated' }} />
+        <img src={src} alt={alt} className="block max-w-none" style={{ imageRendering: 'auto' }} />
         {showLines && joinXCenters.map((jx, i) => {
           const usage = (joinUsage && joinUsage[i]) || 'inpaint';
           const isSkip = usage === 'skip';
@@ -2145,7 +2163,7 @@ function ResultView({
         </button>
         {onSaveToLibrary && (
           <button onClick={onSaveToLibrary} disabled={savingToLibrary}
-            title="Save this yarn (RGBA + dimensions + band metadata) to the shared yarn library so Fabric-generator can import it as a draft material."
+            title="Save this yarn (exact RGB + alpha + dimensions + band metadata) to the shared yarn library so Fabric-generator can import it as a draft material."
             className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 disabled:text-gray-600 text-white text-xs py-1.5 px-3 rounded font-medium">
             {savingToLibrary ? 'Saving…' : '＋ Save to Library'}
           </button>
@@ -2195,7 +2213,7 @@ function ResultView({
           className="text-xs px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium">
           Download Metadata
         </button>
-        {assembledRgbaDataUrl && (
+        {assembledDataUrl && assembledAlphaDataUrl && (
           <span className="flex items-center gap-1 text-xs text-gray-400">
             <span>Custom bg:</span>
             <input type="color" defaultValue="#0a2882"

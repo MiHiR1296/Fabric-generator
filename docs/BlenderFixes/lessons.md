@@ -697,6 +697,64 @@ Then the top/core/bottom V slope is the same everywhere, so the U section ratio 
 
 ---
 
+### Rule 38 — Drawdown-driven strand bend uses MODULO across `Draft Rows`; non-1/1 patterns visibly break.
+
+> Replaces an earlier version of Rule 38 (2026-05-26) which incorrectly blamed `UV Random U`. UV Random U is at most a cosmetic exaggerator; the real bug is in the face-index math. See [phase_log.md Phase 10v](phase_log.md#phase-10v--diagnose-arc-2-looks-wrong-on-simple-twill-no-graph-or-code-changes) for the full retraction and evidence.
+
+The strand bend Z offset is sampled per curve point from the drawdown:
+
+```text
+PW Draft Warp Row Mod    = (Index in Curve) % Draft Rows         <-- BUG
+PW Draft Warp Col Mod    = (Curve Index)    % Draft Columns
+PW Draft Warp Face Index = Warp Row Mod × Draft Columns + Warp Col Mod
+PW Draft Warp Sample.Index = Warp Face Index
+PW Draft Warp Sign = cell_code × 2 − 1
+Math.005           = Sign × Amplitude × 0.5
+Combine XYZ.002.Z  = Math.005
+Set Position.Offset = Combine XYZ.002.Vector                     applied BEFORE Resample Curve
+```
+
+When `Weft Threads ≠ Draft Rows`, the strand's `Index in Curve` runs `0 .. Weft Threads − 1`, but the modulo wraps it `Weft Threads / Draft Rows` times across the drawdown. The strand "sees" each drawdown row `Weft Threads / Draft Rows` times instead of once.
+
+The correct mapping (for a curve with `N` points sampling a drawdown with `R` rows) is integer division:
+
+```text
+row = floor(Index_in_Curve × R / N)
+```
+
+Equivalent: make the warp curve emit exactly `Draft Rows` points (and the weft curve exactly `Draft Columns` points), and keep modulo.
+
+**Why plain weave hides it**: the buggy mapping produces an ultra-high-frequency square wave (e.g. 40 cycles/strand at 80 wefts × 20 rows). The profile sweep + cross-section averaging smear it to ~flat, which happens to look indistinguishable from a true plain weave with very small amplitude.
+
+**Why simple twills break visibly**: 2/2 twill's drawdown column sequence `1,0,0,1,1,0,0,1,...` combined with the modulo wrap produces a `+, -, -, +` square wave at 4-point period — slow enough that the profile sweep does *not* average it out, but fast enough that each drawdown cell is chopped into 4 alternating sub-bumps. Adjacent strands' Arc 2 silhouettes overlap through those sub-bumps, creating the crescent/moon-shaped inverse-geometry overlap users report as "the texture scale changed" or "looks very wrong".
+
+**Why `Over Count` / `Under Count` cannot help**: those Surface-panel sockets are dead in the current graph (Phase 10v Observation 1 — toggling `1 → 2 → 4` produced byte-for-byte identical strand centerline Z). The drawdown is the only place the over/under sequence is communicated to the geometry.
+
+**Why `UV Random U` is not the cause**: it is a U-axis scramble. It does not touch Z. With it at `0.0`, twills still moon-overlap; with it at `1.0`, the moon overlaps additionally get random texture phases per lobe, which is cosmetic.
+
+The rule:
+
+- **Do not** lean on `Over Count` / `Under Count` to fix pattern-dependent geometry bugs — they are dead.
+- **Do not** lean on `UV Random U` either — it does not affect strand Z.
+- **Do** fix the row/col mapping inside `PW Draft Warp/Weft Row/Col Mod` to integer division, or rebuild the strand curves to have exactly `Draft Rows`/`Draft Columns` points each.
+- Snapshot the .blend before changing those math nodes; Rule 22 still applies.
+
+**Why**: Phase 10v final (2026-05-27 local session). Live MCP investigation:
+
+```text
+Test                                strand 0 mean Z range            interpretation
+all-zeros drawdown                  flat at -0.0129                  no bend, sensible
+all-ones drawdown                   flat at +0.0100                  no bend, sensible
+plain weave (1/1)                   flat near -0.005                 buggy ultra-HF averaged out
+2/2 twill                           ±0.014 oscillation, period ~4    buggy HF visible per cell
+Over/Under = 2/2 with 2/2 twill     identical to Over/Under = 1/1   sockets are dead
+Warp/Weft Threads = 20 (= Draft Rows) on 2/2 twill   bend less broken; still imperfect because Set Position acts on the unsampled curve
+```
+
+`PW Draft Warp Row Mod.operation = MODULO` is the precise misuse. Replacing with floor-divide based on point count fixes the high-frequency wrap.
+
+---
+
 ## Open items (to revisit when relevant)
 
 - **Protect the 2026-05-19 visual checkpoint.** Phase 10u is the approved baseline for direct web-to-Blender material preview. Any new Arc 2 split, padding, or U-scale experiment should start from a `.blend` backup and state whether it supersedes [../CHECKPOINT_2026-05-19.md](../CHECKPOINT_2026-05-19.md).

@@ -59,6 +59,27 @@ class AtlasTests(unittest.TestCase):
             self.assertEqual(alpha.getpixel((0, 5)), 255)
             self.assertEqual(alpha.getpixel((0, 0)), 128)
 
+    def test_build_yarn_atlas_can_read_rgba_without_split_files(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            rgba_path = root / "rgba.png"
+            Image.new("RGBA", (2, 2), (10, 20, 30, 128)).save(rgba_path)
+
+            bundle = build_yarn_atlas(
+                [
+                    {
+                        "id": "rgba",
+                        "rgba_path": rgba_path,
+                    },
+                ],
+                root / "atlas",
+            )
+
+            diffuse = Image.open(bundle.diffuse_path)
+            alpha = Image.open(bundle.alpha_path)
+            self.assertEqual(diffuse.getpixel((0, 0)), (10, 20, 30))
+            self.assertEqual(alpha.getpixel((0, 0)), 128)
+
 
 if __name__ == "__main__":
     unittest.main()

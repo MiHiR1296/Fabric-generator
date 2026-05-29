@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import {
   loadLocalPatternBooks,
+  PATTERN_LIBRARY_UPDATED_EVENT,
   parsePatternBookJson,
   upsertLocalPatternBook,
 } from '../domain/bookLibrary';
@@ -152,6 +153,15 @@ export default function PatternPickerPanel({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
+
+  useEffect(() => {
+    const refreshLocalBooks = () => {
+      previewCacheRef.current.clear();
+      setLocalBooks(loadLocalPatternBooks());
+    };
+    window.addEventListener(PATTERN_LIBRARY_UPDATED_EVENT, refreshLocalBooks);
+    return () => window.removeEventListener(PATTERN_LIBRARY_UPDATED_EVENT, refreshLocalBooks);
+  }, []);
 
   const books = useMemo<PatternBook[]>(
     () => [

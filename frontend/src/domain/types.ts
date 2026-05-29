@@ -156,7 +156,15 @@ export interface BlenderRenderJob {
   startedAt?: string | null;
   finishedAt?: string | null;
   imageUrl?: string | null;
+  tileSourceImageUrls?: string[];
   logTail: string[];
+}
+
+export interface TileRenderOptions {
+  tileCount: 4;
+  tileResolution: number;
+  guardThreads: number;
+  variationStrength: number;
 }
 
 export interface YarnAsset {

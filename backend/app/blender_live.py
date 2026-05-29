@@ -10,10 +10,10 @@ This module is the single source of truth for the `bandMeta.blender.*` ->
     body to the running BlenderMCPAddon socket (default 9876, override via
     BLENDER_PORT) so the user can iterate without firing a render job.
 
-The socket map matches the .blend currently on 9876 — Material 1..16 family
+The socket map matches `Codex_ParametricWeave.blend` — Material 1..16 family
 with `Image Width Px / Texture Scale U / Arc 1 V Min/Max / Arc 2 V Min/Max`
-per material, plus the legacy global sockets and pinned footgun sockets
-(Rule 3).
+per material, plus the consumed global sockets and pinned footgun sockets
+(Rule 3). Dead legacy sockets are intentionally not pushed.
 """
 from __future__ import annotations
 
@@ -51,12 +51,6 @@ PER_MATERIAL_SOCKETS: tuple[tuple[str, str, float], ...] = (
     ("Arc 1 V Max", "core_v_max", 1.0),
     ("Arc 2 V Min", "fiber_bot_v_min", 0.0),
     ("Arc 2 V Max", "fiber_top_v_max", 1.0),
-    # Phase 3g — per-yarn Arc 2 split fractions. Sockets don't exist on the
-    # .blend yet (Pass 2 will add + wire them); push code skips missing
-    # sockets silently. Defaults 0.0 mean "no halo" → split == 0 / 1 → the
-    # current symmetric `r` behaviour is preserved if the sockets are absent.
-    ("Top Halo Frac", "top_halo_frac", 0.0),
-    ("Bot Halo Frac", "bot_halo_frac", 0.0),
 )
 
 # Truly-global sockets that the graph still consumes. The legacy
@@ -80,7 +74,6 @@ PINNED_FOOTGUN_SOCKETS: tuple[tuple[str, float | bool], ...] = (
     ("Sub Strand Enable", True),
     ("Texture Scale V", 1.0),
     ("Texture Offset V", 0.0),
-    ("Texture Side Flatten", 0.0),
     ("Sub Texture Scale V", 1.0),
     ("Sub Texture Offset V", 0.0),
 )
@@ -158,9 +151,9 @@ def build_material_asset_entry(asset: Any) -> dict[str, Any]:
         # Inner-pair retained for diagnostics / future revival.
         "fiber_top_v_min": _coerce_float(blender.get("fiber_top_v_min"), 0.0),
         "fiber_bot_v_max": _coerce_float(blender.get("fiber_bot_v_max"), 1.0),
-        # Phase 3g — Arc 2 V split fractions (top/bot hair height / total).
-        # Producer emits these on new saves; for older yarns we fall back to
-        # the value computed from thickness_px above so push still works.
+        # Historical Phase 3g split fractions. The cleaned .blend no longer has
+        # Top/Bot Halo Frac sockets, but keeping these fields in the entry is
+        # useful for diagnostics and old file comparisons.
         "top_halo_frac": _coerce_float(blender.get("top_halo_frac"), fallback_top_frac),
         "bot_halo_frac": _coerce_float(blender.get("bot_halo_frac"), fallback_bot_frac),
     }

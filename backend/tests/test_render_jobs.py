@@ -9,13 +9,12 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from app.atlas import AtlasBundle  # noqa: E402
-from app.models import YarnAsset  # noqa: E402
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.atlas import AtlasBundle  # noqa: E402
+from app.models import YarnAsset  # noqa: E402
 from app.render_jobs import (  # noqa: E402
     DEFAULT_BLEND_FILE,
     DEFAULT_BLENDER_BINARY,
@@ -24,11 +23,23 @@ from app.render_jobs import (  # noqa: E402
     DEFAULT_PREVIEW_RENDER_SAMPLES,
     DEFAULT_SURFACE_RENDER_METHOD,
     DEFAULT_TEXTURE_INTERPOLATION,
+    DEFAULT_TILE_ORTHO_SCALE,
+    DEFAULT_TILE_REPAIR_COLOR_MATCH_STRENGTH,
+    DEFAULT_TILE_REPAIR_SEAM_RADIUS,
+    DEFAULT_TILE_RENDER_SAMPLES,
+    RenderJob,
+    _JOBS,
     build_project_material_payloads,
     build_headless_render_command,
     build_headless_render_script,
+    get_tile_source_image_path,
     load_headless_blender_config,
     submit_project_render_job,
+    _job_snapshot,
+    _next_multiple,
+    _normalize_tile_options,
+    _stitch_tile_grid,
+    _wrapped_segments,
 )
 
 
@@ -254,6 +265,37 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("'status': \"setup_ready\"", script)
         self.assertNotIn("bpy.ops.render.render(write_still=True)", script)
 
+    def test_build_headless_render_script_can_configure_tile_camera(self) -> None:
+        normal_script = build_headless_render_script(
+            {
+                "title": "Normal",
+                "drawdown": [[1]],
+                "warpColors": ["#ffffff"],
+                "weftColors": ["#111111"],
+            },
+            render_path="/tmp/normal-preview.png",
+        )
+        tile_script = build_headless_render_script(
+            {
+                "title": "Tile",
+                "drawdown": [[1]],
+                "warpColors": ["#ffffff"],
+                "weftColors": ["#111111"],
+            },
+            render_path="/tmp/tile-preview.png",
+            render_samples=DEFAULT_TILE_RENDER_SAMPLES,
+            tile_render_mode=True,
+            tile_ortho_scale=DEFAULT_TILE_ORTHO_SCALE,
+        )
+
+        self.assertNotIn("SeamlessTileCamera", normal_script)
+        self.assertIn("SeamlessTileCamera", tile_script)
+        self.assertIn(f"_PW_PREVIEW_RENDER_SAMPLES = {DEFAULT_TILE_RENDER_SAMPLES!r}", tile_script)
+        self.assertIn(f"_PW_TILE_ORTHO_SCALE = {DEFAULT_TILE_ORTHO_SCALE!r}", tile_script)
+        self.assertIn("camera_data.type = 'ORTHO'", tile_script)
+        self.assertIn("camera_data.name = 'SeamlessTileCameraData'", tile_script)
+        self.assertIn("scene.camera = camera_obj", tile_script)
+
     def test_build_headless_render_script_supports_udim_tiled_materials(self) -> None:
         script = build_headless_render_script(
             {
@@ -285,6 +327,14 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("\"diffuse_tile_pattern\": \"/tmp/tiles/albedo_<UDIM>.png\"", script)
 
     def test_build_headless_render_script_supports_rgba_udim_tiled_materials(self) -> None:
+        atlas = AtlasBundle(
+            diffuse_path=Path("/tmp/diffuse_atlas.png"),
+            alpha_path=Path("/tmp/alpha_atlas.png"),
+            rows=1,
+            tile_width=64,
+            tile_height=32,
+            asset_rows={"asset-wide": 0},
+        )
         script = build_headless_render_script(
             {
                 "title": "RGBA UDIM Test",
@@ -293,11 +343,10 @@ class RenderJobTests(unittest.TestCase):
                 "weftColors": ["#111111"],
             },
             render_path="/tmp/rgba-udim-preview.png",
+            atlas_bundle=atlas,
             material_assets=[
                 {
                     "id": "asset-wide",
-                    "diffuse_path": "/tmp/cycles-safe/albedo.png",
-                    "alpha_path": "/tmp/cycles-safe/alpha.png",
                     "texture_mode": "udim_rgba_tiled",
                     "texture_tile_count": 3,
                     "rgba_tile_pattern": "/tmp/tiles/rgba_<UDIM>.png",
@@ -310,8 +359,178 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("use_rgba_tiled = (", script)
         self.assertIn("asset_entry.get('texture_mode') == 'udim_rgba_tiled'", script)
         self.assertIn("asset_entry['rgba_tile_pattern']", script)
-        self.assertIn("alpha_output = alpha_tex.outputs['Alpha'] if use_rgba_tiled else alpha_tex.outputs['Color']", script)
+        self.assertIn("preview_materials = build_generated_preview_materials(_PW_MATERIAL_ASSETS)", script)
+        self.assertNotIn("preview_materials = [ensure_atlas_preview_material", script)
+        self.assertIn("alpha_output = alpha_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']", script)
         self.assertIn("\"rgba_tile_pattern\": \"/tmp/tiles/rgba_<UDIM>.png\"", script)
+
+    def test_build_headless_render_script_supports_rgba_single_materials(self) -> None:
+        atlas = AtlasBundle(
+            diffuse_path=Path("/tmp/diffuse_atlas.png"),
+            alpha_path=Path("/tmp/alpha_atlas.png"),
+            rows=1,
+            tile_width=64,
+            tile_height=32,
+            asset_rows={"asset-rgba": 0},
+        )
+        script = build_headless_render_script(
+            {
+                "title": "RGBA Single Test",
+                "drawdown": [[1]],
+                "warpColors": ["#ffffff"],
+                "weftColors": ["#111111"],
+            },
+            render_path="/tmp/rgba-single-preview.png",
+            atlas_bundle=atlas,
+            material_assets=[
+                {
+                    "id": "asset-rgba",
+                    "texture_mode": "rgba_single",
+                    "rgba_path": "/tmp/assets/rgba.png",
+                },
+            ],
+            warp_material_ids=[0],
+            weft_material_ids=[0],
+        )
+
+        self.assertIn("use_rgba_single = (", script)
+        self.assertIn("asset_entry.get('texture_mode') == 'rgba_single'", script)
+        self.assertIn("asset_entry['rgba_path']", script)
+        self.assertIn("preview_materials = build_generated_preview_materials(_PW_MATERIAL_ASSETS)", script)
+        self.assertNotIn("preview_materials = [ensure_atlas_preview_material", script)
+        self.assertIn("alpha_output = alpha_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']", script)
+
+    def test_tile_helpers_align_repeats_and_wrap_segments(self) -> None:
+        self.assertEqual(_next_multiple(81, 8), 88)
+        self.assertEqual(_next_multiple(80, 8), 80)
+        self.assertEqual(
+            _wrapped_segments(5, -1, 4),
+            [(0, 1, 3, 4), (1, 5, 0, 4)],
+        )
+
+    def test_stitch_tile_grid_pastes_zero_guard_tiles_without_blending(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output_path = root / "stitched.png"
+            colours = [
+                (10, 0, 0, 255),
+                (20, 0, 0, 255),
+                (30, 0, 0, 255),
+                (40, 0, 0, 255),
+            ]
+            tile_paths = []
+            for index, colour in enumerate(colours):
+                tile_path = root / f"tile_{index}.png"
+                Image.new("RGBA", (1, 1), colour).save(tile_path)
+                tile_paths.append(tile_path)
+
+            _stitch_tile_grid(
+                tile_paths,
+                output_path=output_path,
+                columns=2,
+                rows=2,
+                tile_resolution=1,
+                guard_px=0,
+            )
+
+            with Image.open(output_path) as stitched:
+                self.assertEqual(stitched.size, (2, 2))
+                self.assertEqual(stitched.getpixel((0, 0)), colours[0])
+                self.assertEqual(stitched.getpixel((1, 0)), colours[1])
+                self.assertEqual(stitched.getpixel((0, 1)), colours[2])
+                self.assertEqual(stitched.getpixel((1, 1)), colours[3])
+
+    def test_stitch_tile_grid_rejects_mismatched_zero_guard_tile_size(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            tile_path = root / "tile.png"
+            Image.new("RGBA", (2, 1), (10, 0, 0, 255)).save(tile_path)
+
+            with self.assertRaises(ValueError):
+                _stitch_tile_grid(
+                    [tile_path],
+                    output_path=root / "stitched.png",
+                    columns=1,
+                    rows=1,
+                    tile_resolution=1,
+                    guard_px=0,
+                )
+
+    def test_tile_options_default_to_2x2_seam_repair_flow(self) -> None:
+        options = _normalize_tile_options(
+            {
+                "tileCount": 12,
+                "tileResolution": 1200,
+                "guardThreads": 0,
+                "variationStrength": 0.25,
+            }
+        )
+
+        self.assertEqual(options["tileCount"], 4)
+        self.assertEqual(options["columns"], 2)
+        self.assertEqual(options["rows"], 2)
+        self.assertEqual(options["tileResolution"], 1200)
+        self.assertEqual(options["guardThreads"], 0)
+        self.assertEqual(options["variationStrength"], 0.0)
+        self.assertEqual(DEFAULT_TILE_REPAIR_SEAM_RADIUS, 12)
+        self.assertEqual(DEFAULT_TILE_REPAIR_COLOR_MATCH_STRENGTH, 1.2)
+
+    def test_tile_source_artifacts_are_exposed_in_job_snapshot(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            final_path = root / "tile_export.png"
+            source_path = root / "source_tile_01.png"
+            Image.new("RGBA", (1, 1), (10, 20, 30, 255)).save(final_path)
+            Image.new("RGBA", (1, 1), (40, 50, 60, 255)).save(source_path)
+            job = RenderJob(
+                id="tiles_test",
+                status="succeeded",
+                message="done",
+                draft_title="Draft",
+                target_object_name="ParametricWeave",
+                draft_object_name="WebDraft_Live",
+                created_at="2026-05-26T00:00:00Z",
+                job_dir=root,
+                render_path=final_path,
+                script_path=root / "tile_export.json",
+                stdout_path=root / "stdout.log",
+                stderr_path=root / "stderr.log",
+                tile_source_paths=[source_path],
+            )
+
+            snapshot = _job_snapshot(job)
+
+            self.assertEqual(
+                snapshot["tileSourceImageUrls"],
+                ["/api/blender/render-jobs/tiles_test/tile-sources/1"],
+            )
+
+    def test_get_tile_source_image_path_returns_saved_artifact(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_path = root / "source_tile_01.png"
+            Image.new("RGBA", (1, 1), (40, 50, 60, 255)).save(source_path)
+            job = RenderJob(
+                id="tiles_lookup",
+                status="succeeded",
+                message="done",
+                draft_title="Draft",
+                target_object_name="ParametricWeave",
+                draft_object_name="WebDraft_Live",
+                created_at="2026-05-26T00:00:00Z",
+                job_dir=root,
+                render_path=root / "tile_export.png",
+                script_path=root / "tile_export.json",
+                stdout_path=root / "stdout.log",
+                stderr_path=root / "stderr.log",
+                tile_source_paths=[source_path],
+            )
+            _JOBS[job.id] = job
+            try:
+                self.assertEqual(get_tile_source_image_path("tiles_lookup", 1), source_path)
+                self.assertIsNone(get_tile_source_image_path("tiles_lookup", 2))
+            finally:
+                _JOBS.pop(job.id, None)
 
     def test_build_project_material_payloads_generates_udim_tiles_for_wide_assets(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -344,25 +563,45 @@ class RenderJobTests(unittest.TestCase):
             asset_dir = yarn_root / "wide-rgba-asset"
             asset_dir.mkdir(parents=True)
             Image.new("RGBA", (16385, 4), (255, 0, 0, 128)).save(asset_dir / "rgba.png")
-            Image.new("RGB", (16385, 4), (255, 0, 0)).save(asset_dir / "albedo.png")
-            Image.new("L", (16385, 4), 128).save(asset_dir / "alpha.png")
             asset = YarnAsset(
                 id="wide-rgba-asset",
                 label="Wide RGBA Asset",
                 status="ready",
                 sourceFilename="rgba.png",
                 sourceUrl="/rgba.png",
-                diffuseFilename="albedo.png",
-                alphaFilename="alpha.png",
             )
 
             with patch("app.render_jobs.YARN_ASSETS_ROOT", yarn_root):
-                _atlas_entries, material_assets = build_project_material_payloads([asset])
+                atlas_entries, material_assets = build_project_material_payloads([asset])
 
+            self.assertEqual(atlas_entries[0]["rgba_path"], asset_dir / "rgba.png")
             self.assertEqual(material_assets[0]["texture_mode"], "udim_rgba_tiled")
             self.assertEqual(material_assets[0]["texture_tile_count"], 2)
             self.assertTrue((asset_dir / "cycles_tiled" / "rgba_1001.png").exists())
             self.assertIn("<UDIM>", material_assets[0]["rgba_tile_pattern"])
+
+    def test_build_project_material_payloads_supports_rgba_single_assets(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            yarn_root = Path(tmpdir)
+            asset_dir = yarn_root / "rgba-single-asset"
+            asset_dir.mkdir(parents=True)
+            Image.new("RGBA", (32, 4), (255, 0, 0, 128)).save(asset_dir / "rgba.png")
+            asset = YarnAsset(
+                id="rgba-single-asset",
+                label="RGBA Single Asset",
+                status="ready",
+                sourceFilename="rgba.png",
+                sourceUrl="/rgba.png",
+            )
+
+            with patch("app.render_jobs.YARN_ASSETS_ROOT", yarn_root):
+                atlas_entries, material_assets = build_project_material_payloads([asset])
+
+            self.assertEqual(atlas_entries[0]["rgba_path"], asset_dir / "rgba.png")
+            self.assertEqual(material_assets[0]["texture_mode"], "rgba_single")
+            self.assertEqual(material_assets[0]["rgba_path"], str(asset_dir / "rgba.png"))
+            self.assertFalse((asset_dir / "albedo.png").exists())
+            self.assertFalse((asset_dir / "alpha.png").exists())
 
     def test_build_headless_render_command_points_to_blend_file_and_script(self) -> None:
         fake_binary = ROOT / "tests" / "fixtures" / "blender-bin"

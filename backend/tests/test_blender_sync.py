@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,11 +14,19 @@ from app.blender_sync import (  # noqa: E402
     DEFAULT_ARC1_V_PADDING,
     DEFAULT_SPACING,
     build_blender_sync_code,
+    load_blender_socket_config,
     validate_drawdown_matrix,
 )
 
 
 class BlenderSyncTests(unittest.TestCase):
+    def test_load_blender_socket_config_defaults_to_live_mcp_port(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            config = load_blender_socket_config()
+
+        self.assertEqual(config.host, "127.0.0.1")
+        self.assertEqual(config.port, 9876)
+
     def test_validate_drawdown_matrix_rejects_ragged_rows(self) -> None:
         with self.assertRaises(ValueError):
             validate_drawdown_matrix([[1, 0], [1]])

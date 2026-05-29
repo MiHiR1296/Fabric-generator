@@ -44,8 +44,13 @@ def build_yarn_atlas(asset_images: list[dict], output_dir: Path) -> AtlasBundle:
 
     for entry in asset_images:
         asset_id = str(entry["id"])
-        diffuse_image = Image.open(entry["diffuse_path"]).convert("RGB")
-        alpha_image = Image.open(entry["alpha_path"]).convert("L")
+        if entry.get("rgba_path"):
+            rgba_image = Image.open(entry["rgba_path"]).convert("RGBA")
+            diffuse_image = rgba_image.convert("RGB")
+            alpha_image = rgba_image.getchannel("A")
+        else:
+            diffuse_image = Image.open(entry["diffuse_path"]).convert("RGB")
+            alpha_image = Image.open(entry["alpha_path"]).convert("L")
         max_width = max(max_width, diffuse_image.width, alpha_image.width)
         max_height = max(max_height, diffuse_image.height, alpha_image.height)
         diffuse_inputs.append((asset_id, diffuse_image))

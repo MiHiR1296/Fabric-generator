@@ -26,14 +26,16 @@ class YarnLibraryTests(unittest.TestCase):
             mf_dir.mkdir()
             mt_dir.mkdir()
 
-            rgba = Image.new("RGBA", (20, 8), (20, 20, 20, 0))
+            rgb = Image.new("RGB", (20, 8), (20, 20, 20))
             alpha = Image.new("L", (20, 8), 0)
             for y in range(2, 6):
                 for x in range(20):
-                    rgba.putpixel((x, y), (220, 220, 220, 255))
+                    rgb.putpixel((x, y), (220, 220, 220))
                     alpha.putpixel((x, y), 255)
-            rgba.save(mf_dir / "export_assembled_rgba.png")
+            rgb.save(mf_dir / "export_assembled_final.png")
             alpha.save(mf_dir / "export_assembled_alpha.png")
+            rgba = Image.merge("RGBA", (*rgb.split(), alpha))
+            rgba.save(mf_dir / "export_assembled_rgba.png")
 
             scan = Image.new("RGB", (40, 100), (120, 120, 120))
             scan.save(mt_dir / "input.png", dpi=(1600, 1600))
@@ -72,6 +74,11 @@ class YarnLibraryTests(unittest.TestCase):
             self.assertTrue(scale["source_scan"]["matches_declared_dpi"])
             self.assertIsNone(scale["processed_export"]["embedded_dpi"])
             self.assertIn("texture_world_width_m", scale)
+            yarn_dir = library_root / entry["id"]
+            self.assertFalse((yarn_dir / "rgb.png").exists())
+            self.assertFalse((yarn_dir / "alpha.png").exists())
+            self.assertTrue((yarn_dir / "rgba.png").exists())
+            self.assertEqual(meta["files"]["rgba"], "rgba.png")
 
 
 if __name__ == "__main__":

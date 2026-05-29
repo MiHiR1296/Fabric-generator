@@ -5,6 +5,7 @@ import type {
   DraftDocument,
   ImportResult,
   ParserStatus,
+  TileRenderOptions,
   YarnAsset,
 } from '../domain/types';
 
@@ -162,6 +163,34 @@ export async function requestProjectRender(
       draft: project.draft,
       yarnAssets: project.yarnAssets,
       colorBindings: project.colorBindings,
+      target_object_name: options?.targetObjectName || 'ParametricWeave',
+      draft_object_name: options?.draftObjectName || 'WebDraft_Live',
+    }),
+  });
+  return parseJson(response);
+}
+
+export async function requestProjectTileRender(
+  project: FabricProject,
+  tileOptions: TileRenderOptions,
+  options?: {
+    targetObjectName?: string;
+    draftObjectName?: string;
+  },
+): Promise<BlenderRenderJob> {
+  const response = await fetch('/api/blender/render-project-tiles', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      draft: project.draft,
+      yarnAssets: project.yarnAssets,
+      colorBindings: project.colorBindings,
+      tileCount: tileOptions.tileCount,
+      tileResolution: tileOptions.tileResolution,
+      guardThreads: tileOptions.guardThreads,
+      variationStrength: tileOptions.variationStrength,
       target_object_name: options?.targetObjectName || 'ParametricWeave',
       draft_object_name: options?.draftObjectName || 'WebDraft_Live',
     }),

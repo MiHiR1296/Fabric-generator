@@ -124,8 +124,8 @@ export default function MultiThreadImageEditor({ onAssembleDone, onCancel }) {
 
   async function runProcessing() {
     if (!uploadId) { setError('Pick a scan first'); return; }
-    if (nThreads != null && (nThreads < 2 || nThreads > 16)) {
-      setError('Thread count must be 2–16 (or blank for auto-detect)'); return;
+    if (nThreads != null && (nThreads < 1 || nThreads > 16)) {
+      setError('Thread count must be 1–16 (or blank for auto-detect)'); return;
     }
     setError(null);
     setView('processing');
@@ -326,7 +326,7 @@ function UploadView({
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
       <div className="bg-gray-900 border border-gray-800 rounded p-4 flex flex-col gap-3">
         <p className="text-xs text-gray-400">
-          Upload one scan with multiple yarn threads laid parallel.
+          Upload one scan with one or more yarn threads laid parallel.
           The pipeline splits, levels, and detects each thread's solid band, then computes alpha.
         </p>
 
@@ -366,7 +366,7 @@ function UploadView({
         <div className="flex items-center gap-2">
           <label className="text-xs text-gray-300">Thread count:</label>
           <input
-            type="number" min={2} max={16}
+            type="number" min={1} max={16}
             value={nThreads ?? ''}
             placeholder="auto"
             onChange={e => {
@@ -378,7 +378,7 @@ function UploadView({
             className="w-20 bg-gray-800 text-gray-200 text-sm py-1 px-2 rounded border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500"
           />
           <span className="text-xs text-gray-500">
-            {nThreads ? '(2–16; blank = auto)' : 'auto-detect (override 2–16)'}
+            {nThreads ? '(1–16; blank = auto)' : 'auto-detect (override 1–16)'}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -463,8 +463,8 @@ function ReviewView({ summary, bandSource, setBandSource, chosenBand, showWidths
           onChange={e => setBandSource(e.target.value)}
           className="bg-gray-800 text-gray-200 text-xs py-1 px-2 rounded border border-gray-700"
         >
-          <option value="c">Approach C (strict)</option>
-          <option value="d">Approach D (smoothed)</option>
+          <option value="c">Density core</option>
+          <option value="d">Density core mirror</option>
           <option value="none">Hide lines</option>
         </select>
       </div>
@@ -475,11 +475,30 @@ function ReviewView({ summary, bandSource, setBandSource, chosenBand, showWidths
       {showBboxes && summary.urls?.detection_overlay && (
         <div className="bg-gray-900 border border-cyan-800 rounded p-2 flex flex-col gap-1">
           <div className="text-xs text-cyan-300">
-            Detection on original scan — {summary.threads?.length} bounding boxes (the strips fed into the pipeline).
-            Auto-detect counted these as the threads.
+            Segmentation QA — {summary.threads?.length} accepted threads
+            {typeof summary.segmentation?.row_density_p95 === 'number'
+              ? ` · row density p95 ${summary.segmentation.row_density_p95.toFixed(3)}`
+              : ''}
+            {typeof summary.segmentation?.foreground_separation === 'number'
+              ? ` · separation ${summary.segmentation.foreground_separation.toFixed(3)}`
+              : ''}
           </div>
-          <img src={summary.urls.detection_overlay} alt="detection overlay"
-            className="w-full h-auto rounded border border-cyan-900" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <img src={summary.urls.segmentation_overlay || summary.urls.detection_overlay} alt="segmentation overlay"
+              className="w-full h-auto rounded border border-cyan-900" />
+            {summary.urls.segmentation_heatmap && (
+              <img src={summary.urls.segmentation_heatmap} alt="foreground heatmap"
+                className="w-full h-auto rounded border border-cyan-900" />
+            )}
+            {summary.urls.segmentation_normalized && (
+              <img src={summary.urls.segmentation_normalized} alt="normalized foreground"
+                className="w-full h-auto rounded border border-cyan-900" />
+            )}
+            {summary.urls.segmentation_mask && (
+              <img src={summary.urls.segmentation_mask} alt="foreground mask"
+                className="w-full h-auto rounded border border-cyan-900" />
+            )}
+          </div>
         </div>
       )}
 
@@ -511,7 +530,8 @@ function ThreadReviewRow({ thread, band, showWidths }) {
       cv.width = im.width;
       cv.height = im.height;
       const ctx = cv.getContext('2d');
-      ctx.imageSmoothingEnabled = false;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(im, 0, 0);
       if (band && band.top_y >= 0 && band.bottom_y >= 0) {
         const thickness = Math.max(3, Math.round(im.height * 0.012));
@@ -601,7 +621,8 @@ function ThreadReviewRow({ thread, band, showWidths }) {
       cv.width = im.width;
       cv.height = im.height;
       const ctx = cv.getContext('2d');
-      ctx.imageSmoothingEnabled = false;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       // Black background so transparent areas render as black (alpha=0) and
       // the matte luminance reads correctly.
       ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cv.width, cv.height);
@@ -612,6 +633,9 @@ function ThreadReviewRow({ thread, band, showWidths }) {
   }, [thread.urls.alpha]);
 
   const heightLabel = band && band.bottom_y >= 0 ? `${band.bottom_y - band.top_y}px` : '—';
+  const alphaQ = thread.segmentation_quality?.alpha;
+  const splitQ = thread.segmentation_quality?.split;
+  const bandQ = thread.band_quality;
   const fiberLabel = (() => {
     if (!band) return null;
     const tH = (typeof band.fiber_top_y === 'number' && band.fiber_top_y >= 0)
@@ -621,7 +645,7 @@ function ThreadReviewRow({ thread, band, showWidths }) {
     if (tH == null && bH == null) return null;
     return `halo top ${tH ?? '—'}px · bot ${bH ?? '—'}px`;
   })();
-  const lowConfidence = !band || band.top_y < 0;
+  const lowConfidence = !!thread.failure_reason || !band || band.top_y < 0;
   const tt = thread.timings;
 
   return (
@@ -639,13 +663,28 @@ function ThreadReviewRow({ thread, band, showWidths }) {
         {fiberLabel && (
           <span className="text-xs text-amber-400/80">{fiberLabel}</span>
         )}
+        {splitQ && (
+          <span className="text-xs text-cyan-300/80">
+            split score {splitQ.score?.toFixed?.(2) ?? '—'} · cont {splitQ.continuity?.toFixed?.(2) ?? '—'}
+          </span>
+        )}
+        {alphaQ && (
+          <span className="text-xs text-emerald-300/80">
+            α fg {alphaQ.foreground_alpha_p50?.toFixed?.(0) ?? '—'} · bg {alphaQ.background_alpha_p95?.toFixed?.(0) ?? '—'}
+          </span>
+        )}
+        {bandQ && (
+          <span className="text-xs text-blue-300/80">
+            peak {bandQ.peak_density?.toFixed?.(2) ?? '—'}
+          </span>
+        )}
         {tt && (
           <span className="text-[11px] text-gray-500 font-mono ml-auto">
             ⏱ total {tt.total}s (alpha {tt.alpha_run}s · level {tt.preprocess_level}s · band {tt.band_detect}s)
           </span>
         )}
         {lowConfidence && (
-          <span className="text-xs text-yellow-300">low confidence — review carefully</span>
+          <span className="text-xs text-yellow-300">{thread.failure_reason || 'band not found — review alpha'}</span>
         )}
       </div>
       <div className="flex flex-col gap-2">
@@ -655,20 +694,42 @@ function ThreadReviewRow({ thread, band, showWidths }) {
             <canvas
               ref={leveledRef}
               className="block max-h-[200px] w-auto"
-              style={{ imageRendering: 'pixelated' }}
+              style={{ imageRendering: 'auto' }}
             />
           </div>
         </div>
         {thread.urls.alpha && (
           <div>
-            <div className="text-[11px] text-gray-500 mb-1">Alpha matte (achromatic-F closed-form)</div>
+            <div className="text-[11px] text-gray-500 mb-1">Alpha matte</div>
             <div className="overflow-auto rounded border border-gray-800 bg-black">
               <canvas
                 ref={alphaRef}
                 className="block max-h-[200px] w-auto"
-                style={{ imageRendering: 'pixelated' }}
+                style={{ imageRendering: 'auto' }}
               />
             </div>
+          </div>
+        )}
+        {(thread.urls.segmentation_normalized || thread.urls.segmentation_mask) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {thread.urls.segmentation_normalized && (
+              <div>
+                <div className="text-[11px] text-gray-500 mb-1">Foreground probability</div>
+                <div className="overflow-auto rounded border border-gray-800 bg-black">
+                  <img src={thread.urls.segmentation_normalized} alt="thread foreground probability"
+                    className="block max-h-[160px] w-auto" style={{ imageRendering: 'auto' }} />
+                </div>
+              </div>
+            )}
+            {thread.urls.segmentation_mask && (
+              <div>
+                <div className="text-[11px] text-gray-500 mb-1">Foreground mask</div>
+                <div className="overflow-auto rounded border border-gray-800 bg-black">
+                  <img src={thread.urls.segmentation_mask} alt="thread foreground mask"
+                    className="block max-h-[160px] w-auto" style={{ imageRendering: 'auto' }} />
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

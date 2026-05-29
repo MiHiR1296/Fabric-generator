@@ -19,6 +19,7 @@ import {
   toggleTieUpCell,
   updateDraftCounts,
 } from '../domain/draft';
+import { saveDraftAsLocalPattern } from '../domain/bookLibrary';
 import { presets } from '../domain/presets';
 import type {
   ColorBinding,
@@ -112,6 +113,21 @@ export default function PatternBuilderStep({
     setImportMessage(`Loaded ${preset.label}. ${preset.summary}`);
   };
 
+  const handleSavePattern = () => {
+    const fallbackTitle = draft.title?.trim() || 'Untitled Pattern';
+    const title = window.prompt('Pattern name', fallbackTitle);
+    if (title === null) {
+      return;
+    }
+    const cleanedTitle = title.trim();
+    if (!cleanedTitle) {
+      setImportMessage('Pattern name is required before saving.');
+      return;
+    }
+    const { pattern } = saveDraftAsLocalPattern(draft, cleanedTitle);
+    setImportMessage(`Saved "${pattern.title}" to Saved Pattern Drafts.`);
+  };
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
@@ -170,6 +186,7 @@ export default function PatternBuilderStep({
           onPresetChange={handlePresetChange}
           onToggleExplore={() => setShowPicker((current) => !current)}
           onCountsChange={handleCountsChange}
+          onSavePattern={handleSavePattern}
           onImportClick={() => fileInputRef.current?.click()}
           onReset={() => {
             setDraft(createBlankDraft({ sourceType: 'manual', title: 'Untitled Draft' }));

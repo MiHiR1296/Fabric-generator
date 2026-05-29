@@ -103,34 +103,6 @@ def bg_row_clamp(alpha_u8, row_score, score_lo=0.02, score_hi=0.15, floor=0.35, 
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def core_whitefill(alpha_u8, bright_thresh=230, row_min_frac=0.10,
-                   feather_sigma=10, strength=1.0):
-    bright = alpha_u8 >= bright_thresh
-    if not bright.any():
-        return alpha_u8
-    H, W = alpha_u8.shape
-    row_bright = bright.sum(axis=1)
-    thread_rows = row_bright >= (row_min_frac * W)
-    if not thread_rows.any():
-        return alpha_u8
-    row_mask = thread_rows[:, None]
-    bright_in_body = bright & row_mask
-
-    has_bright_col = bright_in_body.any(axis=0)
-    first_idx = np.argmax(bright_in_body, axis=0)
-    last_idx = H - 1 - np.argmax(bright_in_body[::-1], axis=0)
-    row_idx = np.arange(H)[:, None]
-    filled = (row_idx >= first_idx[None, :]) & (row_idx <= last_idx[None, :]) & has_bright_col[None, :]
-    filled = filled & row_mask
-
-    mask_u8 = (filled.astype(np.uint8) * 255)
-    pil = Image.fromarray(mask_u8).filter(ImageFilter.GaussianBlur(radius=feather_sigma))
-    w = np.asarray(pil, dtype=np.float32) / 255.0
-    a = alpha_u8.astype(np.float32)
-    out = a + w * (255.0 - a) * strength
-    return np.clip(out, 0, 255).astype(np.uint8)
-
-
 def kill_bg_ccs(alpha_u8, bright_thresh=230, row_min_frac=0.10, low=10):
     bright = alpha_u8 >= bright_thresh
     H, W = alpha_u8.shape
@@ -206,7 +178,8 @@ def _core_mask(y_work, core_percentile=90, open_iters=2):
     return labels == int(np.argmax(sizes))
 
 
-def level_and_crop(img_rgb, invert=False, pad_ratio=0.25, core_percentile=90):
+def level_and_crop(img_rgb, invert=False, pad_ratio=0.25, core_percentile=90,
+                   min_rotate_deg=0.0):
     """Rotate to flat-horizontal + vertically center the thread body.
 
     Returns (cropped_rgb, meta). If no core CC can be found the input is
@@ -239,12 +212,15 @@ def level_and_crop(img_rgb, invert=False, pad_ratio=0.25, core_percentile=90):
         # CCW rotation to level -> positive angle passed to PIL.
         angle_deg = float(np.degrees(np.arctan(slope)))
 
-    if abs(angle_deg) > 1e-3:
+    # Correct every measured tilt. Even a 0.5 degree drift makes the row-based
+    # core band look thicker/slanted and places the visual red bands badly.
+    if abs(angle_deg) > max(1e-6, float(min_rotate_deg)):
         pil = Image.fromarray(img_rgb).rotate(
-            angle_deg, resample=Image.BILINEAR, expand=True, fillcolor=(0, 0, 0)
+            angle_deg, resample=Image.BICUBIC, expand=True, fillcolor=(0, 0, 0)
         )
         rotated = np.asarray(pil)
     else:
+        angle_deg = 0.0
         rotated = img_rgb
 
     # Recompute core on the rotated image for an accurate bbox.
@@ -431,7 +407,6 @@ PRESETS = {
         "hysteresis": {"low": 18, "high": 70},
         "row_clamp": {"score_lo": 0.02, "score_hi": 0.15, "floor": 0.35, "sharpness": 1.0},
         "speckle": {"blur_sigma": 6, "threshold": 25},
-        "whitefill": {"bright_thresh": 230, "row_min_frac": 0.35, "feather_sigma": 4, "strength": 1.0},
         "despeckle": {"min_area": 30, "low": 10},
         "kill_bg": {"bright_thresh": 230, "row_min_frac": 0.10, "low": 10},
         "hardcut": 40,
@@ -442,7 +417,6 @@ PRESETS = {
         "hysteresis": {"low": 18, "high": 70},
         "row_clamp": {"score_lo": 0.02, "score_hi": 0.15, "floor": 0.35, "sharpness": 1.0},
         "speckle": {"blur_sigma": 6, "threshold": 25},
-        "whitefill": {"bright_thresh": 230, "row_min_frac": 0.35, "feather_sigma": 4, "strength": 1.0},
         "despeckle": {"min_area": 30, "low": 10},
         "kill_bg": {"bright_thresh": 230, "row_min_frac": 0.10, "low": 10},
         "hardcut": 40,
@@ -559,7 +533,6 @@ def run(src_path, dst_path, preset=None, overrides=None, orientation="auto", lev
     out = hysteresis_clean(out, **cfg["hysteresis"])
     out = bg_row_clamp(out, score, **cfg["row_clamp"])
     out = speckle_snap(out, **cfg["speckle"])
-    out = core_whitefill(out, **cfg["whitefill"])
     out = despeckle(out, **cfg["despeckle"])
     out = kill_bg_ccs(out, **cfg["kill_bg"])
     out = hard_low_cut(out, cutoff=int(cfg["hardcut"]))

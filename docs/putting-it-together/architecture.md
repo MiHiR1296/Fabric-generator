@@ -118,6 +118,26 @@ Frontend shows the rendered fabric in Step 3, then Step 4 (Try On 3D) tiles it a
 
 The push-to-Blender code now lives in `backend/app/blender_live.py` and is reused by both headless render scripts and live MCP pushes so the socket mapping cannot drift.
 
+Manual live setup push:
+
+```
+User clicks "Send to Live Blender" in Step 3
+   │
+   ▼
+POST /api/blender/push-project-bandmeta   (draft + colorBindings)
+   │
+   ▼
+backend/app/main.py validates the project bindings, resolves ready YarnAssets,
+builds the same setup script as render-project with render_still=False,
+and sends it to BlenderMCPAddon.execute_code on port 9876.
+```
+
+This updates the open Blender scene immediately (`WebDraft_Live`, modifier sockets,
+and per-material yarn metadata) without starting a render job and without changing
+the `BLENDER_LIVE_RENDER` executor mode. The older debounced auto-push still runs
+from Pattern Builder onward when all bindings are assigned; the button is the
+explicit operator action for "send this exact draft now."
+
 ## Ports — full reference
 
 | Process | Port | Purpose | Override |
@@ -127,7 +147,7 @@ The push-to-Blender code now lives in `backend/app/blender_live.py` and is reuse
 | yarnseamless Flask | 3002 | LaMa + alpha solver + multithread API | hard-coded |
 | Fabric-generator-tryon Vite | 5180 | React UI | `vite.config.ts` |
 | Fabric-generator-tryon FastAPI | 8000 | Library + draft + render endpoints | `uvicorn.run(host=, port=)` |
-| Blender MCP socket | 9876 | `BlenderMCPAddon` socket server | `BLENDER_PORT` env (default 9875; Makefile pins 9876) |
+| Blender MCP socket | 9876 | `BlenderMCPAddon` socket server | `BLENDER_PORT` env (default 9876; Makefile also pins 9876) |
 
 If two of these collide on your machine, both backends accept the standard env-var overrides.
 

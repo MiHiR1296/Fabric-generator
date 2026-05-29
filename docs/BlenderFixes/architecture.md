@@ -21,17 +21,14 @@ What you see in Properties → Modifier (wrench) → Weave:
 │  Scanner Pixels Per BU                                     │
 │  Texture Scale U                                           │
 │  Geometry (input)                                          │
-│  Main Strand Radius                                        │
 │  Draft Object  /  Draft Columns  /  Draft Rows             │
-├── ▸ Pattern             (Over/Under Count, W/W Threads,    │
+│  Arc 1 V Padding                                           │
+├── ▸ Pattern             (Warp/Weft Threads,                │
 │                          Spacing, Amplitude)               │
 ├── ▸ Surface             (Thread Subdivisions,              │
 │                          Arc 2 Boundary Inset,             │
-│                          Match Section Slopes,             │
-│                          Arc 2 Edge Angle Mapping,         │
 │                          Arc 2 Match Arc 1 V Rate)         │
-├── ▸ Texture             (Texture Scale V, Offset V,        │
-│                          Side Flatten)                     │
+├── ▸ Texture             (Texture Scale V, Offset V)        │
 ├── ▸ General             (Seed)                             │
 ├── ▸ Imperfections       (Wobble Amount/Scale,              │
 │                          Pattern Noise X/Y,                │
@@ -39,10 +36,7 @@ What you see in Properties → Modifier (wrench) → Weave:
 ├── ▸ Loose Strands       (4 controls)                       │
 ├── ▸ Material Slots      (Material 1 … Material 16,         │
 │                          NodeSocketMaterial picks)         │
-├── ▸ Warp Material Cycle (Offset + Length 1-4 + Mat 1-4)    │
-├── ▸ Weft Material Cycle (Offset + Length 1-4 + Mat 1-4)    │
-├── ▸ Sub Strand          (Enable, Width, Height,            │
-│                          Sub Texture Scale/Offset V)       │
+├── ▸ Sub Strand          (Enable, Sub Texture Scale/Offset V)│
 └── ▸ V-Band Mapping ⓘ    (96 sockets — Material 1..16 ×     │
    (default-closed)        Image Width Px / Texture Scale U / │
                            Arc 1 V Min/Max / Arc 2 V Min/Max) │
@@ -353,11 +347,11 @@ position_final = sampled_position × scale     (uniform scale toward profile ori
 
 At inset = `arc2_radius − arc1_radius = 0.010` the boundary vertex sits exactly on Arc 1's silhouette and the section discontinuity (where halo content meets core content in the texture) becomes hidden behind Arc 1. Smaller values give partial tuck.
 
-### Match Section Slopes (Phase 10e) — eliminate the slope discontinuity
+### Historical: Match Section Slopes (Phase 10e) — removed in cleanup
 
-Interface socket `Match Section Slopes` (Surface panel, NodeSocketBool, default `False`). When the texture's halo/core V proportions don't match Phase 3q's `0.2 / 0.6 / 0.2` geometric split, the three section slopes (`tex_v / v_around`) differ — by 7% or so on typical yarns, which reads as a tiny cell-aspect band right where the section boundary sits on Arc 2.
+The `Match Section Slopes` socket and its `PW MatchSlopes - *` branch were removed in the 2026-05-27 cleanup because the branch was unreachable from `Group Output`. The historical behavior is kept here so old phase-log entries still make sense.
 
-When `True`, the global `PW Band - Split Minus / Plus` switch from Phase 3q's geometric ratio to a texture-proportional split derived from Material 1's V values:
+When it was active, the global `PW Band - Split Minus / Plus` switched from Phase 3q's geometric ratio to a texture-proportional split derived from Material 1's V values:
 
 ```
 M1_Arc1_V_Min_Padded = max(Material 1 Arc 1 V Min − Arc 1 V Padding, Material 1 Arc 2 V Min)
@@ -372,13 +366,13 @@ Tex Split Minus = top_v / total_v
 Tex Split Plus  = (top_v + core_v) / total_v
 ```
 
-A pair of `GeometryNodeSwitch` (FLOAT) gated by `Match Section Slopes` picks between Geo Split (Phase 3q) and Tex Split (Phase 3m–style), feeding `PW Band - Split Minus / Plus` — which is consumed by both the V Map Range chain and the polyline natural-anchor chain.
+A pair of `GeometryNodeSwitch` (FLOAT) gated by `Match Section Slopes` picked between Geo Split (Phase 3q) and Tex Split (Phase 3m-style), feeding `PW Band - Split Minus / Plus`.
 
 With slopes equal on both sides of every boundary, linear interpolation across the mesh face that spans the boundary produces the correct tex_v automatically, *without* needing per-material polyline rebuilds. The Phase 10 per-section U multiplier becomes a no-op (Section Ratio = 1.0 everywhere). Caveat: the texture-proportional split uses Material 1's V values for the global split — multi-material renders will have exact slope match only for Material 1.
 
-### Arc 2 Edge Angle Mapping (Phase 10f) — cosine-curvature V mapping in Top/Bot
+### Historical: Arc 2 Edge Angle Mapping (Phase 10f) — removed in cleanup
 
-Interface socket `Arc 2 Edge Angle Mapping` (Surface panel boolean, default `False`). When `True`, Arc 2 Top and Arc 2 Bot use a cumulative-`sin(θ)` V mapping instead of linear-in-`v_around`. `θ` is the actual angle of curvature on the source arc (`Arc.001`, start `30°`, sweep `120°`).
+The `Arc 2 Edge Angle Mapping` socket and its `PW EdgeAng - *` branch were removed in the 2026-05-27 cleanup because the branch was unreachable from `Group Output`. The historical design was a cumulative-`sin(theta)` V mapping for Arc 2 Top/Bot instead of linear-in-`v_around`.
 
 The intuition: a polygon at angle `θ` on the cross-section projects to a screen-space size proportional to `sin(θ)` when viewed from `+Z`. Silhouette polygons (`θ ≈ 30°` or `150°`, `sin(θ) ≈ 0.5`) project to half the screen footprint of polygons near the top of the arc (`θ = 90°`, `sin(θ) = 1`). Linear-in-`v_around` allocates the same V band to every polygon, so silhouette polygons end up sampling too much V per screen pixel and read as one stretched cell. Allocating V proportionally to `sin(θ)` (which integrates cumulatively to `cos(θ_start) − cos(θ)`) restores uniform cell size in screen space.
 
@@ -391,7 +385,7 @@ norm_top    = (cos(THETA_START) − cos(θ(v_around))) /
 tex_v_top   = Arc 2 V Min + norm_top × (Arc 1 V Min Padded − Arc 2 V Min)
 ```
 
-Implementation: 22 nodes (`PW EdgeAng - Top *` and `PW EdgeAng - Bot *`); two `GeometryNodeSwitch` (FLOAT, gated by the toggle) feed `PW Band - Top/Bot Weighted.in[0]` from either the existing linear `Map Range.Result` or the new curvature-weighted output. Core mapping is untouched (it spans `θ` near `90°` where `sin(θ) ≈ 1` so linear is already approximately correct).
+Implementation was 22 nodes (`PW EdgeAng - Top *` and `PW EdgeAng - Bot *`); two `GeometryNodeSwitch` nodes fed `PW Band - Top/Bot Weighted.in[0]` from either the existing linear `Map Range.Result` or the curvature-weighted output. Core mapping was untouched.
 
 Recommended pairing: `Match Section Slopes = False` (Phase 3q's `0.2 / 0.8` split keeps Top/Bot wide enough for the cosine remap to operate over a meaningful angular range). With Match `True`, the texture-proportional split shrinks Top/Bot dramatically and the cosine remap's effect becomes negligible.
 
@@ -409,7 +403,7 @@ tex_v_arc2(v_around) = mid + (projected_v − 0.5) × matched
 
 Implementation: 11 nodes (`PW MatchScale - *`) compute the matched V, one `GeometryNodeSwitch` (FLOAT, gated by the toggle) replaces `PW Band - Diff.in[0]` from `PW Band - Arc2 V` (piecewise sum) to the matched output. Arc 1's mapping (`PW Band - Arc1 Map`) is untouched.
 
-The `PW MatchScale - Radius Ratio` node is still present for reference/revert, but it is no longer linked into `PW MatchScale - Matched Span`; the multiplier input is hard-set to `1.0`. This matches Arc 2's V range exactly to Arc 1's padded core range, so Arc 1 and Arc 2 have the same cells-per-silhouette count. Earlier drafts used `span x ratio`, which matched physical cell size but read as Arc 2 being denser because its wider cylinder fit more cells.
+The old `PW MatchScale - Radius Ratio` revert node was removed in the 2026-05-27 cleanup. The active multiplier is hard-set to `1.0`. This matches Arc 2's V range exactly to Arc 1's padded core range, so Arc 1 and Arc 2 have the same cells-per-silhouette count. Earlier drafts used `span x ratio`, which matched physical cell size but read as Arc 2 being denser because its wider cylinder fit more cells.
 
 Why this matched the Phase 10g/10h visual goal: at every shared `v_around`, Arc 1 and Arc 2 sample the same `tex_v`. This is a visual range match, not a physical texel-per-BU match; Arc 2's wider cylinder therefore makes cells physically larger around the outside, but the pattern rows overlap exactly with Arc 1.
 
@@ -492,21 +486,56 @@ Two paths exist:
 
 2. **Live MCP render** (Phase 3g dev mode) — backend sends the same script body via `send_blender_command("execute_code", {"code": ...})` to the BlenderMCPAddon socket on port 9876. The open Blender session executes against the user's current scene and writes to the same `preview.png` path. Toggled by `BLENDER_LIVE_RENDER=1` env var. See [phase_log.md](phase_log.md) Phase 3g.
 
-3. **Setup-only live push** (Phase 3i Pattern Builder mode) — `/api/blender/push-project-bandmeta` sends the same setup body with `render_still=False`. This updates `WebDraft_Live`, object material slots, modifier `Material N` sockets, Warp/Weft material cycles, and V-band metadata, then skips `bpy.ops.render.render(...)`. Important edge case: when the same yarn asset is assigned to warp and weft, only `Material 1` is populated and `Material 2..16` are cleared.
+3. **Setup-only live push** (Phase 3i Pattern Builder mode) — `/api/blender/push-project-bandmeta` sends the same setup body with `render_still=False`. This updates `WebDraft_Live`, object material slots, modifier `Material N` sockets, and V-band metadata, then skips `bpy.ops.render.render(...)`. Important edge case: when the same yarn asset is assigned to warp and weft, only `Material 1` is populated and `Material 2..16` are cleared.
 
 Both use the same script generation (`build_headless_render_script` in [render_jobs.py](../../backend/app/render_jobs.py)). Only the executor differs.
 
 ## Pinned defaults — Rule 3
 
-These six sockets must stay at their pinned values for scan-driven yarns. The 2026-05-19 checkpoint pins the direct-material baseline, with V offset neutral and sub texture V scale at `1`:
+These five sockets must stay at their pinned values for scan-driven yarns. The 2026-05-19 checkpoint pins the direct-material baseline, with V offset neutral and sub texture V scale at `1`:
 
 ```
 Sub Strand Enable      True      # gates Arc 2 — see is_sub_strand chain above
 Texture Scale V        1.0       # multiplier on V (1 = no scale)
 Texture Offset V       0.0       # neutral V phase for the approved checkpoint
-Texture Side Flatten   0.0       # cylindrical projection weight (0 = flat ribbon mapping)
 Sub Texture Scale V    1.0       # approved sub-strand V scale checkpoint value
 Sub Texture Offset V   0.0       # additive offset for sub-strand
 ```
 
 Producer pushes these every time via `PINNED_FOOTGUN_SOCKETS` in [blender_live.py](../../backend/app/blender_live.py). Don't change them without reading lessons.md Rules 3, 34, 35, 37, and the checkpoint doc [../CHECKPOINT_2026-05-19.md](../CHECKPOINT_2026-05-19.md).
+
+## Drawdown → strand bend (the actual bend driver)
+
+The strand bend Z offset comes entirely from the WebDraft_Live `cell_code` attribute. The removed `Over Count` / `Under Count` sockets never affected this active path. The chain:
+
+```text
+PW Draft Object Info        (reads WebDraft_Live)
+PW Draft Cell Code          (reads `cell_code` attribute)
+PW Draft Warp Row Mod       = MODULO(Index in Curve, Draft Rows)         <-- see WARNING below
+PW Draft Warp Col Mod       = MODULO(Curve Index,    Draft Columns)
+PW Draft Warp Row Offset    = Warp Row Mod × Draft Columns
+PW Draft Warp Face Index    = Warp Row Offset + Warp Col Mod
+PW Draft Warp Sample        = cell_code at that face
+PW Draft Warp Sign          = (cell × 2) - 1                              (0 -> -1, 1 -> +1)
+Math.005                    = Sign × Amplitude × 0.5
+Combine XYZ.002.Z           = Math.005                                    (X and Y unused)
+Set Position.Offset         = Combine XYZ.002.Vector                      applied to the raw strand curve
+                                                                          BEFORE Resample Curve, Set Curve
+                                                                          Normal, and PW Warp Set Position.
+```
+
+The weft branch is symmetric with the sign flipped (`Sign = (cell × -2) + 1`) so a `cell_code = 1` ("warp on top") lifts the warp and lowers the weft.
+
+`PW Strand Variation` (the group fed into `PW Warp/Weft Set Position`) only writes X/Y wobble offsets — its Z output is unlinked. The vertical over/under sits earlier in the chain, in the `Set Position` node directly fed by `Combine XYZ.002`.
+
+> **Phase 10v bug → Phase 10w fix (2026-05-27).** The chain shown above is the original buggy version. As of Phase 10w the active graph has `PW Draft Warp Row Mod` and `PW Draft Weft Col Mod` repurposed to `MULTIPLY` and feeds them into new `Divide` and `Floor` nodes, computing `row = floor(Index_in_Curve × Draft_Rows / Warp_Threads)` (and the symmetric formula for the weft branch). Pre-fix snapshot: `Codex_ParametricWeave.pre-phase10w-rowmod-fix-20260527_163701.blend`. See [phase_log.md Phase 10w](phase_log.md#phase-10w--apply-floor-divide-fix-to-drawdown-rowcol-mapping). The across-strand mods (`PW Draft Warp Col Mod` and `PW Draft Weft Row Mod`) are still MODULO on purpose — that gives the wizard's expected drawdown tiling across the swatch.
+
+## Removed Pattern-panel sockets — `Over Count` / `Under Count`
+
+The cleanup removed `Over Count` (Socket_2) and `Under Count` (Socket_3). Phase 10v confirmed that toggling them `1 -> 2 -> 4` with a `2/2 twill` drawdown produced byte-for-byte identical strand centerline Z. They were legacy interface holdovers from an earlier pattern-by-socket design. The drawdown is the only place the geometry knows about the over/under sequence.
+
+## UV Random U
+
+`UV Random U` (Socket_55) is a per-strand random U offset on top of the Phase 5 spool. The backend comment in [blender_sync.py](../../backend/app/blender_sync.py) calls it "a hack to break visible repetition" that "is no longer needed", and defaults the producer override to `0.0` — but the frontend [draft.ts](../../frontend/src/domain/draft.ts) ships `uvRandomU: 1`, which becomes a non-`None` override and wins over the backend default. The live `Weave` modifier therefore renders with `UV Random U = 1.0` on every wizard-driven render.
+
+This was initially (wrongly) blamed for the simple-twill artifact in an early Phase 10v draft; the retracted analysis is preserved in [phase_log.md](phase_log.md) for the historical "I changed my mind" trail. UV Random U is a U-axis scramble — it does not touch Z and cannot create the moon-overlap geometry artifact. It does add per-strand texture-phase noise that makes the underlying geometry bug *louder* on simple twill, so flipping the frontend default to `0` is still worthwhile, but only as a cosmetic cleanup once the Rule 38 face-index bug is actually fixed.
