@@ -71,6 +71,10 @@ class YarnAsset:
     renderTileCount: int | None = None
     renderTileWidthPx: int | None = None
     renderTileHeightPx: int | None = None
+    # Packed PBR map-set reference. The canonical material-map source of truth
+    # is runtime/yarn_assets/<id>/pbr/manifest.json; this field is a validated
+    # cache/reference for UI and render preflight.
+    pbrMaps: dict = field(default_factory=dict)
     # Pre-computed Blender metadata block from the yarn library (see
     # yarnseamless/web/yarn_library.py → metadata.blender). Consumer code in
     # render_jobs.py pushes these straight to the Parametric Weave knotty

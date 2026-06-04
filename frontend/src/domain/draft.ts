@@ -149,10 +149,11 @@ function buildDefaultRenderSettings(warpEnds: number, picks: number): DraftRende
     fiberSubdivs: 4,
     seed: 0,
     fillRatio: 1,
-    // Per-strand texture U-shift. 1 = baseline scatter (default), 0 = lock,
-    // 20 = strong scatter. Exposed in the web UI alongside Spacing /
-    // Pattern Noise. Pushed to the global 'UV Random U' modifier socket.
-    uvRandomU: 1,
+    // Per-strand texture U-shift. Default is 0 for deterministic texture
+    // diagnostics; higher values intentionally stagger U between strands.
+    // Exposed in the web UI alongside Spacing / Pattern Noise and pushed to
+    // the global 'UV Random U' modifier socket.
+    uvRandomU: 0,
   };
 }
 

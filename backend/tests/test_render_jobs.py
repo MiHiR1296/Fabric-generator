@@ -19,6 +19,8 @@ from app.render_jobs import (  # noqa: E402
     DEFAULT_BLEND_FILE,
     DEFAULT_BLENDER_BINARY,
     DEFAULT_CUTOUT_BLEND_METHOD,
+    DEFAULT_PREVIEW_MATERIAL_ROUGHNESS,
+    DEFAULT_PREVIEW_MATERIAL_SHEEN,
     DEFAULT_PREVIEW_RENDER_RESOLUTION,
     DEFAULT_PREVIEW_RENDER_SAMPLES,
     DEFAULT_SURFACE_RENDER_METHOD,
@@ -41,6 +43,16 @@ from app.render_jobs import (  # noqa: E402
     _stitch_tile_grid,
     _wrapped_segments,
 )
+from app.yarn_pbr import (  # noqa: E402
+    PbrPreflightError,
+    bake_pbr_map_set,
+    build_asset_pbr_summary,
+)
+
+
+def _attach_pbr(asset: YarnAsset, asset_dir: Path, rgba_path: Path, *, max_dimension: int = 16384) -> None:
+    manifest = bake_pbr_map_set(rgba_path, asset_dir / "pbr", max_dimension=max_dimension)
+    asset.pbrMaps = build_asset_pbr_summary(asset_dir, manifest)
 
 
 class RenderJobTests(unittest.TestCase):
@@ -150,7 +162,14 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn(f"_PW_TEXTURE_INTERPOLATION = {DEFAULT_TEXTURE_INTERPOLATION!r}", script)
         self.assertIn(f"_PW_CUTOUT_BLEND_METHOD = {DEFAULT_CUTOUT_BLEND_METHOD!r}", script)
         self.assertIn(f"_PW_SURFACE_RENDER_METHOD = {DEFAULT_SURFACE_RENDER_METHOD!r}", script)
+        self.assertIn(f"_PW_PREVIEW_MATERIAL_ROUGHNESS = {DEFAULT_PREVIEW_MATERIAL_ROUGHNESS!r}", script)
+        self.assertIn(f"_PW_PREVIEW_MATERIAL_SHEEN = {DEFAULT_PREVIEW_MATERIAL_SHEEN!r}", script)
+        self.assertIn("set_principled_input(shader, ('Roughness',), _PW_PREVIEW_MATERIAL_ROUGHNESS)", script)
+        self.assertIn("set_principled_input(shader, ('Sheen Weight', 'Sheen'), _PW_PREVIEW_MATERIAL_SHEEN)", script)
         self.assertIn("texture_node.interpolation = _PW_TEXTURE_INTERPOLATION", script)
+        self.assertIn("links.new(alpha_output, shader.inputs['Alpha'])", script)
+        self.assertNotIn("FabricStudioAlphaRemap", script)
+        self.assertNotIn("FabricStudioAlphaCurve", script)
         self.assertIn("material.blend_method = _PW_CUTOUT_BLEND_METHOD", script)
         self.assertIn("material.surface_render_method = _PW_SURFACE_RENDER_METHOD", script)
         self.assertIn("set_modifier_input(modifier, node_group, f'Material {index}', material)", script)
@@ -209,6 +228,44 @@ class RenderJobTests(unittest.TestCase):
             )
 
         self.assertIn("_PW_TEXTURE_INTERPOLATION = 'Closest'", script)
+
+    def test_build_headless_render_script_wires_packed_pbr_nodes(self) -> None:
+        script = build_headless_render_script(
+            {
+                "title": "PBR Material Test",
+                "drawdown": [[1]],
+                "warpColors": ["#ffffff"],
+                "weftColors": ["#111111"],
+            },
+            render_path="/tmp/unit-preview.png",
+            material_assets=[
+                {
+                    "id": "asset-one",
+                    "rgba_path": "/tmp/one-rgba.png",
+                    "texture_mode": "rgba_single",
+                    "pbr_texture_mode": "pbr_single",
+                    "pbr_normal_height_path": "/tmp/normal_height.png",
+                    "pbr_roughness_specular_path": "/tmp/roughness_specular.png",
+                    "pbr_consumer_defaults": {
+                        "normal_strength": 0.1,
+                        "bump_strength": 1.0,
+                        "bump_distance_bu": 0.0008,
+                    },
+                },
+            ],
+            warp_material_ids=[0],
+            weft_material_ids=[0],
+        )
+
+        self.assertIn("FabricStudioNormalHeightNode", script)
+        self.assertIn("FabricStudioRoughnessSpecularNode", script)
+        self.assertIn("normal_map.inputs['Strength'].default_value = pbr_consumer_default(asset_entry, 'normal_strength', 0.1)", script)
+        self.assertIn("bump.inputs['Strength'].default_value = pbr_consumer_default(asset_entry, 'bump_strength', 1.0)", script)
+        self.assertIn("normal_map.space = 'OBJECT'", script)
+        self.assertIn("links.new(normal_map.outputs['Normal'], bump.inputs['Normal'])", script)
+        self.assertIn("links.new(normal_height_tex.outputs['Alpha'], bump.inputs['Height'])", script)
+        self.assertIn("links.new(bump.outputs['Normal'], shader.inputs['Normal'])", script)
+        self.assertIn("first_socket(shader.inputs, ('Specular IOR Level',))", script)
 
     def test_build_headless_render_script_supports_cutout_preview_overrides(self) -> None:
         with patch.dict(
@@ -359,6 +416,8 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("use_rgba_tiled = (", script)
         self.assertIn("asset_entry.get('texture_mode') == 'udim_rgba_tiled'", script)
         self.assertIn("asset_entry['rgba_tile_pattern']", script)
+        self.assertIn('f"{material_name}_RGBA_Alpha_UDIM"', script)
+        self.assertIn("asset_entry['rgba_tile_pattern'],\n            tile_count,\n            'Non-Color'", script)
         self.assertIn("preview_materials = build_generated_preview_materials(_PW_MATERIAL_ASSETS)", script)
         self.assertNotIn("preview_materials = [ensure_atlas_preview_material", script)
         self.assertIn("alpha_output = alpha_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']", script)
@@ -396,6 +455,9 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("use_rgba_single = (", script)
         self.assertIn("asset_entry.get('texture_mode') == 'rgba_single'", script)
         self.assertIn("asset_entry['rgba_path']", script)
+        self.assertIn("diffuse_tex.image = ensure_image(f\"{material_name}_RGBA\", asset_entry['rgba_path'], 'sRGB')", script)
+        self.assertIn("alpha_tex.image = ensure_image(f\"{material_name}_RGBA_Alpha\", asset_entry['rgba_path'], 'Non-Color')", script)
+        self.assertIn("bpy.data.images.load(image_path, check_existing=False)", script)
         self.assertIn("preview_materials = build_generated_preview_materials(_PW_MATERIAL_ASSETS)", script)
         self.assertNotIn("preview_materials = [ensure_atlas_preview_material", script)
         self.assertIn("alpha_output = alpha_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']", script)
@@ -539,6 +601,7 @@ class RenderJobTests(unittest.TestCase):
             asset_dir.mkdir(parents=True)
             Image.new("RGB", (16385, 4), (255, 0, 0)).save(asset_dir / "albedo.png")
             Image.new("L", (16385, 4), 255).save(asset_dir / "alpha.png")
+            Image.new("RGBA", (16385, 4), (255, 0, 0, 255)).save(asset_dir / "rgba.png")
             asset = YarnAsset(
                 id="wide-asset",
                 label="Wide Asset",
@@ -548,12 +611,14 @@ class RenderJobTests(unittest.TestCase):
                 diffuseFilename="albedo.png",
                 alphaFilename="alpha.png",
             )
+            _attach_pbr(asset, asset_dir, asset_dir / "rgba.png", max_dimension=16384)
 
             with patch("app.render_jobs.YARN_ASSETS_ROOT", yarn_root):
                 _atlas_entries, material_assets = build_project_material_payloads([asset])
 
             self.assertEqual(material_assets[0]["texture_mode"], "udim_tiled")
             self.assertEqual(material_assets[0]["texture_tile_count"], 2)
+            self.assertEqual(material_assets[0]["pbr_texture_mode"], "pbr_udim_tiled")
             self.assertTrue((asset_dir / "cycles_tiled" / "albedo_1001.png").exists())
             self.assertIn("<UDIM>", material_assets[0]["diffuse_tile_pattern"])
 
@@ -570,6 +635,7 @@ class RenderJobTests(unittest.TestCase):
                 sourceFilename="rgba.png",
                 sourceUrl="/rgba.png",
             )
+            _attach_pbr(asset, asset_dir, asset_dir / "rgba.png", max_dimension=16384)
 
             with patch("app.render_jobs.YARN_ASSETS_ROOT", yarn_root):
                 atlas_entries, material_assets = build_project_material_payloads([asset])
@@ -577,6 +643,7 @@ class RenderJobTests(unittest.TestCase):
             self.assertEqual(atlas_entries[0]["rgba_path"], asset_dir / "rgba.png")
             self.assertEqual(material_assets[0]["texture_mode"], "udim_rgba_tiled")
             self.assertEqual(material_assets[0]["texture_tile_count"], 2)
+            self.assertEqual(material_assets[0]["pbr_texture_mode"], "pbr_udim_tiled")
             self.assertTrue((asset_dir / "cycles_tiled" / "rgba_1001.png").exists())
             self.assertIn("<UDIM>", material_assets[0]["rgba_tile_pattern"])
 
@@ -593,15 +660,37 @@ class RenderJobTests(unittest.TestCase):
                 sourceFilename="rgba.png",
                 sourceUrl="/rgba.png",
             )
+            _attach_pbr(asset, asset_dir, asset_dir / "rgba.png", max_dimension=16384)
 
             with patch("app.render_jobs.YARN_ASSETS_ROOT", yarn_root):
                 atlas_entries, material_assets = build_project_material_payloads([asset])
 
             self.assertEqual(atlas_entries[0]["rgba_path"], asset_dir / "rgba.png")
             self.assertEqual(material_assets[0]["texture_mode"], "rgba_single")
+            self.assertEqual(material_assets[0]["pbr_texture_mode"], "pbr_single")
             self.assertEqual(material_assets[0]["rgba_path"], str(asset_dir / "rgba.png"))
             self.assertFalse((asset_dir / "albedo.png").exists())
             self.assertFalse((asset_dir / "alpha.png").exists())
+
+    def test_build_project_material_payloads_fails_without_pbr_manifest(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            yarn_root = Path(tmpdir)
+            asset_dir = yarn_root / "legacy-asset"
+            asset_dir.mkdir(parents=True)
+            Image.new("RGBA", (32, 4), (255, 0, 0, 128)).save(asset_dir / "rgba.png")
+            asset = YarnAsset(
+                id="legacy-asset",
+                label="Legacy Asset",
+                status="ready",
+                sourceFilename="rgba.png",
+                sourceUrl="/rgba.png",
+            )
+
+            with patch("app.render_jobs.YARN_ASSETS_ROOT", yarn_root):
+                with self.assertRaises(PbrPreflightError) as ctx:
+                    build_project_material_payloads([asset])
+
+            self.assertEqual(ctx.exception.stale_reason, "missing_pbr_manifest")
 
     def test_build_headless_render_command_points_to_blend_file_and_script(self) -> None:
         fake_binary = ROOT / "tests" / "fixtures" / "blender-bin"
@@ -706,6 +795,18 @@ class RenderJobTests(unittest.TestCase):
                     alphaUrl="/api/yarn/assets/asset-black/files/processed/black-alpha.png",
                 ),
             }
+            for asset, color in (
+                (assets_lookup["asset-red"], (220, 24, 48)),
+                (assets_lookup["asset-black"], (8, 8, 8)),
+            ):
+                asset_dir = yarn_root / asset.id
+                processed_dir = asset_dir / "processed"
+                processed_dir.mkdir(parents=True, exist_ok=True)
+                source_path = asset_dir / asset.sourceFilename
+                Image.new("RGBA", (16, 8), (*color, 255)).save(source_path)
+                Image.new("RGB", (16, 8), color).save(asset_dir / asset.diffuseFilename)
+                Image.new("L", (16, 8), 255).save(asset_dir / asset.alphaFilename)
+                _attach_pbr(asset, asset_dir, source_path)
 
             project_payload = {
                 "draft": {

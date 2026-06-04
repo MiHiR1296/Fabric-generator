@@ -8,12 +8,13 @@ Read in this order:
 |---|---|---|
 | 1 | [FINAL_HANDOFF.md](FINAL_HANDOFF.md) | The consolidated final doc: what we built, workflow, process, artifact management, features, open items. |
 | 2 | [CHECKPOINT_2026-05-19.md](CHECKPOINT_2026-05-19.md) | The visually approved Blender/material baseline: exact socket values, U-scale denominator, backup file, and verification. |
-| 3 | [application-blueprint.md](application-blueprint.md) | The weaving-draft subsystem product spec — what the UI must preserve when ported into the larger app. |
-| 4 | [putting-it-together/](putting-it-together/) | How the app + Blender talk to each other. Read this first for system-level picture: architecture, data contract, full phase log, lessons. |
-| 5 | [BlenderFixes/](BlenderFixes/) | Everything that lives inside the .blend itself + the backend code that drives it. Zoom-in on `Parametric Weave knotty`: node-group structure, Arc 1 / Arc 2 V-band system, socket-rename history, live-render dev mode. |
-| 6 | [WebUIChanges/](WebUIChanges/) | Wizard / FastAPI surface changes — the three state layers (library / runtime asset / color binding), the sync points between them, and every UI-visible behavior fix logged Symptom / Diagnosis / Fix / Verification. |
-| 7 | [YarnScanProcessing/](YarnScanProcessing/) | 2026-05-29 yarn-scan processing log: robust thread detection, natural RGBA, background spill removal, sub-degree rotation, connected-core bands, tests, and QA metrics. |
-| 8 | [WebUIbands/](WebUIbands/) | Yarn band detection (core + fiber halos) — historical setup, FWHM post-export detector, and later connected-core refinements. |
+| 3 | [TextureResolutionFix/](TextureResolutionFix/) | Active investigation and action plan for Blender texture-resolution mismatch: source RGBA/UDIM verification, root U-scale drift, atlas fallback risk, diagnostics, and fix phases. |
+| 4 | [application-blueprint.md](application-blueprint.md) | The weaving-draft subsystem product spec — what the UI must preserve when ported into the larger app. |
+| 5 | [putting-it-together/](putting-it-together/) | How the app + Blender talk to each other. Read this first for system-level picture: architecture, data contract, full phase log, lessons. |
+| 6 | [BlenderFixes/](BlenderFixes/) | Everything that lives inside the .blend itself + the backend code that drives it. Zoom-in on `Parametric Weave knotty`: node-group structure, Arc 1 / Arc 2 V-band system, socket-rename history, live-render dev mode. |
+| 7 | [WebUIChanges/](WebUIChanges/) | Wizard / FastAPI surface changes — the three state layers (library / runtime asset / color binding), the sync points between them, and every UI-visible behavior fix logged Symptom / Diagnosis / Fix / Verification. |
+| 8 | [YarnScanProcessing/](YarnScanProcessing/) | 2026-05-29 yarn-scan processing log: robust thread detection, natural RGBA, background spill removal, sub-degree rotation, connected-core bands, tests, and QA metrics. |
+| 9 | [WebUIbands/](WebUIbands/) | Yarn band detection (core + fiber halos) — historical setup, FWHM post-export detector, and later connected-core refinements. |
 
 External runtime assets are shared here:
 

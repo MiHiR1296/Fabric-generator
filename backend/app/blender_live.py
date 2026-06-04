@@ -61,10 +61,10 @@ GLOBAL_SOCKETS: tuple[tuple[str, str, float], ...] = (
     ("Scanner Pixels Per BU", "scanner_pixels_per_bu", 1.0),
 )
 
-# Pinned defaults — Rule 3 in lessons.md. The V-related sockets are additive
-# deltas, NOT absolute overrides; leaving them at zero/one is the safest shape
-# for scan-driven yarns. We push them defensively even though they're the
-# .blend's defaults — protects against someone tweaking the file.
+# Pinned defaults — Rule 3 in lessons.md. These match the approved
+# 2026-05-19 visual checkpoint for scan-driven yarns. Sub Texture Scale V = 1
+# is deliberate: Arc 2's free-flow halo path expects the full sub-strand scale
+# control to stay enabled.
 #
 # Sub Strand Enable is also pinned here because Arc 2's halo mapping is gated
 # by the is_sub_strand attribute — without sub-strand geometry, PW Band - Band V

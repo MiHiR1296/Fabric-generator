@@ -158,7 +158,7 @@ If that doesn't print "imports OK", do nothing else until it does.
 ## Open items (to revisit when relevant)
 
 - **Cycles 16384 cap**: kept as the default in [backend/app/yarn_assets.py:_ensure_cycles_safe_texture](../../backend/app/yarn_assets.py). Override via `CYCLES_MAX_TEXTURE_DIM`. If we ever switch to CPU-only rendering for a class of jobs, raise the cap there. Tile-wise the visible loss is invisible because the texture repeats; the cap is about GPU VRAM and texture-array limits, not artistic fidelity.
-- **MCP port**: 9876 not 9875. Pinned in the Makefile. If your Blender ever runs on a different port, `BLENDER_PORT=<n> make backend-dev`.
+- **MCP port**: use 9876. Pinned in the Makefile. If your Blender ever runs on a different port, `BLENDER_PORT=<n> make backend-dev`.
 - **No auth on any endpoint**. Localhost only. If this ever leaves localhost, treat it as a project-blocking item.
 
 ---

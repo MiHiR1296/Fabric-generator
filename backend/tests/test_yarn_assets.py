@@ -202,9 +202,15 @@ class YarnAssetTests(unittest.TestCase):
             imported["renderRgbaTileFilenames"],
             ["cycles_tiled/rgba_1001.png", "cycles_tiled/rgba_1002.png"],
         )
+        self.assertEqual(imported["pbrMaps"]["textureMode"], "pbr_udim_tiled")
+        self.assertEqual(imported["pbrMaps"]["tileCount"], 2)
         self.assertFalse((asset_dir / "rgb.png").exists())
         self.assertFalse((asset_dir / "alpha.png").exists())
         self.assertTrue((asset_dir / "rgba.png").exists())
+        self.assertTrue((asset_dir / "pbr" / "manifest.json").exists())
+        self.assertTrue((asset_dir / "pbr" / "normal_height.png").exists())
+        self.assertTrue((asset_dir / "pbr" / "roughness_specular.png").exists())
+        self.assertTrue((asset_dir / "pbr" / "cycles_tiled" / "normal_height_1001.png").exists())
         self.assertFalse((asset_dir / "cycles_tiled" / "rgb_1001.png").exists())
         self.assertFalse((asset_dir / "cycles_tiled" / "alpha_1001.png").exists())
         self.assertTrue((asset_dir / "cycles_tiled" / "rgba_1001.png").exists())

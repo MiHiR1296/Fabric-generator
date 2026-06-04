@@ -27,10 +27,12 @@ from .fabric_project import (
 from .runtime_paths import BLEND_FILE_PATH, PROJECTS_ROOT, RENDER_JOBS_ROOT, YARN_ASSETS_ROOT, ensure_runtime_dirs
 from .tile_inpaint_repair import repair_tile_with_two_pass_inpaint
 from .yarn_assets import (
+    MAX_CYCLES_TEXTURE_DIMENSION,
     ensure_cycles_tiled_rgba_texture_set,
     ensure_cycles_tiled_texture_set,
     get_ready_yarn_assets_lookup,
 )
+from .yarn_pbr import validate_asset_pbr
 
 
 def _is_live_render_mode() -> bool:
@@ -47,10 +49,13 @@ DEFAULT_RUNTIME_ROOT = RENDER_JOBS_ROOT
 MAX_DIRECT_PREVIEW_MATERIALS = 16
 DEFAULT_PREVIEW_RENDER_RESOLUTION = 3200
 DEFAULT_PREVIEW_RENDER_SAMPLES = 96
+DEFAULT_PREVIEW_MATERIAL_ROUGHNESS = 1.0
+DEFAULT_PREVIEW_MATERIAL_SHEEN = 0.5
 DEFAULT_TEXTURE_INTERPOLATION = "Linear"
 TEXTURE_INTERPOLATION_MODES = {"Linear", "Closest", "Cubic", "Smart"}
 DEFAULT_CUTOUT_BLEND_METHOD = "BLEND"
 DEFAULT_SURFACE_RENDER_METHOD = "BLENDED"
+DEFAULT_PRUNE_ORPHAN_MATERIALS = True
 CUTOUT_BLEND_METHODS = {"OPAQUE", "CLIP", "HASHED", "BLEND"}
 SURFACE_RENDER_METHODS = {"DITHERED", "BLENDED"}
 DEFAULT_TILE_COUNT = 4
@@ -127,6 +132,13 @@ def _texture_interpolation_env() -> str:
     return value if value in TEXTURE_INTERPOLATION_MODES else DEFAULT_TEXTURE_INTERPOLATION
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _enum_env(name: str, default: str, allowed: set[str]) -> str:
     value = os.environ.get(name, default).upper()
     return value if value in allowed else default
@@ -174,10 +186,21 @@ def build_headless_render_script(
             "diffuse_tile_pattern",
             "alpha_tile_pattern",
             "rgba_tile_pattern",
+            "pbr_manifest_path",
+            "pbr_normal_height_path",
+            "pbr_roughness_specular_path",
+            "pbr_normal_height_tile_pattern",
+            "pbr_roughness_specular_tile_pattern",
         ):
             if normalized.get(path_key) is not None:
                 normalized[path_key] = str(normalized[path_key])
-        for path_list_key in ("diffuse_tile_paths", "alpha_tile_paths", "rgba_tile_paths"):
+        for path_list_key in (
+            "diffuse_tile_paths",
+            "alpha_tile_paths",
+            "rgba_tile_paths",
+            "pbr_normal_height_tile_paths",
+            "pbr_roughness_specular_tile_paths",
+        ):
             if normalized.get(path_list_key):
                 normalized[path_list_key] = [str(path) for path in normalized[path_list_key]]
         normalized_material_assets.append(normalized)
@@ -233,6 +256,10 @@ def build_headless_render_script(
         DEFAULT_SURFACE_RENDER_METHOD,
         SURFACE_RENDER_METHODS,
     )
+    prune_orphan_materials = _bool_env(
+        "WEAVE_PRUNE_ORPHAN_MATERIALS",
+        DEFAULT_PRUNE_ORPHAN_MATERIALS,
+    )
     modifier_name_json = json.dumps(weave_modifier_name)
     sync_code = build_blender_sync_code(
         {
@@ -268,6 +295,17 @@ def hex_to_rgba(value):
         1.0,
     )
 
+def set_principled_input(shader, input_names, value):
+    for input_name in input_names:
+        if input_name in shader.inputs:
+            shader.inputs[input_name].default_value = value
+            return True
+    return False
+
+def configure_preview_shader(shader):
+    set_principled_input(shader, ('Roughness',), _PW_PREVIEW_MATERIAL_ROUGHNESS)
+    set_principled_input(shader, ('Sheen Weight', 'Sheen'), _PW_PREVIEW_MATERIAL_SHEEN)
+
 def ensure_preview_material(name, warp_hex, weft_hex):
     material = bpy.data.materials.get(name)
     if material is None:
@@ -282,7 +320,7 @@ def ensure_preview_material(name, warp_hex, weft_hex):
     output.location = (440, 0)
     shader = nodes.new('ShaderNodeBsdfPrincipled')
     shader.location = (200, 0)
-    shader.inputs['Roughness'].default_value = 0.72
+    configure_preview_shader(shader)
     attribute = nodes.new('ShaderNodeAttribute')
     attribute.location = (-560, -40)
     attribute.attribute_name = 'thread_kind'
@@ -304,7 +342,8 @@ def ensure_preview_material(name, warp_hex, weft_hex):
 def ensure_image(name, image_path, colorspace=None):
     image = bpy.data.images.get(name)
     if image is None:
-        image = bpy.data.images.load(image_path, check_existing=True)
+        image = bpy.data.images.load(image_path, check_existing=False)
+        image.name = name
     else:
         image.filepath = image_path
         image.reload()
@@ -364,6 +403,108 @@ def safe_material_suffix(value, fallback):
     safe = ''.join(ch if ch.isalnum() else '_' for ch in raw)
     return safe[:32] or str(fallback)
 
+def first_socket(sockets, names):
+    for name in names:
+        if name in sockets:
+            return sockets[name]
+    raise RuntimeError('Missing socket: ' + ' / '.join(names))
+
+def pbr_consumer_default(asset_entry, key, default):
+    defaults = asset_entry.get('pbr_consumer_defaults') or {}
+    try:
+        value = float(defaults.get(key, default))
+    except Exception:
+        value = default
+    return value if value == value else default
+
+def require_pbr_asset_entry(asset_entry):
+    mode = asset_entry.get('pbr_texture_mode')
+    tile_count = int(asset_entry.get('pbr_tile_count') or asset_entry.get('texture_tile_count') or 0)
+    if mode == 'pbr_udim_tiled':
+        if (
+            asset_entry.get('pbr_normal_height_tile_pattern')
+            and asset_entry.get('pbr_roughness_specular_tile_pattern')
+            and tile_count > 1
+        ):
+            return 'tiled'
+    if mode == 'pbr_single':
+        if (
+            asset_entry.get('pbr_normal_height_path')
+            and asset_entry.get('pbr_roughness_specular_path')
+        ):
+            return 'single'
+    raise RuntimeError('Complete PBR maps are required for FabricStudio material ' + str(asset_entry.get('id') or 'unknown'))
+
+def add_pbr_nodes(nodes, links, shader, asset_entry, material_name, vector_output, use_tiled_vector):
+    pbr_kind = require_pbr_asset_entry(asset_entry)
+    normal_height_tex = nodes.new('ShaderNodeTexImage')
+    normal_height_tex.name = 'FabricStudioNormalHeightNode'
+    normal_height_tex.location = (600, -420) if use_tiled_vector else (80, -420)
+    roughness_specular_tex = nodes.new('ShaderNodeTexImage')
+    roughness_specular_tex.name = 'FabricStudioRoughnessSpecularNode'
+    roughness_specular_tex.location = (600, -640) if use_tiled_vector else (80, -640)
+
+    if pbr_kind == 'tiled':
+        tile_count = int(asset_entry.get('pbr_tile_count') or asset_entry.get('texture_tile_count') or 1)
+        normal_height_tex.image = ensure_udim_image(
+            f"{material_name}_PBR_NormalHeight_UDIM",
+            asset_entry['pbr_normal_height_tile_pattern'],
+            tile_count,
+            'Non-Color',
+        )
+        roughness_specular_tex.image = ensure_udim_image(
+            f"{material_name}_PBR_RoughnessSpecular_UDIM",
+            asset_entry['pbr_roughness_specular_tile_pattern'],
+            tile_count,
+            'Non-Color',
+        )
+        configure_texture_node(normal_height_tex, 'CLIP')
+        configure_texture_node(roughness_specular_tex, 'CLIP')
+    else:
+        normal_height_tex.image = ensure_image(
+            f"{material_name}_PBR_NormalHeight",
+            asset_entry['pbr_normal_height_path'],
+            'Non-Color',
+        )
+        roughness_specular_tex.image = ensure_image(
+            f"{material_name}_PBR_RoughnessSpecular",
+            asset_entry['pbr_roughness_specular_path'],
+            'Non-Color',
+        )
+        configure_texture_node(normal_height_tex)
+        configure_texture_node(roughness_specular_tex)
+
+    links.new(vector_output, normal_height_tex.inputs['Vector'])
+    links.new(vector_output, roughness_specular_tex.inputs['Vector'])
+
+    normal_map = nodes.new('ShaderNodeNormalMap')
+    normal_map.name = 'FabricStudioObjectNormalMap'
+    normal_map.location = (850, -420)
+    try:
+        normal_map.space = 'OBJECT'
+    except Exception:
+        pass
+    normal_map.inputs['Strength'].default_value = pbr_consumer_default(asset_entry, 'normal_strength', 0.1)
+
+    bump = nodes.new('ShaderNodeBump')
+    bump.name = 'FabricStudioHeightBump'
+    bump.location = (1060, -340)
+    bump.inputs['Strength'].default_value = pbr_consumer_default(asset_entry, 'bump_strength', 1.0)
+    bump.inputs['Distance'].default_value = pbr_consumer_default(asset_entry, 'bump_distance_bu', 0.0008)
+
+    roughness_specular_split = nodes.new('ShaderNodeSeparateColor')
+    roughness_specular_split.name = 'FabricStudioRoughnessSpecularSplit'
+    roughness_specular_split.location = (850, -760)
+
+    links.new(normal_height_tex.outputs['Color'], normal_map.inputs['Color'])
+    links.new(normal_map.outputs['Normal'], bump.inputs['Normal'])
+    links.new(normal_height_tex.outputs['Alpha'], bump.inputs['Height'])
+    links.new(bump.outputs['Normal'], shader.inputs['Normal'])
+
+    links.new(roughness_specular_tex.outputs['Color'], roughness_specular_split.inputs['Color'])
+    links.new(first_socket(roughness_specular_split.outputs, ('Red', 'R')), shader.inputs['Roughness'])
+    links.new(first_socket(roughness_specular_split.outputs, ('Green', 'G')), first_socket(shader.inputs, ('Specular IOR Level',)))
+
 def ensure_texture_preview_material(asset_entry, index):
     suffix = safe_material_suffix(asset_entry.get('id'), f'material_{index}')
     material_name = f"FabricStudioMaterial_{index:02d}_{suffix}"
@@ -380,7 +521,7 @@ def ensure_texture_preview_material(asset_entry, index):
     output.location = (620, 0)
     shader = nodes.new('ShaderNodeBsdfPrincipled')
     shader.location = (380, 0)
-    shader.inputs['Roughness'].default_value = 0.72
+    configure_preview_shader(shader)
     shader.inputs['Alpha'].default_value = 1.0
 
     use_rgba_tiled = (
@@ -407,20 +548,23 @@ def ensure_texture_preview_material(asset_entry, index):
     alpha_tex.location = (80, -160)
     if use_rgba_tiled:
         tile_count = int(asset_entry.get('texture_tile_count') or 1)
-        rgba_image = ensure_udim_image(
+        diffuse_tex.image = ensure_udim_image(
             f"{material_name}_RGBA_UDIM",
             asset_entry['rgba_tile_pattern'],
             tile_count,
             'sRGB',
         )
-        diffuse_tex.image = rgba_image
-        alpha_tex.image = rgba_image
+        alpha_tex.image = ensure_udim_image(
+            f"{material_name}_RGBA_Alpha_UDIM",
+            asset_entry['rgba_tile_pattern'],
+            tile_count,
+            'Non-Color',
+        )
         configure_texture_node(diffuse_tex, 'CLIP')
         configure_texture_node(alpha_tex, 'CLIP')
     elif use_rgba_single:
-        rgba_image = ensure_image(f"{material_name}_RGBA", asset_entry['rgba_path'], 'sRGB')
-        diffuse_tex.image = rgba_image
-        alpha_tex.image = rgba_image
+        diffuse_tex.image = ensure_image(f"{material_name}_RGBA", asset_entry['rgba_path'], 'sRGB')
+        alpha_tex.image = ensure_image(f"{material_name}_RGBA_Alpha", asset_entry['rgba_path'], 'Non-Color')
         configure_texture_node(diffuse_tex)
         configure_texture_node(alpha_tex)
     elif use_tiled:
@@ -476,15 +620,26 @@ def ensure_texture_preview_material(asset_entry, index):
         links.new(uv_sep.outputs['Z'], tiled_vector.inputs['Z'])
         links.new(tiled_vector.outputs['Vector'], diffuse_tex.inputs['Vector'])
         links.new(tiled_vector.outputs['Vector'], alpha_tex.inputs['Vector'])
+        material_vector_output = tiled_vector.outputs['Vector']
     else:
         mapping = nodes.new('ShaderNodeMapping')
         mapping.location = (-180, 20)
         links.new(uv_attr.outputs['Vector'], mapping.inputs['Vector'])
         links.new(mapping.outputs['Vector'], diffuse_tex.inputs['Vector'])
         links.new(mapping.outputs['Vector'], alpha_tex.inputs['Vector'])
+        material_vector_output = mapping.outputs['Vector']
     links.new(diffuse_tex.outputs['Color'], shader.inputs['Base Color'])
     alpha_output = alpha_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']
     links.new(alpha_output, shader.inputs['Alpha'])
+    add_pbr_nodes(
+        nodes,
+        links,
+        shader,
+        asset_entry,
+        material_name,
+        material_vector_output,
+        bool(use_rgba_tiled or use_tiled),
+    )
     links.new(shader.outputs['BSDF'], output.inputs['Surface'])
 
     configure_cutout_material(material)
@@ -518,6 +673,65 @@ def apply_material_cycle_inputs(modifier, node_group, prefix, material_ids):
         maybe_set_modifier_input(modifier, node_group, f'{prefix} Length {index + 1}', int(length_value))
         maybe_set_modifier_input(modifier, node_group, f'{prefix} Material {index + 1}', int(material_value))
 
+def material_is_referenced_by_scene(material):
+    for obj in bpy.data.objects:
+        for slot in getattr(obj, 'material_slots', []):
+            if slot.material == material:
+                return True
+        for mod in getattr(obj, 'modifiers', []):
+            if getattr(mod, 'type', None) != 'NODES':
+                continue
+            try:
+                keys = list(mod.keys())
+            except Exception:
+                keys = []
+            for key in keys:
+                try:
+                    if mod[key] == material:
+                        return True
+                except Exception:
+                    pass
+    return False
+
+def prune_orphan_fabric_studio_materials(active_asset_ids, preview_active_materials=None):
+    import re
+    preview_active_materials = set(preview_active_materials or [])
+    active_asset_ids = set(active_asset_ids or [])
+    pattern = re.compile(r'^FabricStudioMaterial_[0-9]{2}_(?P<asset_id>[A-Za-z0-9_]+)$')
+    removed_materials = 0
+    removed_images = 0
+    for material in list(bpy.data.materials):
+        match = pattern.match(material.name)
+        if not match:
+            continue
+        if material.name in preview_active_materials:
+            continue
+        if match.group('asset_id') in active_asset_ids:
+            continue
+        if getattr(material, 'use_fake_user', False):
+            continue
+        if material.users != 0:
+            continue
+        if material_is_referenced_by_scene(material):
+            continue
+        try:
+            bpy.data.materials.remove(material)
+            removed_materials += 1
+        except Exception:
+            pass
+
+    for image in list(bpy.data.images):
+        if not image.name.startswith('FabricStudioMaterial_'):
+            continue
+        if image.users != 0:
+            continue
+        try:
+            bpy.data.images.remove(image)
+            removed_images += 1
+        except Exception:
+            pass
+    return {'materials': removed_materials, 'images': removed_images}
+
 def apply_modifier_material_slots(modifier, node_group, materials, warp_ids, weft_ids, material_assets=None):
     summary = {'materials': 0, 'cleared': 0, 'bandMeta': None}
     if modifier is None or node_group is None:
@@ -547,6 +761,19 @@ def apply_modifier_material_slots(modifier, node_group, materials, warp_ids, wef
         apply_material_cycle_inputs(modifier, node_group, 'Weft', weft_ids)
     except Exception as exc:
         summary['cycle_error'] = str(exc)
+    if globals().get('_PW_PRUNE_ORPHAN_MATERIALS', True):
+        try:
+            active_asset_ids = {
+                safe_material_suffix(entry.get('id'), '')
+                for entry in (material_assets or [])
+                if entry.get('id')
+            }
+            summary['pruned'] = prune_orphan_fabric_studio_materials(
+                active_asset_ids,
+                globals().get('_PW_PREVIEW_ACTIVE_MATERIALS', set()),
+            )
+        except Exception as exc:
+            summary['prune_error'] = str(exc)
     return summary
 
 def build_generated_preview_materials(material_assets):
@@ -567,7 +794,8 @@ atlas_rows = {atlas_bundle.rows}
 def ensure_image(name, image_path, colorspace):
     image = bpy.data.images.get(name)
     if image is None:
-        image = bpy.data.images.load(image_path, check_existing=True)
+        image = bpy.data.images.load(image_path, check_existing=False)
+        image.name = name
     else:
         image.filepath = image_path
         image.reload()
@@ -590,7 +818,7 @@ def ensure_atlas_preview_material(name, diffuse_path, alpha_path, rows):
     transparent.location = (520, 160)
     shader = nodes.new('ShaderNodeBsdfPrincipled')
     shader.location = (520, -40)
-    shader.inputs['Roughness'].default_value = 0.72
+    configure_preview_shader(shader)
     mix_shader = nodes.new('ShaderNodeMixShader')
     mix_shader.location = (760, 40)
 
@@ -762,9 +990,13 @@ _PW_MODIFIER_NAME = {modifier_name_json}
 _PW_TEXTURE_SCALE_U_MULTIPLIER = float(globals().get('material_texture_scale_u', 1.0))
 _PW_PREVIEW_RENDER_RESOLUTION = {repr(preview_render_resolution)}
 _PW_PREVIEW_RENDER_SAMPLES = {repr(preview_render_samples)}
+_PW_PREVIEW_MATERIAL_ROUGHNESS = {repr(DEFAULT_PREVIEW_MATERIAL_ROUGHNESS)}
+_PW_PREVIEW_MATERIAL_SHEEN = {repr(DEFAULT_PREVIEW_MATERIAL_SHEEN)}
 _PW_TEXTURE_INTERPOLATION = {repr(texture_interpolation)}
 _PW_CUTOUT_BLEND_METHOD = {repr(cutout_blend_method)}
 _PW_SURFACE_RENDER_METHOD = {repr(surface_render_method)}
+_PW_PRUNE_ORPHAN_MATERIALS = {repr(prune_orphan_materials)}
+_PW_PREVIEW_ACTIVE_MATERIALS = set(globals().get('_PW_PREVIEW_ACTIVE_MATERIALS', []))
 
 scene = bpy.context.scene
 try:
@@ -831,6 +1063,7 @@ print({{
         'resolution_y': scene.render.resolution_y,
         'resolution_percentage': scene.render.resolution_percentage,
         'cycles_samples': getattr(getattr(scene, 'cycles', None), 'samples', None),
+        'texture_interpolation': _PW_TEXTURE_INTERPOLATION,
     }}
 }})
 {render_action}
@@ -901,6 +1134,15 @@ def build_project_material_payloads(ordered_assets: list[Any]) -> tuple[list[dic
         )
         if tile_payload:
             material_entry.update(tile_payload)
+        material_entry.update(
+            validate_asset_pbr(
+                asset_dir=YARN_ASSETS_ROOT / asset.id,
+                asset_id=asset.id,
+                asset_label=getattr(asset, "label", None) or asset.id,
+                pbr_maps=getattr(asset, "pbrMaps", None),
+                max_dimension=MAX_CYCLES_TEXTURE_DIMENSION,
+            )
+        )
         material_assets.append(material_entry)
 
     return atlas_entries, material_assets

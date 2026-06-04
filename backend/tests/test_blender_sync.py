@@ -12,6 +12,8 @@ if str(ROOT) not in sys.path:
 
 from app.blender_sync import (  # noqa: E402
     DEFAULT_ARC1_V_PADDING,
+    DEFAULT_PREVIEW_MATERIAL_ROUGHNESS,
+    DEFAULT_PREVIEW_MATERIAL_SHEEN,
     DEFAULT_SPACING,
     build_blender_sync_code,
     load_blender_socket_config,
@@ -43,6 +45,7 @@ class BlenderSyncTests(unittest.TestCase):
                     "weftThreads": 96,
                     "spacing": 0.03,
                     "amplitude": 0.005,
+                    "threadSubdivisions": 12,
                     "textureScaleV": 0.5,
                     "fillRatio": 1,
                     "arc1VPadding": 0.1,
@@ -51,10 +54,19 @@ class BlenderSyncTests(unittest.TestCase):
         )
 
         self.assertIn("ensure_web_draft_material", code)
+        self.assertIn(f"preview_material_roughness = {DEFAULT_PREVIEW_MATERIAL_ROUGHNESS!r}", code)
+        self.assertIn(f"preview_material_sheen = {DEFAULT_PREVIEW_MATERIAL_SHEEN!r}", code)
+        self.assertIn("set_principled_input(shader, ('Roughness',), preview_material_roughness)", code)
+        self.assertIn("set_principled_input(shader, ('Sheen Weight', 'Sheen'), preview_material_sheen)", code)
         self.assertIn("'Warp Threads'", code)
         self.assertIn("'Weft Threads'", code)
         self.assertIn("warp_threads_override = 120", code)
         self.assertIn("weft_threads_override = 96", code)
+        self.assertIn("thread_subdivisions_override = 12.0", code)
+        self.assertIn(
+            "'Thread Subdivisions', pick_value(thread_subdivisions_override, preserved.get('Thread Subdivisions'), 8.0)",
+            code,
+        )
         self.assertIn("fill_ratio_override = 1.0", code)
         self.assertIn("arc1_v_padding_override = 0.1", code)
         self.assertIn("'Arc 1 V Padding'", code)
@@ -80,6 +92,7 @@ class BlenderSyncTests(unittest.TestCase):
         self.assertIn("weft_material_id", code)
         self.assertIn("ensure_draft_colour_id_sampling", code)
         self.assertIn("ensure_parametric_knotty_draft_contract", code)
+        self.assertIn("flat_arc1_sampling_contract", code)
         self.assertIn("('PW Draft Warp Col Mod', 0, 'Curve of Point', 'Curve Index')", code)
         self.assertIn("('PW Draft Warp Row Mod', 0, 'Curve of Point', 'Index in Curve')", code)
         self.assertIn("('PW Draft Weft Col Mod', 0, 'Curve of Point.001', 'Index in Curve')", code)

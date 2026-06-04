@@ -106,11 +106,11 @@ The graph is now arranged into these readable frames:
 | `Draft Sampling` | `WebDraft_Live` object info, drawdown cell sampling, material ID sampling. |
 | `Strand Generation / Drawdown` | Warp/weft strand curve generation and Z over/under bend. |
 | `Surface` | Active surface controls such as Arc 2 boundary inset. |
-| `Profile / Mesh` | Arc profile construction, curve-to-mesh conversion, strand attributes, and the Arc 1 sampling mesh used by same-strand U transfer. |
+| `Profile / Mesh` | Arc profile construction, curve-to-mesh conversion, strand attributes, and historical Arc 1 sampling mesh context. |
 | `Texture Coordinates` | U-length math and strand-space texture coordinate setup. |
 | `Texture U/V Output` | Final UV vector assembly and V scale/offset application. |
 | `Arc 1 / Arc 2 V Band Mapping` | Per-material V-band switches, Arc 1 padding, Arc 2 piecewise/matched mapping. |
-| `Same-Strand U Transfer` | Nearest-surface transfer that borrows Arc 1 U for Arc 2 on the same strand. |
+| `Same-Strand U Transfer` | Deterministic same-strand U switch that keeps Arc 2 in Arc 1's yarn U stream without nearest-surface sampling. |
 | `Material Assignment` | Material socket inputs and `Set Material` chain. |
 | `General / Imperfections` | Wobble/noise controls. |
 | `Loose Strands` | Flyaway yarn generation. |
@@ -129,11 +129,10 @@ flow readable.
 | `PW Helper - Arc 1 Padding Clamp` | `PW Clamp Arc 1 V Band Inside Arc 2` | Computes padded Arc 1 V Min/Max and clamps them inside Arc 2's outer silhouette. |
 | `PW Helper - Arc 2 Match Arc 1 Range` | `PW Match Arc 2 V To Arc 1 Range` | Optional Surface-panel branch that replaces piecewise Arc 2 V with the padded Arc 1 V range when `Arc 2 Match Arc 1 V Rate` is enabled. |
 
-## Arc 1 same-strand sampling path
+## Arc 2 Same-Strand U Path
 
-The same-strand U transfer depends on a real Arc 1/main-strand mesh being
-available as the sampling surface. That path is intentionally explicit in the
-main graph instead of hidden inside a helper group:
+The old same-strand U transfer depended on a real Arc 1/main-strand mesh as a
+nearest-surface sampling target:
 
 ```text
 PW Arc1 Sample Profile
@@ -142,16 +141,32 @@ PW Arc1 Sample Profile
   -> PW Arc1 Sample Tag Main
 ```
 
-`PW Arc1 Sample Tag Main` stores `is_sub_strand = 0`, then feeds two places:
+`PW Arc1 Sample Tag Main` stores `is_sub_strand = 0`, then historically fed:
 
 ```text
 Join Geometry.001.Geometry
 PW StrandXferU - Sample Same-Strand Arc1 U.Mesh
 ```
 
-This keeps the main Arc 1 mesh present in the final strand assembly and gives
-`PW StrandXferU - Sample Same-Strand Arc1 U` a same-strand surface to sample
-from using `pw_strand_id` as both the source and target group id.
+That nearest-surface sample is now rejected for the active U output because it
+introduced small Arc 2 endpoint shrink and local zero/reversed U steps. The
+active graph keeps the same design goal with deterministic wiring:
+
+```text
+Arc 1/main:
+  PW StrandXferU - Use Same-Strand Arc1 U On Arc2.False
+    <- PW U - Per Section Multiplier
+
+Arc 2/halo:
+  PW StrandXferU - Use Same-Strand Arc1 U On Arc2.True
+    <- PW UV U Add
+
+Switch:
+  <- PW StrandXferU - Is Arc2
+```
+
+This keeps Arc 2 in the same yarn U stream as Arc 1 while allowing Arc 2 to keep
+its own V mapping.
 
 ## Active data contracts
 

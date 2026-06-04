@@ -10,6 +10,8 @@ from typing import Any
 DEFAULT_TEXTURE_U_CALIBRATION = 0.1
 DEFAULT_ARC1_V_PADDING = 0.008
 DEFAULT_SPACING = 0.026
+DEFAULT_PREVIEW_MATERIAL_ROUGHNESS = 1.0
+DEFAULT_PREVIEW_MATERIAL_SHEEN = 0.5
 
 
 @dataclass(frozen=True)
@@ -157,6 +159,7 @@ def build_blender_sync_code(
     # longer needed. Kept as an escape-hatch override.
     uv_random_u_override = maybe_float("uvRandomU")
     amplitude_override = maybe_float("amplitude")
+    thread_subdivisions_override = maybe_float("threadSubdivisions")
     texture_scale_v_override = maybe_float("textureScaleV")
     fill_ratio_override = maybe_float("fillRatio")
     arc1_v_padding_override = maybe_float("arc1VPadding")
@@ -194,10 +197,13 @@ pattern_noise_x_override = {repr(pattern_noise_x_override)}
 pattern_noise_y_override = {repr(pattern_noise_y_override)}
 uv_random_u_override = {repr(uv_random_u_override)}
 amplitude_override = {repr(amplitude_override)}
+thread_subdivisions_override = {repr(thread_subdivisions_override)}
 texture_scale_v_override = {repr(texture_scale_v_override)}
 fill_ratio_override = {repr(fill_ratio_override)}
 arc1_v_padding_override = {repr(arc1_v_padding_override)}
 texture_u_calibration = {repr(texture_u_calibration)}
+preview_material_roughness = {repr(DEFAULT_PREVIEW_MATERIAL_ROUGHNESS)}
+preview_material_sheen = {repr(DEFAULT_PREVIEW_MATERIAL_SHEEN)}
 default_warp_threads = {repr(default_warp_threads)}
 default_weft_threads = {repr(default_weft_threads)}
 material_count_override = {repr(material_count)}
@@ -266,6 +272,17 @@ def hex_to_rgba(value):
         1.0,
     )
 
+def set_principled_input(shader, input_names, value):
+    for input_name in input_names:
+        if input_name in shader.inputs:
+            shader.inputs[input_name].default_value = value
+            return True
+    return False
+
+def configure_preview_shader(shader):
+    set_principled_input(shader, ('Roughness',), preview_material_roughness)
+    set_principled_input(shader, ('Sheen Weight', 'Sheen'), preview_material_sheen)
+
 def ensure_web_draft_material(name, warp_hex, weft_hex):
     material = bpy.data.materials.get(name)
     if material is None:
@@ -280,7 +297,7 @@ def ensure_web_draft_material(name, warp_hex, weft_hex):
     output.location = (440, 0)
     shader = nodes.new('ShaderNodeBsdfPrincipled')
     shader.location = (200, 0)
-    shader.inputs['Roughness'].default_value = 0.72
+    configure_preview_shader(shader)
     attribute = nodes.new('ShaderNodeAttribute')
     attribute.location = (-560, -40)
     attribute.attribute_name = 'thread_kind'
@@ -465,6 +482,9 @@ def set_unlinked_input_default(group, node_name, input_index, value):
 def ensure_parametric_knotty_draft_contract(group):
     if group.name != 'Parametric Weave knotty':
         return
+    if group.get('flat_arc1_sampling_contract') == 'logical_thread_tiling_v1':
+        print('[sync] Flat Arc1 logical-thread sampling contract present; skipping legacy draft relink.')
+        return
     # Current web draft convention is matrix[row=pick][col=warp end].
     # Warp strands therefore sample col from Curve Index and row from Index in Curve;
     # weft strands do the opposite. Older graph revisions had these four links
@@ -594,7 +614,7 @@ except KeyError:
 # silent on missing sockets so one script body works for both graphs.
 maybe_set_modifier_input(weave_mod, weave_group, 'Amplitude', pick_value(amplitude_override, preserved.get('Amplitude'), 0.005))
 maybe_set_modifier_input(weave_mod, weave_group, 'Thread Radius', preserved.get('Thread Radius') if preserved.get('Thread Radius') is not None else 0.028)
-maybe_set_modifier_input(weave_mod, weave_group, 'Thread Subdivisions', preserved.get('Thread Subdivisions') if preserved.get('Thread Subdivisions') is not None else 8.0)
+maybe_set_modifier_input(weave_mod, weave_group, 'Thread Subdivisions', pick_value(thread_subdivisions_override, preserved.get('Thread Subdivisions'), 8.0))
 maybe_set_modifier_input(weave_mod, weave_group, 'Ply Count', preserved.get('Ply Count') if preserved.get('Ply Count') is not None else 3)
 maybe_set_modifier_input(weave_mod, weave_group, 'Ply Radius', preserved.get('Ply Radius') if preserved.get('Ply Radius') is not None else 0.013)
 maybe_set_modifier_input(weave_mod, weave_group, 'Twist Amount', preserved.get('Twist Amount') if preserved.get('Twist Amount') is not None else 16.0)

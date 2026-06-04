@@ -257,9 +257,17 @@ no pw_u_factor / pw_thread_kind projection stores
 
 Keep this as a caution: a projected-axis branch should be validated as a temporary switch/debug branch first, ideally with a viewport screenshot or small render after each scalar term, not saved as the default path until the visual result is confirmed.
 
-### Arc 2 same-strand U transfer (Phase 10k)
+### Arc 2 Deterministic Same-Strand U (Phase 10k, Revised 2026-06-04)
 
-Phase 10k keeps the Phase 10j lesson but changes the implementation. The viewport mismatch was not `UV Random U`; it was Arc 2 using the right deterministic thread-length model on the wrong visible shell. The first nearest-surface preview also failed because an ungrouped sample can hit a neighboring strand where Arc 1 and Arc 2 are close in screen space.
+Phase 10k originally kept the Phase 10j lesson but changed the implementation
+to grouped nearest-surface sampling. That proved better than the ungrouped
+sample, but later texture-resolution diagnostics measured small Arc 2 endpoint
+shrink and local zero/reversed U steps from the nearest-surface lookup.
+
+The revised implementation keeps the design intent while removing the lookup:
+Arc 2 uses the same deterministic base U stream as Arc 1 (`PW UV U Add`) and
+keeps its own V chain. This is not an independent Arc 2 texture stream; it is
+the same yarn U coordinate before the nearest-surface sampler distorted it.
 
 Active graph state:
 
@@ -273,19 +281,20 @@ Weft curve branch:
     -> PW StrandID - Weft Offset (+10000)
     -> PW StrandID - Store Weft (INT point attribute `pw_strand_id`)
 
-Arc 2 U transfer:
+Arc 2 deterministic U:
   PW StrandXferU - Strand ID                         reads `pw_strand_id`
-  PW StrandXferU - Sample Same-Strand Arc1 U         samples PW U - Per Section Multiplier from Arc 1 mesh
-    Mesh                                             <- Reroute.001 (Arc 1/main mesh)
-    Value                                            <- PW U - Per Section Multiplier.Value
-    Group ID / Sample Group ID                       <- pw_strand_id
-    Sample Position                                  <- Position
   PW StrandXferU - Is Arc2                           reads `is_sub_strand`
-  PW StrandXferU - Use Same-Strand Arc1 U On Arc2    selects sampled Arc 1 U only for Arc 2
+  PW StrandXferU - Use Same-Strand Arc1 U On Arc2    selects deterministic base U only for Arc 2
+    False                                            <- PW U - Per Section Multiplier.Value
+    True                                             <- PW UV U Add.Value
   Combine XYZ.006.X                                  <- PW StrandXferU - Use Same-Strand Arc1 U On Arc2
 ```
 
-Only U is transferred. Arc 2 keeps the existing Arc 2 V chain (`Arc 2 Match Arc 1 V Rate` can still be used for visual cell-count matching), and no `PW VisU`, `pw_visual_u_correction`, `pw_u_factor`, or `pw_thread_kind` nodes are active.
+Only U is shared. Arc 2 keeps the existing Arc 2 V chain (`Arc 2 Match Arc 1 V
+Rate` can still be used for visual cell-count matching), and no `PW VisU`,
+`pw_visual_u_correction`, `pw_u_factor`, or `pw_thread_kind` nodes are active.
+The old `PW StrandXferU - Sample Same-Strand Arc1 U` node may remain in saved
+files as muted historical context but must not feed the active U output.
 
 ### Arc 2 profile is a custom 31-vertex polyline (Phase 10c → 10d)
 

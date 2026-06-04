@@ -4796,7 +4796,7 @@ PY
 status: success; scene contains ParametricWeave and WebDraft_Live
 ```
 
-Socket note: the app and docs use Blender MCP port `9876`, which was open and returned scene info. The generic Blender MCP tool in this Codex session was pointed at `9875` and failed there, so app-level verification used the backend's configured socket helper.
+Socket note: the app, docs, and Codex MCP bridge should all use Blender MCP port `9876`, which was open and returned scene info.
 
 ### Lesson
 

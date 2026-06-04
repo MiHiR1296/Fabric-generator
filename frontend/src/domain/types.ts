@@ -32,10 +32,9 @@ export interface DraftRenderSettings {
   fiberSubdivs: number;
   seed: number;
   fillRatio: number;
-  // Per-strand U-offset randomization. 0 disables; 1 (default) is the baseline
-  // shift; up to 20 produces strong staggering so the same texture repeat
-  // doesn't appear identically across the swatch. Pushed to the global
-  // 'UV Random U' modifier socket.
+  // Per-strand U-offset randomization. 0 disables and is the default for
+  // deterministic texture diagnostics; up to 20 produces strong staggering.
+  // Pushed to the global 'UV Random U' modifier socket.
   uvRandomU: number;
 }
 

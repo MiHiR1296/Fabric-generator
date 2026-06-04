@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 try:
     from fastapi import FastAPI, File, Form, HTTPException, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, JSONResponse
     from pydantic import BaseModel
 except ImportError as exc:  # pragma: no cover - exercised through setup docs instead.
     FastAPI = None
@@ -13,6 +14,7 @@ except ImportError as exc:  # pragma: no cover - exercised through setup docs in
     File = None
     Form = None
     HTTPException = RuntimeError
+    JSONResponse = None
     BaseModel = object
     IMPORT_ERROR = exc
 else:
@@ -38,6 +40,7 @@ from .yarn_assets import (
     create_yarn_assets,
     delete_library_yarn,
     delete_yarn_asset,
+    get_pbr_migration_job,
     get_library_yarn_file_path,
     get_ready_yarn_assets_lookup,
     get_yarn_asset,
@@ -45,8 +48,11 @@ from .yarn_assets import (
     import_yarn_from_library,
     list_library_yarns,
     list_yarn_assets,
+    migrate_pbr_assets,
+    regenerate_asset_pbr,
     retry_yarn_asset,
 )
+from .yarn_pbr import PbrPreflightError
 
 
 if FastAPI is not None:
@@ -103,6 +109,14 @@ if FastAPI is not None:
         colorBindings: list[dict] = []
         target_object_name: str = "ParametricWeave"
         modifier_name: str = "Weave"
+
+
+    class PbrMigrationRequest(BaseModel):
+        assetIds: Optional[list[str]] = None
+
+
+    def _pbr_preflight_response(exc: PbrPreflightError):
+        return JSONResponse(status_code=409, content=exc.to_response())
 
 
     @app.get("/api/parser/health")
@@ -182,6 +196,8 @@ if FastAPI is not None:
                 target_object_name=request.target_object_name,
                 draft_object_name=request.draft_object_name,
             )
+        except PbrPreflightError as exc:
+            return _pbr_preflight_response(exc)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -204,6 +220,8 @@ if FastAPI is not None:
                 target_object_name=request.target_object_name,
                 draft_object_name=request.draft_object_name,
             )
+        except PbrPreflightError as exc:
+            return _pbr_preflight_response(exc)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -222,7 +240,10 @@ if FastAPI is not None:
             ordered_assets = list(lookup.values())
         if not ordered_assets:
             raise HTTPException(status_code=400, detail="No ready yarn assets to push.")
-        _atlas_entries, material_assets = build_project_material_payloads(ordered_assets)
+        try:
+            _atlas_entries, material_assets = build_project_material_payloads(ordered_assets)
+        except PbrPreflightError as exc:
+            return _pbr_preflight_response(exc)
         response = push_bandmeta_to_live_blender(
             material_assets,
             target_object_name=request.target_object_name,
@@ -257,7 +278,10 @@ if FastAPI is not None:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not ordered_assets:
             raise HTTPException(status_code=400, detail="No ready yarn assets to push.")
-        _atlas_entries, material_assets = build_project_material_payloads(ordered_assets)
+        try:
+            _atlas_entries, material_assets = build_project_material_payloads(ordered_assets)
+        except PbrPreflightError as exc:
+            return _pbr_preflight_response(exc)
         script = build_headless_render_script(
             request.draft,
             render_path="/tmp/fabric-studio-live-setup.png",
@@ -414,6 +438,29 @@ if FastAPI is not None:
             raise HTTPException(status_code=404, detail="Yarn asset not found.") from exc
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+    @app.post("/api/yarn-assets/{asset_id}/regenerate-pbr")
+    async def regenerate_asset_pbr_endpoint(asset_id: str):
+        try:
+            return regenerate_asset_pbr(asset_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+    @app.post("/api/yarn-assets/migrate-pbr")
+    async def migrate_asset_pbr_endpoint(request: PbrMigrationRequest):
+        return migrate_pbr_assets(request.assetIds)
+
+
+    @app.get("/api/yarn-assets/migrate-pbr/{job_id}")
+    async def pbr_migration_status(job_id: str):
+        job = get_pbr_migration_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="PBR migration job not found.")
+        return job
 
 
     @app.delete("/api/yarn/assets/{asset_id}")
