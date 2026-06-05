@@ -16,6 +16,10 @@ if str(ROOT) not in sys.path:
 from app.atlas import AtlasBundle  # noqa: E402
 from app.models import YarnAsset  # noqa: E402
 from app.render_jobs import (  # noqa: E402
+    DEFAULT_ALPHA_CURVE_GAMMA,
+    DEFAULT_ALPHA_REMAP_ENABLED,
+    DEFAULT_ALPHA_REMAP_HIGH,
+    DEFAULT_ALPHA_REMAP_LOW,
     DEFAULT_BLEND_FILE,
     DEFAULT_BLENDER_BINARY,
     DEFAULT_CUTOUT_BLEND_METHOD,
@@ -167,9 +171,13 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("set_principled_input(shader, ('Roughness',), _PW_PREVIEW_MATERIAL_ROUGHNESS)", script)
         self.assertIn("set_principled_input(shader, ('Sheen Weight', 'Sheen'), _PW_PREVIEW_MATERIAL_SHEEN)", script)
         self.assertIn("texture_node.interpolation = _PW_TEXTURE_INTERPOLATION", script)
-        self.assertIn("links.new(alpha_output, shader.inputs['Alpha'])", script)
-        self.assertNotIn("FabricStudioAlphaRemap", script)
-        self.assertNotIn("FabricStudioAlphaCurve", script)
+        self.assertIn("link_alpha_to_shader(nodes, links, alpha_output, shader.inputs['Alpha'])", script)
+        self.assertIn("if not _PW_ALPHA_REMAP_ENABLED:", script)
+        self.assertIn("links.new(alpha_output, shader_alpha_input)", script)
+        self.assertIn(f"_PW_ALPHA_REMAP_ENABLED = {DEFAULT_ALPHA_REMAP_ENABLED!r}", script)
+        self.assertIn(f"_PW_ALPHA_REMAP_LOW = {DEFAULT_ALPHA_REMAP_LOW!r}", script)
+        self.assertIn(f"_PW_ALPHA_REMAP_HIGH = {DEFAULT_ALPHA_REMAP_HIGH!r}", script)
+        self.assertIn(f"_PW_ALPHA_CURVE_GAMMA = {DEFAULT_ALPHA_CURVE_GAMMA!r}", script)
         self.assertIn("material.blend_method = _PW_CUTOUT_BLEND_METHOD", script)
         self.assertIn("material.surface_render_method = _PW_SURFACE_RENDER_METHOD", script)
         self.assertIn("set_modifier_input(modifier, node_group, f'Material {index}', material)", script)
@@ -179,6 +187,42 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("_PW_TEXTURE_SCALE_U_MULTIPLIER = float(globals().get('material_texture_scale_u', 1.0))", script)
         self.assertIn("_pw_resolved_texture_scale_u(entry, modifier, node_group) * texture_scale_u_multiplier", script)
         self.assertIn("/tmp/red.png", script)
+
+    def test_build_headless_render_script_supports_alpha_remap_overrides(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "WEAVE_ALPHA_REMAP_ENABLED": "1",
+                "WEAVE_ALPHA_REMAP_LOW": "0.04",
+                "WEAVE_ALPHA_REMAP_HIGH": "0.55",
+                "WEAVE_ALPHA_CURVE_GAMMA": "0.75",
+            },
+        ):
+            script = build_headless_render_script(
+                {
+                    "title": "Alpha Override Test",
+                    "drawdown": [[1]],
+                    "warpColors": ["#ffffff"],
+                    "weftColors": ["#111111"],
+                },
+                render_path="/tmp/unit-preview.png",
+                material_assets=[
+                    {
+                        "id": "asset-one",
+                        "diffuse_path": "/tmp/one.png",
+                        "alpha_path": "/tmp/one-alpha.png",
+                    },
+                ],
+                warp_material_ids=[0],
+                weft_material_ids=[0],
+            )
+
+        self.assertIn("_PW_ALPHA_REMAP_ENABLED = True", script)
+        self.assertIn("_PW_ALPHA_REMAP_LOW = 0.04", script)
+        self.assertIn("_PW_ALPHA_REMAP_HIGH = 0.55", script)
+        self.assertIn("_PW_ALPHA_CURVE_GAMMA = 0.75", script)
+        self.assertIn("FabricStudioAlphaRemap", script)
+        self.assertIn("FabricStudioAlphaCurve", script)
 
     def test_build_headless_render_script_loads_material_json_with_python_booleans(self) -> None:
         script = build_headless_render_script(
@@ -416,11 +460,10 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("use_rgba_tiled = (", script)
         self.assertIn("asset_entry.get('texture_mode') == 'udim_rgba_tiled'", script)
         self.assertIn("asset_entry['rgba_tile_pattern']", script)
-        self.assertIn('f"{material_name}_RGBA_Alpha_UDIM"', script)
-        self.assertIn("asset_entry['rgba_tile_pattern'],\n            tile_count,\n            'Non-Color'", script)
+        self.assertNotIn('f"{material_name}_RGBA_Alpha_UDIM"', script)
         self.assertIn("preview_materials = build_generated_preview_materials(_PW_MATERIAL_ASSETS)", script)
         self.assertNotIn("preview_materials = [ensure_atlas_preview_material", script)
-        self.assertIn("alpha_output = alpha_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']", script)
+        self.assertIn("alpha_output = diffuse_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']", script)
         self.assertIn("\"rgba_tile_pattern\": \"/tmp/tiles/rgba_<UDIM>.png\"", script)
 
     def test_build_headless_render_script_supports_rgba_single_materials(self) -> None:
@@ -456,11 +499,11 @@ class RenderJobTests(unittest.TestCase):
         self.assertIn("asset_entry.get('texture_mode') == 'rgba_single'", script)
         self.assertIn("asset_entry['rgba_path']", script)
         self.assertIn("diffuse_tex.image = ensure_image(f\"{material_name}_RGBA\", asset_entry['rgba_path'], 'sRGB')", script)
-        self.assertIn("alpha_tex.image = ensure_image(f\"{material_name}_RGBA_Alpha\", asset_entry['rgba_path'], 'Non-Color')", script)
+        self.assertNotIn("alpha_tex.image = ensure_image(f\"{material_name}_RGBA_Alpha\", asset_entry['rgba_path'], 'Non-Color')", script)
         self.assertIn("bpy.data.images.load(image_path, check_existing=False)", script)
         self.assertIn("preview_materials = build_generated_preview_materials(_PW_MATERIAL_ASSETS)", script)
         self.assertNotIn("preview_materials = [ensure_atlas_preview_material", script)
-        self.assertIn("alpha_output = alpha_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']", script)
+        self.assertIn("alpha_output = diffuse_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']", script)
 
     def test_tile_helpers_align_repeats_and_wrap_segments(self) -> None:
         self.assertEqual(_next_multiple(81, 8), 88)

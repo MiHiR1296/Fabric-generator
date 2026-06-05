@@ -1848,6 +1848,46 @@ Result:
 34 tests passed.
 ```
 
+## Phase 1.8 - Direct RGBA Alpha Default
+
+### Trigger
+
+The user reviewed the live Blender material and found the better current output
+with the diffuse/RGBA texture's own alpha channel linked directly to the shader,
+without using the generated alpha texture and without the Map Range boost.
+
+### Change
+
+The material-generator contract changed from "RGBA diffuse plus separate
+RGBA_Alpha image" to "RGBA diffuse supplies both color and alpha" for RGBA
+single and RGBA UDIM assets.
+
+```text
+Default RGBA path:
+  FabricStudioDiffuseNode.Color -> Principled BSDF.Base Color
+  FabricStudioDiffuseNode.Alpha -> Principled BSDF.Alpha
+
+Opt-in diagnostic:
+  WEAVE_ALPHA_REMAP_ENABLED=1 inserts FabricStudioAlphaRemap
+```
+
+The split diffuse/alpha fallback path still uses a separate alpha map because
+those assets do not carry an alpha channel in the diffuse image.
+
+### Arc 1 Padding
+
+The same review changed the current code default for `Arc 1 V Padding` to
+`0.02` in backend and frontend render settings.
+
+### Verification
+
+```text
+python3 -m py_compile backend/app/render_jobs.py backend/app/blender_sync.py
+python3 -m unittest backend.tests.test_render_jobs backend.tests.test_blender_sync
+
+31 tests passed.
+```
+
 ---
 
 ## Phase 1.4 - Live Alpha Cleanup And Arc 2 U Transfer Bypass

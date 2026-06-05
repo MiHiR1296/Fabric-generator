@@ -28,10 +28,11 @@ MAX_MATERIAL_SLOTS = 16
 # Arc 1's physical-equivalent slice of v_around on the strand cross-section.
 # Currently a constant from the .blend's Phase 3q geometry-owned split
 # (arc1_radius / arc2_radius = 0.015 / 0.025 -> 0.6). Kept as radius/split
-# provenance; the active auto Scale U denominator is separated below so we can
-# test projected/reference-image scaling without changing geometry semantics.
+# provenance and used by the automatic per-material U scale. The source core
+# band is a material property; Arc 1 V Padding is a visual V expansion control
+# and should not change along-strand U consumption.
 ARC1_V_AROUND_SPAN = 0.6
-AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0
+AUTO_TEXTURE_SCALE_U_CORE_FRACTION = ARC1_V_AROUND_SPAN
 
 # Per-Material socket suffix, the matching key inside `bandMeta.blender`, and
 # the safe default to push when the value is missing.
@@ -72,6 +73,7 @@ GLOBAL_SOCKETS: tuple[tuple[str, str, float], ...] = (
 # no halo). Pinning True keeps Arc 2 active. See BlenderFixes/phase_log.md.
 PINNED_FOOTGUN_SOCKETS: tuple[tuple[str, float | bool], ...] = (
     ("Sub Strand Enable", True),
+    ("Texture Scale U", 1.0),
     ("Texture Scale V", 1.0),
     ("Texture Offset V", 0.0),
     ("Sub Texture Scale V", 1.0),
@@ -122,17 +124,17 @@ def build_material_asset_entry(asset: Any) -> dict[str, Any]:
     core_v_min = _coerce_float(blender.get("core_v_min"), 0.0)
     core_v_max = _coerce_float(blender.get("core_v_max"), 1.0)
     core_v_span = max(core_v_max - core_v_min, 1e-6)
-    # Uniform-aspect U scale: match U sample density to V's implicit stretch
-    # so texture features look the same size in both directions on the strand.
+    # Uniform-aspect U scale: derive the along-strand scale from the material's
+    # detected core band and the graph's core fraction. This is intentionally
+    # independent of Arc 1 V Padding; padding widens the rendered V band, but it
+    # should not make the same yarn consume more source length per strand.
     # Producer may still ship an override in blender.texture_scale_u; if absent
-    # (or set to the legacy 1.0 default) the Blender apply step recomputes it
-    # from the current padded V span because Arc 1 V Padding is a modifier
-    # socket, not asset metadata. Keep this raw-core fallback for older scripts
-    # that do not know about texture_scale_u_is_auto yet.
+    # (or set to the legacy 1.0 default) the Blender apply step recomputes the
+    # same raw-core value so old material entries and live pushes cannot drift.
     explicit_scale_u = blender.get("texture_scale_u")
     texture_scale_u_is_auto = explicit_scale_u is None or _coerce_float(explicit_scale_u, 1.0) == 1.0
     if texture_scale_u_is_auto:
-        uniform_scale_u = core_v_span / AUTO_TEXTURE_SCALE_U_DENOMINATOR
+        uniform_scale_u = core_v_span * AUTO_TEXTURE_SCALE_U_CORE_FRACTION
     else:
         uniform_scale_u = _coerce_float(explicit_scale_u, 1.0)
     return {
@@ -171,7 +173,7 @@ _GLOBAL_SOCKETS = """ + repr(GLOBAL_SOCKETS) + """
 _PINNED_FOOTGUN_SOCKETS = """ + repr(PINNED_FOOTGUN_SOCKETS) + """
 _MAX_MATERIAL_SLOTS = """ + repr(MAX_MATERIAL_SLOTS) + """
 _ARC1_V_AROUND_SPAN = """ + repr(ARC1_V_AROUND_SPAN) + """
-_AUTO_TEXTURE_SCALE_U_DENOMINATOR = """ + repr(AUTO_TEXTURE_SCALE_U_DENOMINATOR) + """
+_AUTO_TEXTURE_SCALE_U_CORE_FRACTION = """ + repr(AUTO_TEXTURE_SCALE_U_CORE_FRACTION) + """
 
 
 def _pw_socket_identifier(node_group, name):
@@ -218,15 +220,10 @@ def _pw_resolved_texture_scale_u(entry, modifier, node_group):
     if not entry.get('texture_scale_u_is_auto'):
         return base
 
-    arc1_padding = _pw_float(_pw_get_socket(modifier, node_group, 'Arc 1 V Padding', 0.0), 0.0)
     core_v_min = _pw_float(entry.get('core_v_min'), 0.0)
     core_v_max = _pw_float(entry.get('core_v_max'), 1.0)
-    arc2_v_min = _pw_float(entry.get('fiber_bot_v_min'), 0.0)
-    arc2_v_max = _pw_float(entry.get('fiber_top_v_max'), 1.0)
-    padded_min = max(core_v_min - arc1_padding, arc2_v_min)
-    padded_max = min(core_v_max + arc1_padding, arc2_v_max)
-    visible_span = max(padded_max - padded_min, 1e-6)
-    return visible_span / _AUTO_TEXTURE_SCALE_U_DENOMINATOR
+    core_span = max(core_v_max - core_v_min, 1e-6)
+    return core_span * _AUTO_TEXTURE_SCALE_U_CORE_FRACTION
 
 
 def _pw_apply_modifier_material_metadata(modifier, material_assets):

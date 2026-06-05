@@ -56,13 +56,13 @@ Current code/docs state:
 backend/app/blender_live.py          pins Sub Texture Scale V = 1.0
 backend/app/blender_sync.py          sets Sub Texture Scale V = 1.0
 backend/app/blender_sync.py          sets preview roughness 1.0, sheen 0.5
-backend/app/render_jobs.py           inserts FabricStudioAlphaRemap by default; curve is opt-in
-backend/app/render_jobs.py           loads RGBA diffuse as sRGB and RGBA alpha as separate Non-Color image
+backend/app/render_jobs.py           uses RGBA diffuse alpha directly by default; alpha remap is opt-in
+backend/app/render_jobs.py           loads one RGBA diffuse node on the RGBA path; split alpha remains fallback
 backend/app/render_jobs.py           sets generated preview roughness 1.0, sheen 0.5
 scripts/build_flat_arc1_rebuild.py   rebuild default is Sub Texture Scale V = 1.0
 scripts/build_flat_arc1_rebuild.py   final V combiner restored to Texture + is_sub*Sub
 live Blender MCP scene               restored to the previous Arc 2 scale wiring
-live Blender MCP scene               current FabricStudio materials use separate Non-Color alpha images
+live Blender MCP scene               current active RGBA FabricStudio material links diffuse alpha directly
 ```
 
 Validation:
@@ -77,7 +77,8 @@ Remaining work:
 ```text
 1. Preserve the approved Arc 2 free-flow halo graph.
 2. Review the live Blender diagnostic setup:
-   alpha remap low/high = 0.10 / 0.78, gamma = 1.0.
+   direct diffuse/RGBA alpha is the default material path.
+   alpha remap low/high = 0.10 / 0.78, gamma = 1.0 remain opt-in only.
    Arc 2 deterministic same-strand U is active.
 3. Keep the old nearest-surface transfer disabled/muted; it was replaced
    because it caused endpoint shrink / plateau artifacts.
@@ -107,12 +108,10 @@ FabricStudioAlphaCurve:
   POWER gamma = 1.0 by default, so the curve step is skipped unless opted in
 ```
 
-Production patch landed in `backend/app/render_jobs.py` inside
-`ensure_texture_preview_material`, gated by `WEAVE_ALPHA_REMAP_ENABLED` and
-`WEAVE_ALPHA_REMAP_LOW`, `WEAVE_ALPHA_REMAP_HIGH`, and
-`WEAVE_ALPHA_CURVE_GAMMA`. See
-[action_plan.md Phase A-2](action_plan.md) for the exact diff and acceptance
-criteria.
+The 2026-06-05 material review superseded this as the default path: generated
+RGBA materials now use the diffuse/RGBA alpha output directly, and the remap
+chain is created only when `WEAVE_ALPHA_REMAP_ENABLED=1`. See
+[action_plan.md Phase A-2](action_plan.md) for the current acceptance criteria.
 
 The alpha-curve fix is independent of the Arc 2 V combiner choice. It
 operates on the per-pixel alpha value after sampling and does not change
@@ -471,7 +470,7 @@ detail.
 Claim:
 
 ```text
-The undulation amplitude (Amplitude socket = 0.005, Arc 1 V Padding = 0.008)
+The undulation amplitude (Amplitude socket = 0.005, Arc 1 V Padding = 0.02)
 and the arc unwrap leave the geometry curved in 3D world space. Even with
 arc-length parameterization, screen-space dU/dx and dV/dx still spike at
 grazing-angle bands across the strand. Those spikes drive local MIP

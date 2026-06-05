@@ -162,20 +162,70 @@ def speckle_snap(alpha_u8, blur_sigma=6, threshold=25):
 # same core mask — wisps are allowed to poke outside the crop, not drive it.
 # ---------------------------------------------------------------------------
 
+def _component_rank(mask):
+    H, W = mask.shape
+    labels, n = ndimage.label(mask, structure=np.ones((3, 3), dtype=bool))
+    if n == 0:
+        return None
+    slices = ndimage.find_objects(labels)
+    ranked = []
+    for idx, slc in enumerate(slices, start=1):
+        if slc is None:
+            continue
+        ys, xs = slc
+        h = ys.stop - ys.start
+        w = xs.stop - xs.start
+        if h <= 0 or w <= 0:
+            continue
+        area = int((labels[slc] == idx).sum())
+        if area < 8 or w < 8:
+            continue
+        reasonable_height = h <= max(12, int(round(H * 0.70)))
+        ranked.append((reasonable_height, int(w), -int(h), int(area), int(idx)))
+    if not ranked:
+        return None
+    ranked.sort(reverse=True)
+    return labels == ranked[0][-1]
+
+
 def _core_mask(y_work, core_percentile=90, open_iters=2):
     """Binary mask of the thread's thick core.
     y_work = luma in 'work space' (bright thread on dark bg)."""
-    thresh = float(np.percentile(y_work, core_percentile))
-    m = y_work >= thresh
-    if open_iters > 0:
-        m = ndimage.binary_opening(m, structure=np.ones((3, 3), dtype=bool),
-                                   iterations=open_iters)
-    labels, n = ndimage.label(m, structure=np.ones((3, 3), dtype=bool))
-    if n == 0:
-        return np.zeros_like(m, dtype=bool)
-    sizes = np.bincount(labels.ravel())
-    sizes[0] = 0
-    return labels == int(np.argmax(sizes))
+    H, W = y_work.shape
+    close_w = max(3, min(151, W // 150))
+    if close_w % 2 == 0:
+        close_w += 1
+    close_structure = np.ones((3, close_w), dtype=bool)
+    open_structure = np.ones((2, 3), dtype=bool)
+
+    percentiles = []
+    for pct in (core_percentile + 5, core_percentile, core_percentile - 5):
+        pct = int(max(50, min(99, pct)))
+        if pct not in percentiles:
+            percentiles.append(pct)
+
+    fallback = None
+    for pct in percentiles:
+        thresh = float(np.percentile(y_work, pct))
+        m = y_work >= thresh
+        if close_w > 3:
+            m = ndimage.binary_closing(m, structure=close_structure)
+        if open_iters > 0:
+            opened = ndimage.binary_opening(m, structure=open_structure)
+            if opened.any():
+                m = opened
+        ranked = _component_rank(m)
+        if ranked is not None:
+            ranked_y = np.where(ranked)[0]
+            h = int(np.ptp(ranked_y) + 1) if ranked_y.size else 0
+            if h <= max(12, int(round(H * 0.70))):
+                return ranked
+            if fallback is None:
+                fallback = ranked
+
+    if fallback is not None:
+        return fallback
+    return np.zeros_like(y_work, dtype=bool)
 
 
 def level_and_crop(img_rgb, invert=False, pad_ratio=0.25, core_percentile=90,

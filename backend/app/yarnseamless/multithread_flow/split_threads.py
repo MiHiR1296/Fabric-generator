@@ -10,7 +10,7 @@ import json
 import os
 import numpy as np
 from PIL import Image, ImageDraw
-from scipy import signal
+from scipy import ndimage, signal
 
 import alpha_pipeline
 import solid_band
@@ -191,21 +191,151 @@ def detect_thread_layout(img_rgb, n_threads=None):
     return thread_segmentation.detect_threads(img_rgb, n_threads)
 
 
-def split_into_strips(img_rgb, peaks):
-    """Slice into N strips, each centered on a peak with width = median peak
-    spacing. Returns list of (x0, x1, strip_array)."""
-    H, W = img_rgb.shape[:2]
+def _strip_ranges_from_peaks(width, peaks):
     if len(peaks) > 1:
         spacing = float(np.median(np.diff(peaks)))
     else:
-        spacing = float(W)
+        spacing = float(width)
     half = int(round(spacing / 2.0))
 
-    strips = []
+    ranges = []
     for p in peaks:
         x0 = max(0, int(p) - half)
-        x1 = min(W, int(p) + half)
-        strips.append((x0, x1, img_rgb[:, x0:x1]))
+        x1 = min(width, int(p) + half)
+        ranges.append((x0, x1))
+    return ranges, spacing
+
+
+def _layout_candidates(layout):
+    if layout is None or isinstance(layout, dict):
+        return []
+    return list(getattr(layout, "candidates", []) or [])
+
+
+def _fit_centerline_from_layout(layout, peak, lane, image_height):
+    if layout is None or isinstance(layout, dict):
+        return 0.0, float(peak), 0
+    mask = getattr(layout, "foreground_mask", None)
+    score = getattr(layout, "foreground_score", None)
+    if mask is None or score is None:
+        return 0.0, float(peak), 0
+
+    mask = np.asarray(mask, dtype=bool)
+    score = np.asarray(score, dtype=np.float32)
+    if mask.ndim != 2 or score.shape != mask.shape:
+        return 0.0, float(peak), 0
+
+    Hs, Ws = mask.shape
+    x0 = max(0, min(Ws - 1, int(lane[0])))
+    x1 = max(x0 + 1, min(Ws, int(lane[1])))
+    row_step = max(1, int(np.ceil(float(image_height) / float(max(1, Hs)))))
+
+    xs = np.arange(x0, x1, dtype=np.float32)
+    row_ids = []
+    centers = []
+    weights = []
+    for r in range(Hs):
+        m = mask[r, x0:x1]
+        if not m.any():
+            continue
+        w = np.where(m, score[r, x0:x1], 0.0).astype(np.float32)
+        weight_sum = float(w.sum())
+        if weight_sum <= 1e-5:
+            continue
+        row_ids.append(float(r * row_step))
+        centers.append(float((xs * w).sum() / weight_sum))
+        weights.append(max(weight_sum, 1e-4))
+
+    if len(centers) < 20:
+        return 0.0, float(peak), len(centers)
+
+    y = np.asarray(row_ids, dtype=np.float32)
+    x = np.asarray(centers, dtype=np.float32)
+    w = np.sqrt(np.asarray(weights, dtype=np.float32))
+    try:
+        slope, intercept = np.polyfit(y, x, 1, w=w)
+    except Exception:
+        return 0.0, float(peak), len(centers)
+
+    for _ in range(2):
+        residual = np.abs(x - (float(slope) * y + float(intercept)))
+        med = float(np.median(residual))
+        mad = float(np.median(np.abs(residual - med)))
+        cutoff = max(10.0, med + 3.5 * max(mad * 1.4826, 1e-3))
+        keep = residual <= cutoff
+        if int(keep.sum()) < 20 or keep.all():
+            break
+        slope, intercept = np.polyfit(y[keep], x[keep], 1, w=w[keep])
+
+    return float(slope), float(intercept), len(centers)
+
+
+def _aligned_strip_width(spacing, candidate_width, image_width):
+    if image_width <= 0:
+        return 1
+    if spacing <= 0:
+        spacing = float(image_width)
+    base = max(64.0, float(spacing) * 0.45)
+    if candidate_width:
+        base = max(base, float(candidate_width) * 4.0)
+    width = int(round(min(float(image_width), max(32.0, min(float(spacing) * 0.9, base)))))
+    return max(1, width)
+
+
+def _sample_centerline_strip(img_rgb, slope, intercept, strip_width, fill_rgb):
+    H, W = img_rgb.shape[:2]
+    strip_width = max(1, int(strip_width))
+    offsets = (np.arange(strip_width, dtype=np.float32)
+               - (float(strip_width - 1) * 0.5))
+    ys = np.arange(H, dtype=np.float32)
+    x_grid = (float(slope) * ys[:, None]) + float(intercept) + offsets[None, :]
+    y_grid = np.broadcast_to(ys[:, None], x_grid.shape)
+
+    channels = []
+    fill = np.asarray(fill_rgb, dtype=np.float32)
+    for c in range(3):
+        sampled = ndimage.map_coordinates(
+            img_rgb[..., c].astype(np.float32),
+            [y_grid, x_grid],
+            order=1,
+            mode="constant",
+            cval=float(fill[c] if fill.size >= 3 else 0.0),
+        )
+        channels.append(sampled)
+    out = np.stack(channels, axis=2)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def split_into_strips(img_rgb, peaks, layout=None):
+    """Slice into per-thread strips.
+
+    With segmentation metadata, resample each strip along the detected
+    per-thread centerline before the alpha pipeline rotates it horizontal.
+    This prevents long, slightly angled scans from being clipped by a fixed
+    vertical crop. Without metadata, fall back to the legacy axis-aligned crop.
+    Returns list of (x0, x1, strip_array).
+    """
+    H, W = img_rgb.shape[:2]
+    ranges, spacing = _strip_ranges_from_peaks(W, peaks)
+    candidates = _layout_candidates(layout)
+    bg_rgb = getattr(layout, "bg_rgb", None) if layout is not None and not isinstance(layout, dict) else None
+    if bg_rgb is None:
+        bg_rgb = np.median(img_rgb.reshape(-1, 3), axis=0)
+
+    strips = []
+    for i, p in enumerate(peaks):
+        x0, x1 = ranges[i]
+        if layout is None or isinstance(layout, dict):
+            strips.append((x0, x1, img_rgb[:, x0:x1]))
+            continue
+        candidate_width = candidates[i].width if i < len(candidates) else None
+        slope, intercept, n_rows = _fit_centerline_from_layout(layout, p, (x0, x1), H)
+        strip_width = _aligned_strip_width(spacing, candidate_width, W)
+        if n_rows < 20:
+            strips.append((x0, x1, img_rgb[:, x0:x1]))
+            continue
+        strip = _sample_centerline_strip(img_rgb, slope, intercept, strip_width, bg_rgb)
+        strips.append((x0, x1, strip))
     return strips
 
 
@@ -263,11 +393,15 @@ def process_multi_thread_scan(input_path, out_dir, n_threads=4, verbose=True):
     if verbose:
         print(f"[info] input: {W}x{H}")
 
-    peaks, _ = detect_thread_columns(img, n_threads)
+    layout = detect_thread_layout(img, n_threads)
+    if getattr(layout, "failure_reason", None):
+        raise RuntimeError(layout.failure_reason)
+    layout_peaks = layout["peaks"] if isinstance(layout, dict) else layout.peaks
+    peaks = np.asarray(layout_peaks, dtype=int)
     if verbose:
         print(f"[info] detected thread x-positions: {peaks.tolist()}")
 
-    strips = split_into_strips(img, peaks)
+    strips = split_into_strips(img, peaks, layout=layout)
     save_detection_overlay(img, peaks, strips,
                            os.path.join(out_dir, "detection_overlay.png"))
 

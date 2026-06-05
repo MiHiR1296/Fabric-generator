@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -92,6 +93,39 @@ class SplitThreadsTests(unittest.TestCase):
         peaks, _profile = split_threads.detect_thread_columns(img, n_threads=3)
 
         _assert_peaks_close(self, peaks, [55, 161, 265])
+
+    def test_split_with_layout_recenters_slanted_thread(self) -> None:
+        img = _scan(180, 260, (155, 58, 62))
+        fg_mask = np.zeros(img.shape[:2], dtype=bool)
+        fg_score = np.zeros(img.shape[:2], dtype=np.float32)
+        for y in range(img.shape[0]):
+            x = int(round(35 + 0.24 * y))
+            img[y, max(0, x - 4):min(img.shape[1], x + 5)] = np.array((232, 232, 226), dtype=np.uint8)
+            fg_mask[y, max(0, x - 4):min(img.shape[1], x + 5)] = True
+            fg_score[y, max(0, x - 4):min(img.shape[1], x + 5)] = 1.0
+
+        layout = SimpleNamespace(
+            foreground_mask=fg_mask,
+            foreground_score=fg_score,
+            bg_rgb=[155.0, 58.0, 62.0],
+            candidates=[SimpleNamespace(width=9)],
+        )
+        strips = split_threads.split_into_strips(img, np.asarray([66], dtype=int), layout=layout)
+
+        self.assertEqual(len(strips), 1)
+        _x0, _x1, strip = strips[0]
+        self.assertEqual(strip.shape[0], img.shape[0])
+        luma = (0.2126 * strip[..., 0] + 0.7152 * strip[..., 1] + 0.0722 * strip[..., 2])
+        mask = luma > 180
+        row_has = mask.sum(axis=1) > 0
+        centers = []
+        xs = np.arange(strip.shape[1], dtype=np.float32)
+        for row in np.where(row_has)[0]:
+            w = mask[row].astype(np.float32)
+            centers.append(float((xs * w).sum() / max(float(w.sum()), 1e-6)))
+
+        self.assertGreater(len(centers), 200)
+        self.assertLess(max(centers) - min(centers), 4.0)
 
 
 if __name__ == "__main__":

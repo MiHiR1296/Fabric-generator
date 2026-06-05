@@ -56,6 +56,10 @@ TEXTURE_INTERPOLATION_MODES = {"Linear", "Closest", "Cubic", "Smart"}
 DEFAULT_CUTOUT_BLEND_METHOD = "BLEND"
 DEFAULT_SURFACE_RENDER_METHOD = "BLENDED"
 DEFAULT_PRUNE_ORPHAN_MATERIALS = True
+DEFAULT_ALPHA_REMAP_ENABLED = False
+DEFAULT_ALPHA_REMAP_LOW = 0.10
+DEFAULT_ALPHA_REMAP_HIGH = 0.78
+DEFAULT_ALPHA_CURVE_GAMMA = 1.0
 CUTOUT_BLEND_METHODS = {"OPAQUE", "CLIP", "HASHED", "BLEND"}
 SURFACE_RENDER_METHODS = {"DITHERED", "BLENDED"}
 DEFAULT_TILE_COUNT = 4
@@ -137,6 +141,15 @@ def _bool_env(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _float_env(name: str, default: float, *, minimum: float, maximum: float) -> float:
+    raw = os.environ.get(name)
+    try:
+        value = float(raw) if raw is not None else default
+    except (TypeError, ValueError):
+        value = default
+    return min(maximum, max(minimum, value))
 
 
 def _enum_env(name: str, default: str, allowed: set[str]) -> str:
@@ -259,6 +272,30 @@ def build_headless_render_script(
     prune_orphan_materials = _bool_env(
         "WEAVE_PRUNE_ORPHAN_MATERIALS",
         DEFAULT_PRUNE_ORPHAN_MATERIALS,
+    )
+    alpha_remap_enabled = _bool_env(
+        "WEAVE_ALPHA_REMAP_ENABLED",
+        DEFAULT_ALPHA_REMAP_ENABLED,
+    )
+    alpha_remap_low = _float_env(
+        "WEAVE_ALPHA_REMAP_LOW",
+        DEFAULT_ALPHA_REMAP_LOW,
+        minimum=0.0,
+        maximum=0.99,
+    )
+    alpha_remap_high = _float_env(
+        "WEAVE_ALPHA_REMAP_HIGH",
+        DEFAULT_ALPHA_REMAP_HIGH,
+        minimum=0.01,
+        maximum=1.0,
+    )
+    if alpha_remap_high <= alpha_remap_low:
+        alpha_remap_high = min(1.0, alpha_remap_low + 0.01)
+    alpha_curve_gamma = _float_env(
+        "WEAVE_ALPHA_CURVE_GAMMA",
+        DEFAULT_ALPHA_CURVE_GAMMA,
+        minimum=0.05,
+        maximum=4.0,
     )
     modifier_name_json = json.dumps(weave_modifier_name)
     sync_code = build_blender_sync_code(
@@ -409,6 +446,51 @@ def first_socket(sockets, names):
             return sockets[name]
     raise RuntimeError('Missing socket: ' + ' / '.join(names))
 
+def set_node_input_default(node, names, value):
+    for name in names:
+        if name in node.inputs:
+            node.inputs[name].default_value = value
+            return True
+    return False
+
+def link_alpha_to_shader(nodes, links, alpha_output, shader_alpha_input):
+    if not _PW_ALPHA_REMAP_ENABLED:
+        links.new(alpha_output, shader_alpha_input)
+        return
+
+    remap = nodes.new('ShaderNodeMapRange')
+    remap.name = 'FabricStudioAlphaRemap'
+    remap.location = (260, -300)
+    try:
+        remap.data_type = 'FLOAT'
+    except Exception:
+        pass
+    set_node_input_default(remap, ('From Min',), _PW_ALPHA_REMAP_LOW)
+    set_node_input_default(remap, ('From Max',), _PW_ALPHA_REMAP_HIGH)
+    set_node_input_default(remap, ('To Min',), 0.0)
+    set_node_input_default(remap, ('To Max',), 1.0)
+    try:
+        remap.clamp = True
+    except Exception:
+        pass
+    try:
+        remap.interpolation_type = 'SMOOTHERSTEP'
+    except Exception:
+        pass
+    links.new(alpha_output, first_socket(remap.inputs, ('Value', 'Input')))
+    alpha_value = first_socket(remap.outputs, ('Result', 'Value'))
+
+    if abs(float(_PW_ALPHA_CURVE_GAMMA) - 1.0) > 0.000001:
+        curve = nodes.new('ShaderNodeMath')
+        curve.name = 'FabricStudioAlphaCurve'
+        curve.location = (470, -300)
+        curve.operation = 'POWER'
+        curve.inputs[1].default_value = float(_PW_ALPHA_CURVE_GAMMA)
+        links.new(alpha_value, curve.inputs[0])
+        alpha_value = curve.outputs['Value']
+
+    links.new(alpha_value, shader_alpha_input)
+
 def pbr_consumer_default(asset_entry, key, default):
     defaults = asset_entry.get('pbr_consumer_defaults') or {}
     try:
@@ -543,9 +625,7 @@ def ensure_texture_preview_material(asset_entry, index):
     diffuse_tex = nodes.new('ShaderNodeTexImage')
     diffuse_tex.name = 'FabricStudioDiffuseNode'
     diffuse_tex.location = (80, 80)
-    alpha_tex = nodes.new('ShaderNodeTexImage')
-    alpha_tex.name = 'FabricStudioAlphaNode'
-    alpha_tex.location = (80, -160)
+    alpha_tex = None
     if use_rgba_tiled:
         tile_count = int(asset_entry.get('texture_tile_count') or 1)
         diffuse_tex.image = ensure_udim_image(
@@ -554,20 +634,14 @@ def ensure_texture_preview_material(asset_entry, index):
             tile_count,
             'sRGB',
         )
-        alpha_tex.image = ensure_udim_image(
-            f"{material_name}_RGBA_Alpha_UDIM",
-            asset_entry['rgba_tile_pattern'],
-            tile_count,
-            'Non-Color',
-        )
         configure_texture_node(diffuse_tex, 'CLIP')
-        configure_texture_node(alpha_tex, 'CLIP')
     elif use_rgba_single:
         diffuse_tex.image = ensure_image(f"{material_name}_RGBA", asset_entry['rgba_path'], 'sRGB')
-        alpha_tex.image = ensure_image(f"{material_name}_RGBA_Alpha", asset_entry['rgba_path'], 'Non-Color')
         configure_texture_node(diffuse_tex)
-        configure_texture_node(alpha_tex)
     elif use_tiled:
+        alpha_tex = nodes.new('ShaderNodeTexImage')
+        alpha_tex.name = 'FabricStudioAlphaNode'
+        alpha_tex.location = (80, -160)
         tile_count = int(asset_entry.get('texture_tile_count') or 1)
         diffuse_tex.image = ensure_udim_image(
             f"{material_name}_Diffuse_UDIM",
@@ -584,6 +658,9 @@ def ensure_texture_preview_material(asset_entry, index):
         configure_texture_node(diffuse_tex, 'CLIP')
         configure_texture_node(alpha_tex, 'CLIP')
     else:
+        alpha_tex = nodes.new('ShaderNodeTexImage')
+        alpha_tex.name = 'FabricStudioAlphaNode'
+        alpha_tex.location = (80, -160)
         diffuse_tex.image = ensure_image(f"{material_name}_Diffuse", asset_entry['diffuse_path'], 'sRGB')
         alpha_tex.image = ensure_image(f"{material_name}_Alpha", asset_entry['alpha_path'], 'Non-Color')
         configure_texture_node(diffuse_tex)
@@ -610,7 +687,8 @@ def ensure_texture_preview_material(asset_entry, index):
         tiled_vector = nodes.new('ShaderNodeCombineXYZ')
         tiled_vector.location = (380, -40)
         diffuse_tex.location = (600, 80)
-        alpha_tex.location = (600, -160)
+        if alpha_tex is not None:
+            alpha_tex.location = (600, -160)
 
         links.new(uv_attr.outputs['Vector'], uv_sep.inputs['Vector'])
         links.new(uv_sep.outputs['X'], u_fract.inputs[0])
@@ -619,18 +697,20 @@ def ensure_texture_preview_material(asset_entry, index):
         links.new(uv_sep.outputs['Y'], tiled_vector.inputs['Y'])
         links.new(uv_sep.outputs['Z'], tiled_vector.inputs['Z'])
         links.new(tiled_vector.outputs['Vector'], diffuse_tex.inputs['Vector'])
-        links.new(tiled_vector.outputs['Vector'], alpha_tex.inputs['Vector'])
+        if alpha_tex is not None:
+            links.new(tiled_vector.outputs['Vector'], alpha_tex.inputs['Vector'])
         material_vector_output = tiled_vector.outputs['Vector']
     else:
         mapping = nodes.new('ShaderNodeMapping')
         mapping.location = (-180, 20)
         links.new(uv_attr.outputs['Vector'], mapping.inputs['Vector'])
         links.new(mapping.outputs['Vector'], diffuse_tex.inputs['Vector'])
-        links.new(mapping.outputs['Vector'], alpha_tex.inputs['Vector'])
+        if alpha_tex is not None:
+            links.new(mapping.outputs['Vector'], alpha_tex.inputs['Vector'])
         material_vector_output = mapping.outputs['Vector']
     links.new(diffuse_tex.outputs['Color'], shader.inputs['Base Color'])
-    alpha_output = alpha_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']
-    links.new(alpha_output, shader.inputs['Alpha'])
+    alpha_output = diffuse_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']
+    link_alpha_to_shader(nodes, links, alpha_output, shader.inputs['Alpha'])
     add_pbr_nodes(
         nodes,
         links,
@@ -996,6 +1076,10 @@ _PW_TEXTURE_INTERPOLATION = {repr(texture_interpolation)}
 _PW_CUTOUT_BLEND_METHOD = {repr(cutout_blend_method)}
 _PW_SURFACE_RENDER_METHOD = {repr(surface_render_method)}
 _PW_PRUNE_ORPHAN_MATERIALS = {repr(prune_orphan_materials)}
+_PW_ALPHA_REMAP_ENABLED = {repr(alpha_remap_enabled)}
+_PW_ALPHA_REMAP_LOW = {repr(alpha_remap_low)}
+_PW_ALPHA_REMAP_HIGH = {repr(alpha_remap_high)}
+_PW_ALPHA_CURVE_GAMMA = {repr(alpha_curve_gamma)}
 _PW_PREVIEW_ACTIVE_MATERIALS = set(globals().get('_PW_PREVIEW_ACTIVE_MATERIALS', []))
 
 scene = bpy.context.scene

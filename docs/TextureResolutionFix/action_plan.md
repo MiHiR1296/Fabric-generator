@@ -47,10 +47,9 @@ New live diagnostic findings:
    in the evaluated mesh.
 
 3. The dominant visible haze is alpha/material blending.
-   The source RGBA is full resolution, but the material was feeding the raw
-   alpha directly into Principled Alpha. A two-step alpha cleanup first
-   removes the low-alpha haze band, then applies a mild curve to expose more
-   strand/fiber detail without changing UVs.
+   The source RGBA is full resolution. The 2026-06-04 A/B found useful alpha
+   remap controls, but the 2026-06-05 artist readback prefers the diffuse/RGBA
+   alpha channel directly, with no default Map Range boost.
 ```
 
 Updated priority:
@@ -58,7 +57,8 @@ Updated priority:
 ```text
 Phase A-1: keep Sub Texture Scale V = 1.0 and keep the restored additive
            final V combiner.
-Phase A-2: ship a tunable alpha remap + curve in the material generator.
+Phase A-2: use direct diffuse/RGBA alpha by default; keep alpha remap + curve
+           as opt-in material-generator controls.
 Phase A-3: replace nearest-surface Same-Strand U Transfer with deterministic
            same-yarn Arc 1 -> Arc 2 U continuity.
 Phase A-4: keep geometry density / interpolation as quality presets, not the
@@ -185,13 +185,13 @@ runtime/texture_resolution_v_mapping_tests/20260604_020718/
   04_alpha_boost_subdelta0.png
 ```
 
-## Phase A-2 - Add A Tunable Alpha Opacity Curve
+## Phase A-2 - Direct RGBA Alpha With Opt-In Alpha Remap
 
 Owner: backend render material generator
 
-Status as of 2026-06-04: validated in live Blender via the Phase 1.2 A/B test.
-Lead production fix. See [phase_log.md Phase 1.2](phase_log.md) for the full
-trace, scene baseline readback, and viewport before/after.
+Status as of 2026-06-05: default changed after artist review. The Phase 1.2
+remap/curve A/B remains useful history and an opt-in control, but it is no
+longer the production default for RGBA yarn materials.
 
 ### Evidence
 
@@ -223,7 +223,7 @@ alpha = pow(alpha, 0.35):
 Live A/B nodes were removed after the test; scene was restored to its
 Phase 1.1 state.
 
-### Why The Alpha Remap Works
+### Why The Alpha Remap Became Opt-In
 
 ```text
 Source RGBA has the yarn body in a narrow ~36 px V core band with
@@ -231,34 +231,30 @@ semi-transparent fiber tails on either side (alpha ~ 0.15..0.30).
 Linear texture filtering blends those low-alpha pixels across the strand's
 screen pixels, producing gray haze that drowns out twist contrast.
 
-The live fix does not change which pixels are sampled. It maps very low
-alpha to zero, maps the useful yarn/fiber range back to 0..1 with a smooth
-Map Range, then applies a mild POWER curve. This keeps the anti-aliased
-fiber edge, but stops the broad translucent halo from washing out the yarn
-twist detail.
+The remap does not change which pixels are sampled. It maps very low alpha to
+zero, maps the useful yarn/fiber range back to 0..1 with a smooth Map Range,
+then optionally applies a POWER curve. That was useful diagnostically, but the
+current Blender material review looked more faithful when `rgba.png` supplied
+both color and alpha directly.
 ```
 
-### Production Patch (Validated)
+### Production Patch (Current)
 
 Single-point change in [backend/app/render_jobs.py](../../backend/app/render_jobs.py)
-inside `ensure_texture_preview_material(...)`: route the selected alpha output
-through `link_alpha_to_shader(...)` instead of linking directly to
-`Principled BSDF.Alpha`.
+inside `ensure_texture_preview_material(...)`: select the alpha output from the
+diffuse/RGBA texture node for RGBA materials, and keep the remap helper behind
+`WEAVE_ALPHA_REMAP_ENABLED`.
 
 ```python
-# Before
-alpha_output = alpha_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']
-links.new(alpha_output, shader.inputs['Alpha'])
-
-# After
-alpha_output = alpha_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']
+# Current default
+alpha_output = diffuse_tex.outputs['Alpha'] if (use_rgba_tiled or use_rgba_single) else alpha_tex.outputs['Color']
 link_alpha_to_shader(nodes, links, alpha_output, shader.inputs['Alpha'])
 ```
 
 Properties:
 
 ```text
-Default enabled:    WEAVE_ALPHA_REMAP_ENABLED = true
+Default enabled:    WEAVE_ALPHA_REMAP_ENABLED = false
 Low cleanup:        WEAVE_ALPHA_REMAP_LOW = 0.10
 Useful range top:   WEAVE_ALPHA_REMAP_HIGH = 0.78
 Default curve:      WEAVE_ALPHA_CURVE_GAMMA = 1.0
@@ -267,8 +263,8 @@ Nodes:
   FabricStudioAlphaRemap  ShaderNodeMapRange, clamp, smootherstep if available
   FabricStudioAlphaCurve  ShaderNodeMath POWER, only created when gamma != 1.0
 
-Off switch:
-  WEAVE_ALPHA_REMAP_ENABLED=0 restores the direct alpha link.
+Opt-in switch:
+  WEAVE_ALPHA_REMAP_ENABLED=1 inserts the remap chain for A/B testing.
 
 Optional sharper curve:
   WEAVE_ALPHA_CURVE_GAMMA=0.75 or lower keeps the low/high remap and boosts
@@ -286,16 +282,15 @@ not create or refresh material nodes.
 ### Acceptance
 
 ```text
-1. Live setup leaves active materials with FabricStudioAlphaRemap between
-   FabricStudioAlphaNode.Alpha and Principled BSDF.Alpha. FabricStudioAlphaCurve
-   may exist only when gamma is not 1.0.
-2. WEAVE_ALPHA_REMAP_ENABLED=0 restores the previous direct-link behavior
-   without code changes, so before/after A/B remains trivial.
-3. WEAVE_ALPHA_CURVE_GAMMA=1.0 disables only the POWER step; this is the
-   current default after Arc 2 visual review.
-4. Render preview at 3200 retains the alpha-cleanup detail (not just viewport).
-5. No regression on yarns whose alpha is already crisp; in those cases use
-   environment overrides or future per-asset settings to relax the remap.
+1. RGBA live setup leaves active materials with
+   FabricStudioDiffuseNode.Alpha -> Principled BSDF.Alpha by default.
+2. RGBA material generation does not create `RGBA_Alpha` or `RGBA_Alpha_UDIM`
+   image nodes.
+3. `WEAVE_ALPHA_REMAP_ENABLED=1` inserts FabricStudioAlphaRemap between the
+   selected alpha output and Principled BSDF.Alpha.
+4. `WEAVE_ALPHA_CURVE_GAMMA=1.0` disables only the POWER step when remap is
+   enabled.
+5. Split diffuse/alpha fallback assets continue to use the separate alpha map.
 ```
 
 ### Optional Follow-Ups After Landing

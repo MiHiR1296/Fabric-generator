@@ -51,7 +51,7 @@ For each ready yarn asset, the backend calls `build_material_asset_entry(asset)`
 | Producer key (`bandMeta.blender.*`) | Lands on socket | Drives |
 |---|---|---|
 | `image_width_px` | `Material N Image Width Px` | U-axis world-width per repeat |
-| `texture_scale_u` (resolved at apply time) | `Material N Texture Scale U` | Per-yarn U multiplier after Image Width Px. Auto values are recomputed from the current padded visible V span; explicit non-`1.0` producer values are respected. |
+| `texture_scale_u` (resolved at apply time) | `Material N Texture Scale U` | Per-yarn U multiplier after Image Width Px. Auto values are recomputed from the detected core V band times the graph core fraction; explicit non-`1.0` producer values are respected. |
 | `core_v_min` | `Material N Arc 1 V Min` | Raw core lower V edge from metadata. Phase 4c padding happens inside the .blend after material selection. |
 | `core_v_max` | `Material N Arc 1 V Max` | Raw core upper V edge from metadata. Phase 4c padding happens inside the .blend after material selection. |
 | `fiber_bot_v_min` | `Material N Arc 2 V Min` | Strand silhouette's bottommost V |
@@ -92,7 +92,7 @@ The graph already labelled its internal nodes Arc 1 / Arc 2, but the interface s
 From [0, 1]  →  To [Arc 1 V Min, Arc 1 V Max]
 ```
 
-Phase 4c exposes `Arc 1 V Padding` on the modifier and inserts it after the material switch chain. The 2026-05-19 checkpoint sets its default to `0.008` and lets the Web UI push the same socket:
+Phase 4c exposes `Arc 1 V Padding` on the modifier and inserts it after the material switch chain. The 2026-06-05 default is `0.02` and the Web UI pushes the same socket:
 
 ```text
 Padded Arc 1 V Min = max(Material Arc 1 V Min - Arc 1 V Padding, Material Arc 2 V Min)
@@ -200,19 +200,17 @@ source_strand_length_BU / (image_width_px / scanner_pixels_per_bu)
   * Material N Texture Scale U
 ```
 
-For scan-driven yarns after Phase 5 and Phase 10u, [blender_sync.py](../../backend/app/blender_sync.py) keeps root `Texture Scale U` neutral. [blender_live.py](../../backend/app/blender_live.py) resolves each automatic per-material U scale during the apply-metadata pass, after the current `Arc 1 V Padding` socket is known:
+For scan-driven yarns after Phase 5 and the 2026-06-05 correction, [blender_sync.py](../../backend/app/blender_sync.py) keeps root `Texture Scale U` neutral. [blender_live.py](../../backend/app/blender_live.py) resolves each automatic per-material U scale from the material's detected core band, not from padding:
 
 ```
-Arc1_V_Min_Padded = max(Material N Arc 1 V Min - Arc 1 V Padding, Material N Arc 2 V Min)
-Arc1_V_Max_Padded = min(Material N Arc 1 V Max + Arc 1 V Padding, Material N Arc 2 V Max)
-visible_v_span = Arc1_V_Max_Padded - Arc1_V_Min_Padded
+core_v_span = Material N Arc 1 V Max - Material N Arc 1 V Min
 
 root_texture_scale_u = 1.0
-AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0
-Material N Texture Scale U = visible_v_span / AUTO_TEXTURE_SCALE_U_DENOMINATOR   # auto mode only
+AUTO_TEXTURE_SCALE_U_CORE_FRACTION = 0.6
+Material N Texture Scale U = core_v_span * AUTO_TEXTURE_SCALE_U_CORE_FRACTION   # auto mode only
 ```
 
-The producer pre-computes the measured width and pushes the raw `image_width_px` to `Material N Image Width Px`; the graph divides by `Scanner Pixels Per BU` internally to get world width. `bandMeta.texture_scale_u` remains the per-yarn/artistic override. If it is unset or `1.0`, the consumer treats it as automatic and derives the visible-span value above; if it is non-`1.0`, the consumer pushes that explicit value unchanged. `ARC1_V_AROUND_SPAN = 0.6` remains geometry/radius provenance for the Arc 1 / Arc 2 split, not the active auto U denominator.
+The producer pre-computes the measured width and pushes the raw `image_width_px` to `Material N Image Width Px`; the graph divides by `Scanner Pixels Per BU` internally to get world width. `bandMeta.texture_scale_u` remains the per-yarn/artistic override. If it is unset or `1.0`, the consumer treats it as automatic and derives the core-band value above; if it is non-`1.0`, the consumer pushes that explicit value unchanged. `AUTO_TEXTURE_SCALE_U_CORE_FRACTION = 0.6` mirrors the Arc 1 / Arc 2 core fraction used by the graph.
 
 The backend still sends `U Stride Per Warp End / Weft Pick` as the straight-baseline repeats-per-strand. Inside the graph, Phase 10i adds:
 
@@ -485,7 +483,7 @@ Two paths exist:
 1. **Headless render** — backend writes a per-job Python script under `runtime/render_jobs/<id>/render_job.py`, spawns `blender -b <blend> --python <script>`. The script:
    - Builds WebDraft_Live mesh (via `build_blender_sync_code`)
    - Sets every modifier input that has data behind it (with `maybe_set_modifier_input` to silently skip sockets that don't exist on the current graph revision)
-   - Creates direct per-yarn preview materials for <=16 assets, using full-resolution UDIM tiles when a scan exceeds the Cycles single-texture cap, otherwise Cycles-safe diffuse + alpha textures, all with `Linear` interpolation
+   - Creates direct per-yarn preview materials for <=16 assets, using full-resolution RGBA UDIM tiles when a scan exceeds the Cycles single-texture cap, otherwise RGBA single textures or split diffuse/alpha fallbacks, all with `Linear` interpolation. RGBA paths link diffuse alpha directly by default.
    - Appends those materials to object slots and sets modifier `Material N` sockets
    - Inlines `APPLY_METADATA_PY` and calls `_pw_apply_modifier_material_metadata` to push per-Material V-bands and pinned defaults
    - Pushes Warp/Weft material cycle inputs so draft color bindings select the right `Material N`

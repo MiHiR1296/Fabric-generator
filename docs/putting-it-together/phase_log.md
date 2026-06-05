@@ -4810,6 +4810,63 @@ Manual live setup push is not the same as the `BLENDER_LIVE_RENDER` executor tog
 
 ---
 
+## Phase 4b — direct RGBA alpha and Arc 1 padding default
+
+**Date**: 2026-06-05
+
+### Motivation
+
+The live Blender file had been manually adjusted for material review. The user
+confirmed the current target: use the alpha channel embedded in the diffuse/RGBA
+scan directly, without the generated alpha texture and without default Map Range
+alpha boost. The same review set `Arc 1 V Padding` to `0.02`.
+
+### Diagnosis
+
+Blender MCP on port `9876` showed the active material link as:
+
+```text
+FabricStudioDiffuseNode.Alpha -> Principled BSDF.Alpha
+```
+
+The previous generated RGBA path still created a separate `RGBA_Alpha` image
+node and the previous stabilization docs described default alpha remap. That no
+longer matched the user-approved material.
+
+### Fix
+
+- [backend/app/render_jobs.py](../../backend/app/render_jobs.py): RGBA single
+  and RGBA UDIM materials now link `diffuse_tex.outputs['Alpha']` to shader
+  alpha by default and do not create `RGBA_Alpha` image nodes. The alpha remap
+  helper remains opt-in with `WEAVE_ALPHA_REMAP_ENABLED=1`.
+- [backend/app/blender_sync.py](../../backend/app/blender_sync.py) and
+  [frontend/src/domain/draft.ts](../../frontend/src/domain/draft.ts): default
+  `Arc 1 V Padding` changed to `0.02`.
+- Current contract and stabilization docs updated to make direct RGBA alpha the
+  default material path.
+
+### Verification
+
+```text
+python3 -m py_compile backend/app/render_jobs.py backend/app/blender_sync.py
+python3 -m unittest backend.tests.test_render_jobs backend.tests.test_blender_sync
+
+31 tests passed.
+```
+
+### Lesson
+
+For RGBA yarn assets, keep color and alpha on the same sampled texture node
+unless an explicit diagnostic or artist override opts into remapping.
+
+### What was NOT done
+
+- Split diffuse/alpha fallback assets were left intact.
+- The open Blender file was not modified by code during this phase; it already
+  reflected the user-approved material readback.
+
+---
+
 ## Template for new phases
 
 ```

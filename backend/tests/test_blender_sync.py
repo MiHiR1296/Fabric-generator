@@ -150,7 +150,7 @@ class BlenderSyncTests(unittest.TestCase):
             f"spacing_value = pick_value(spacing_override, preserved.get('Spacing'), {DEFAULT_SPACING!r})",
             code,
         )
-        self.assertEqual(DEFAULT_ARC1_V_PADDING, 0.008)
+        self.assertEqual(DEFAULT_ARC1_V_PADDING, 0.02)
         self.assertEqual(DEFAULT_SPACING, 0.026)
 
 

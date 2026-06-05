@@ -8,13 +8,14 @@ Read in this order:
 |---|---|---|
 | 1 | [FINAL_HANDOFF.md](FINAL_HANDOFF.md) | The consolidated final doc: what we built, workflow, process, artifact management, features, open items. |
 | 2 | [CHECKPOINT_2026-05-19.md](CHECKPOINT_2026-05-19.md) | The visually approved Blender/material baseline: exact socket values, U-scale denominator, backup file, and verification. |
-| 3 | [TextureResolutionFix/](TextureResolutionFix/) | Active investigation and action plan for Blender texture-resolution mismatch: source RGBA/UDIM verification, root U-scale drift, atlas fallback risk, diagnostics, and fix phases. |
-| 4 | [application-blueprint.md](application-blueprint.md) | The weaving-draft subsystem product spec — what the UI must preserve when ported into the larger app. |
-| 5 | [putting-it-together/](putting-it-together/) | How the app + Blender talk to each other. Read this first for system-level picture: architecture, data contract, full phase log, lessons. |
-| 6 | [BlenderFixes/](BlenderFixes/) | Everything that lives inside the .blend itself + the backend code that drives it. Zoom-in on `Parametric Weave knotty`: node-group structure, Arc 1 / Arc 2 V-band system, socket-rename history, live-render dev mode. |
-| 7 | [WebUIChanges/](WebUIChanges/) | Wizard / FastAPI surface changes — the three state layers (library / runtime asset / color binding), the sync points between them, and every UI-visible behavior fix logged Symptom / Diagnosis / Fix / Verification. |
-| 8 | [YarnScanProcessing/](YarnScanProcessing/) | 2026-05-29 yarn-scan processing log: robust thread detection, natural RGBA, background spill removal, sub-degree rotation, connected-core bands, tests, and QA metrics. |
-| 9 | [WebUIbands/](WebUIbands/) | Yarn band detection (core + fiber halos) — historical setup, FWHM post-export detector, and later connected-core refinements. |
+| 3 | [BlenderRenderStabilizationPlan/](BlenderRenderStabilizationPlan/) | Active source-of-truth plan for the live Blender setup: MCP readback, current material/socket truth, alpha-remap implementation, root-U pinning, rejected methods, and future quality phases. |
+| 4 | [TextureResolutionFix/](TextureResolutionFix/) | Historical investigation and action plan for Blender texture-resolution mismatch: source RGBA/UDIM verification, root U-scale drift, atlas fallback risk, diagnostics, and fix phases. |
+| 5 | [application-blueprint.md](application-blueprint.md) | The weaving-draft subsystem product spec — what the UI must preserve when ported into the larger app. |
+| 6 | [putting-it-together/](putting-it-together/) | How the app + Blender talk to each other. Read this first for system-level picture: architecture, data contract, full phase log, lessons. |
+| 7 | [BlenderFixes/](BlenderFixes/) | Everything that lives inside the .blend itself + the backend code that drives it. Zoom-in on `Parametric Weave knotty`: node-group structure, Arc 1 / Arc 2 V-band system, socket-rename history, live-render dev mode. |
+| 8 | [WebUIChanges/](WebUIChanges/) | Wizard / FastAPI surface changes — the three state layers (library / runtime asset / color binding), the sync points between them, and every UI-visible behavior fix logged Symptom / Diagnosis / Fix / Verification. |
+| 9 | [YarnScanProcessing/](YarnScanProcessing/) | 2026-05-29 yarn-scan processing log: robust thread detection, natural RGBA, background spill removal, sub-degree rotation, connected-core bands, tests, and QA metrics. |
+| 10 | [WebUIbands/](WebUIbands/) | Yarn band detection (core + fiber halos) — historical setup, FWHM post-export detector, and later connected-core refinements. |
 
 External runtime assets are shared here:
 
@@ -40,9 +41,10 @@ https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP
 | **Phase 3e** — Arc 2 internal link rewire so the halo region actually renders (4 link swaps inside `Parametric Weave knotty`) | ✓ done |
 | **Phase 3f** — modifier panel reorganization + dead socket removal (5 legacy globals removed; Material Slots + V-Band Mapping panels consolidated) | ✓ done |
 | **Phase 3g** — pin Sub Strand Enable + add `BLENDER_LIVE_RENDER` dev-mode env var (render jobs route to the open Blender session over MCP) | ✓ done |
-| **Phase 10u / Checkpoint 2026-05-19** — visually approved direct web-to-Blender material baseline; `Spacing = 0.026`, `Arc 1 V Padding = 0.008`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`, and auto `Material N Texture Scale U = visible_v_span / 1.0` | ✓ done |
+| **Phase 10u / Checkpoint 2026-05-19** — visually approved direct web-to-Blender material baseline; `Spacing = 0.026`, `Arc 1 V Padding = 0.008`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`; current auto `Material N Texture Scale U` derives from the material core band times the graph core fraction | ✓ done |
 | **Publish prep** — final handoff doc, debug ignores, external model env-path support, LFS-disabled fallback documented | ✓ done |
 | **Yarn scan processing repair** — segmentation-first thread detection, natural RGBA export, full-resolution RGBA UDIM tiles, red/background chroma removal from fringe, mandatory sub-degree thread rotation, connected-core red bands | ✓ done |
+| **2026-06-05 material/padding update** — current generated RGBA yarn materials use the diffuse/RGBA alpha channel directly, with alpha remap opt-in only; `Arc 1 V Padding` default is now `0.02` | ✓ done |
 
 ## What we set out to achieve
 
@@ -78,7 +80,7 @@ In rough priority order — the **bigger** items first.
 
 ### Deferred (logged with rationale)
 
-- **Atlas fallback path parity** is still lower priority, but the current direct per-yarn material now uses blended alpha for a smoother live preview. Hashed/dithered alpha can still be forced for sorting experiments with `WEAVE_CUTOUT_BLEND_METHOD=HASHED WEAVE_SURFACE_RENDER_METHOD=DITHERED`.
+- **Atlas fallback path parity** is still lower priority, but the current direct per-yarn RGBA material now uses the diffuse texture's alpha channel directly for a smoother live preview. Hashed/dithered alpha can still be forced for sorting experiments with `WEAVE_CUTOUT_BLEND_METHOD=HASHED WEAVE_SURFACE_RENDER_METHOD=DITHERED`.
 
 - **SAM2 / ViTMatte single-image flow** from yarnseamless was deliberately not ported (Phase 2b). The yarn workflow doesn't use it. Cost to revisit: small.
 

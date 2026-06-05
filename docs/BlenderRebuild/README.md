@@ -106,7 +106,7 @@ Root sockets:
 | `Draft Object` | `Socket_100` | `WebDraft_Live` | Source object for draft sampling. |
 | `Draft Columns` | `Socket_101` | `8` | Current live draft width. |
 | `Draft Rows` | `Socket_102` | `8` | Current live draft height. |
-| `Arc 1 V Padding` | `Socket_244` | `0.008` | Expands the core V range before Arc 1/2 mapping. |
+| `Arc 1 V Padding` | `Socket_244` | `0.02` | Expands the core V range before Arc 1/2 mapping. |
 | `Arc 2 Endpoint Pinch` | `Socket_252` | `0.0` | Current live experimental control, not backend-driven. |
 | `Arc 2 Apex Pinch` | `Socket_253` | `0.0` | Current live experimental control, not backend-driven. |
 | `Arc 2 Apex Min Radius` | `Socket_254` | `0.0` | Current live experimental control, not backend-driven. |
@@ -381,7 +381,7 @@ Backend side:
 
 ```text
 texture_world_width_BU = Material N Image Width Px / Scanner Pixels Per BU
-Material N Texture Scale U = resolved visible V span in auto mode
+Material N Texture Scale U = core V span * Arc 1/Arc 2 core fraction in auto mode
 U Stride Per Warp End = weft_threads * spacing / texture_world_width_BU * material_scale_u
 U Stride Per Weft Pick = warp_threads * spacing / texture_world_width_BU * material_scale_u
 ```
@@ -878,7 +878,9 @@ used visually in this Arc1-only pass.
 
    Generated render materials in `backend/app/render_jobs.py` still read the
    `uv_scaled` geometry attribute. That path supports single RGBA, RGBA UDIM,
-   split diffuse/alpha, and split UDIM assets.
+   split diffuse/alpha, and split UDIM assets. RGBA assets use the diffuse
+   image node's alpha output directly; split diffuse/alpha assets keep a
+   separate alpha image node as fallback.
 
 7. `Resolution Diagnostics`
 

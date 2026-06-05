@@ -13,7 +13,7 @@ We turned the Fabric Generator prototype into a four-step production-shaped stud
 
 The big product change is that users no longer need to juggle separate yarnseamless, draft-builder, and Blender workflows. The app owns the workflow; Blender is treated as the render/setup engine behind the scenes.
 
-Current checkpoint: the 2026-05-19 web-to-Blender visual baseline is approved and recorded in [CHECKPOINT_2026-05-19.md](CHECKPOINT_2026-05-19.md). The important frozen values are `Spacing = 0.026`, `Arc 1 V Padding = 0.008`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`, and automatic `Material N Texture Scale U = visible_v_span / 1.0`.
+Current checkpoint history: the 2026-05-19 web-to-Blender visual baseline is recorded in [CHECKPOINT_2026-05-19.md](CHECKPOINT_2026-05-19.md). Current code has since superseded two material controls: `Arc 1 V Padding` defaults to `0.02`, and RGBA yarn materials use the diffuse/RGBA alpha channel directly with alpha remap opt-in only. The still-frozen values are `Spacing = 0.026`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`, and automatic `Material N Texture Scale U = (core_v_max - core_v_min) * 0.6`.
 
 ## What We Integrated
 
@@ -173,8 +173,8 @@ Important socket concepts:
 - `Scanner Pixels Per BU` is the remaining global scale socket.
 - `Sub Strand Enable` is pinned on so Arc 2 halo mapping actually renders.
 - V-axis footgun sockets are pinned to neutral values to keep scan-driven yarns aligned.
-- `Material N Texture Scale U` receives the fit-aware U correction so the visible repeat matches the render context.
-- `Arc 1 V Padding` (Surface panel) controls how far the core texture band extends into the halo region before the rasterizer sees a section transition. Checkpoint default `0.008`.
+- `Material N Texture Scale U` receives the core-band U correction so the visible repeat stays independent of the padding control.
+- `Arc 1 V Padding` (Surface panel) controls how far the core texture band extends into the halo region before the rasterizer sees a section transition. Current default `0.02`.
 - `Arc 2 Boundary Inset` (Surface panel, Phase 10d) pulls Arc 2 profile vertices near the section boundaries radially inward — `0.010 BU` tucks the section discontinuity exactly behind Arc 1.
 - `Match Section Slopes` (Surface panel boolean, Phase 10e) swaps the geometric section split for a texture-proportional one so all four V slopes match by construction. Default `False`; turn on to eliminate the V-slope-discontinuity band at section boundaries.
 - `Arc 2 Edge Angle Mapping` (Surface panel boolean, Phase 10f) replaces linear-in-`v_around` V mapping with a cumulative-`sin(θ)` curvature-aware mapping in Top and Bot sections, so silhouette polygons sample V proportionally to their projected screen size. Default `False`; turn on to de-stretch cells at the strand silhouette. Best effect with `Match Section Slopes = False` (Phase 3q's wider Top/Bot sections).
@@ -197,7 +197,7 @@ Important socket concepts:
 - Browser-side Try On 3D preview.
 - Backend and frontend tests for the main data contracts.
 - Arc 2 V-mapping integrity chain (Phase 10 → 10e): per-section U scaling for uniform texel aspect, custom polyline profile that places vertices on the live section boundaries for any radius ratio, optional boundary inset to hide the section discontinuity behind Arc 1, and optional texture-proportional split that equalizes section slopes.
-- Phase 10u / 2026-05-19 visual checkpoint: the active direct-material look is approved with neutral root `Texture Scale U`, neutral V offsets, `Sub Texture Scale V = 1`, and auto per-material U scale using `AUTO_TEXTURE_SCALE_U_DENOMINATOR = 1.0`.
+- Phase 10u / 2026-05-19 visual checkpoint plus 2026-06-05 material update: the active direct-material look keeps neutral root `Texture Scale U`, neutral V offsets, `Sub Texture Scale V = 1`, direct diffuse/RGBA alpha, and auto per-material U scale from core V span times `0.6`.
 
 ## Operating The App
 

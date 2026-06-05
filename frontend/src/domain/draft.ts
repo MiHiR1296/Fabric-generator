@@ -13,7 +13,7 @@ export const DEFAULT_WARP_COLOR = '#f3ede2';
 export const DEFAULT_WEFT_COLOR = '#b85e3c';
 export const STORAGE_KEY = 'weaving-draft-studio/current-draft';
 export const WEAVE_ZOOM_THREAD_LEVELS = [80, 120, 160, 200] as const;
-export const DEFAULT_ARC1_V_PADDING = 0.008;
+export const DEFAULT_ARC1_V_PADDING = 0.02;
 const PHYSICAL_SPACING_MIN = 0.026;
 const PHYSICAL_SPACING_MAX = 0.1;
 

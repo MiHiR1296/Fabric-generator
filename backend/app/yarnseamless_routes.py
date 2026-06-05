@@ -665,9 +665,9 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
                             "Provide an explicit n_threads to disambiguate."),
                 )
             n_threads = int(len(peaks))
-        strips = _split_threads.split_into_strips(img_arr, peaks)
+        strips = _split_threads.split_into_strips(img_arr, peaks, layout=layout)
         if img2_arr is not None:
-            strips2 = _split_threads.split_into_strips(img2_arr, peaks)
+            strips2 = _split_threads.split_into_strips(img2_arr, peaks, layout=layout)
         _split_threads.save_detection_overlay(
             img_arr, peaks, strips, str(work_dir / "detection_overlay.png")
         )
@@ -751,6 +751,19 @@ async def multithread_process(payload: dict = Body(default_factory=dict)) -> dic
                         y0_, y1_, x0_, x1_ = best
                         cropped = leveled[y0_:y1_ + 1, x0_:x1_ + 1]
                         Image.fromarray(cropped).save(leveled_path)
+                        level_meta = preprocess_meta.setdefault("level", {})
+                        old_bbox = level_meta.get("bbox")
+                        if isinstance(old_bbox, list) and len(old_bbox) == 4:
+                            level_meta["bbox"] = [
+                                int(old_bbox[0]) + int(x0_),
+                                int(old_bbox[1]) + int(y0_),
+                                int(old_bbox[0]) + int(x1_) + 1,
+                                int(old_bbox[1]) + int(y1_) + 1,
+                            ]
+                        level_meta["cropped_size"] = [
+                            int(cropped.shape[1]),
+                            int(cropped.shape[0]),
+                        ]
             except Exception as _e:
                 print(f"[inscribed-crop] thread {i} skipped: {_e}")
             tt["preprocess_level"] = round(time.time() - t, 2)
