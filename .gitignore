@@ -15,11 +15,22 @@ backend/.pytest_cache/
 backend/**/__pycache__/
 backend/**/*.pyc
 backend/vendor/yarn_pipeline/big-lama.pt
+backend/vendor/yarn_pipeline/model_chunks/
 
 *.blend1
 *.pre-*.blend
 *.failed-*.blend
+*.flat-arc1-rebuild*.blend
 
+GLB/
+Renders/
+PROJECT_REVIEW*.html
+blender-method-deep-learning.html
+
+runtime/*
+!runtime/projects/
+!runtime/render_jobs/
+!runtime/yarn_assets/
 runtime/debug/
 runtime/dev-services/
 runtime/logs/

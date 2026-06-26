@@ -66,7 +66,7 @@ In rough priority order — the **bigger** items first.
 
 - **Live-render UI toggle**. Currently `BLENDER_LIVE_RENDER` is a backend env var (`make backend-dev-live`). A dev-only checkbox in Step 3 would let multiple devs share a backend without restarting.
 
-- **Large model artifact migration**. The raw `big-lama.pt` stays out of Git and can be supplied through `BIG_LAMA_MODEL_PATH` / `LAMA_MODEL`. The existing split chunks are still part of the current repository baseline; moving them to release assets or LFS would need a separate history-cleanup decision.
+- **Large model artifact migration**. The raw `big-lama.pt` stays out of Git and can be supplied through `BIG_LAMA_MODEL_PATH` / `LAMA_MODEL`. The old split chunks have been removed from the repository baseline; keep weights in Drive, local cache, release assets, or LFS if the repository enables it later.
 
 ### Smaller cleanups
 
