@@ -19,7 +19,7 @@ Read in this order:
 
 ## TL;DR
 
-- **Scene file:** `Renders/Objects.blend` (override with `TRYON_BLEND_FILE`).
+- **Scene file:** `Renders/Objects.blend` is tracked in Git (override with `TRYON_BLEND_FILE`).
   Organized into one collection per showcase object (`Backdrop_Cloth_08`,
   `Cushion`, `Sphere`) that share the fabric material `Material.001`.
 - **What gets applied:** the user's seamless **tile** texture from Step 3
@@ -34,7 +34,8 @@ Read in this order:
   job and shows results progressively.
 - **Always headless:** Try-On renders spawn headless Blender against
   `Objects.blend`. They never use the live MCP session (that session holds the
-  weave file, not the object scene).
+  weave file, not the object scene). The backend preflights the configured
+  Blender binary before queueing the batch.
 - **Reuses** the existing render-job registry and the
   `/api/blender/render-jobs/{id}` + `/image` endpoints for status + preview.
 

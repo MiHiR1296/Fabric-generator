@@ -34,6 +34,25 @@ function writePersisted(obj) {
 function clearPersisted() {
   try { sessionStorage.removeItem(SS_KEY); } catch {}
 }
+async function readJsonResponse(response) {
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (!response.ok) {
+        throw new Error(`Server error ${response.status}: ${text.slice(0, 240)}`);
+      }
+      throw new Error('Server returned an unexpected non-JSON response.');
+    }
+  }
+  if (!response.ok) {
+    const detail = data?.detail || data?.error;
+    throw new Error(typeof detail === 'string' ? detail : `Server error ${response.status}`);
+  }
+  return data;
+}
 
 export default function MultiThreadImageEditor({ onAssembleDone, onCancel, onAiYarnImported }) {
   const persisted = useRef(readPersisted()).current;
@@ -78,9 +97,7 @@ export default function MultiThreadImageEditor({ onAssembleDone, onCancel, onAiY
     const fd = new FormData();
     fd.append('file', file);
     const r = await fetch('/api/multithread/upload', { method: 'POST', body: fd });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || `Upload failed (${r.status})`);
-    return data; // { upload_id, ext, width, height, thumbnail_data_url, size_bytes }
+    return readJsonResponse(r); // { upload_id, ext, width, height, thumbnail_data_url, size_bytes }
   }
 
   async function handleFile(e) {
@@ -147,8 +164,7 @@ export default function MultiThreadImageEditor({ onAssembleDone, onCancel, onAiY
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || `Server error ${r.status}`);
+      const data = await readJsonResponse(r);
       setSummary(data);
       // If approach C failed for any thread, default to D (band-source toggle)
       const anyC_missing = (data.threads || []).some(t => t.c_band?.top_y < 0);
@@ -182,8 +198,7 @@ export default function MultiThreadImageEditor({ onAssembleDone, onCancel, onAiY
       fd.append('labelPrefix', aiLabelPrefix.trim() || 'AI Yarn');
       fd.append('importRuntime', 'true');
       const r = await fetch('/api/yarn/ai/import', { method: 'POST', body: fd });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.detail || data.error || `AI import failed (${r.status})`);
+      const data = await readJsonResponse(r);
       const count = data.entries?.length || 0;
       setAiFiles([]);
       if (aiFileInputRef.current) aiFileInputRef.current.value = '';

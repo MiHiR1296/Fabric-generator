@@ -23,7 +23,9 @@ backend/vendor/yarn_pipeline/model_chunks/
 *.flat-arc1-rebuild*.blend
 
 GLB/
-Renders/
+Renders/*
+!Renders/Objects.blend
+!Renders/tryon_targets.json
 PROJECT_REVIEW*.html
 blender-method-deep-learning.html
 

@@ -72,3 +72,12 @@ We remove the fake-model code path. The instant in-browser tiling is lost, but
 the Blender drape is the actual deliverable the manual `TMPrenders` workflow was
 producing. (If a fast in-browser preview is wanted later, it can come back as a
 secondary tab.)
+
+### D9. Commit `Renders/Objects.blend`, keep generated renders ignored
+
+The Try-On backend defaults to `Renders/Objects.blend`; without that scene, a
+fresh clone can list targets but cannot render them. The scene is small enough
+for normal Git in this repository, so it is tracked beside
+`Codex_ParametricWeave.blend`. Generated outputs under `Renders/` (`*.png`,
+`*.exr`, `TMPrenders/`, autosaves) remain ignored because they are local render
+products, not source assets.

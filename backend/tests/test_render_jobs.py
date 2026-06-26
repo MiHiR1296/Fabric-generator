@@ -33,6 +33,7 @@ from app.render_jobs import (  # noqa: E402
     DEFAULT_TILE_REPAIR_COLOR_MATCH_STRENGTH,
     DEFAULT_TILE_REPAIR_SEAM_RADIUS,
     DEFAULT_TILE_RENDER_SAMPLES,
+    HeadlessBlenderConfig,
     RenderJob,
     _JOBS,
     build_project_material_payloads,
@@ -46,6 +47,7 @@ from app.render_jobs import (  # noqa: E402
     _next_multiple,
     _normalize_tile_options,
     _stitch_tile_grid,
+    validate_headless_blender_config,
     _wrapped_segments,
 )
 from app.yarn_pbr import (  # noqa: E402
@@ -67,6 +69,48 @@ class RenderJobTests(unittest.TestCase):
 
         self.assertEqual(config.blender_binary, DEFAULT_BLENDER_BINARY)
         self.assertEqual(config.blend_file, DEFAULT_BLEND_FILE)
+
+    def test_validate_headless_blender_config_launch_check_passes(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            fake_binary = root / "blender"
+            fake_blend = root / "scene.blend"
+            runtime = root / "runtime"
+            fake_binary.write_text("#!/bin/sh\necho 'Blender 5.1.0'\n", encoding="utf-8")
+            fake_binary.chmod(0o755)
+            fake_blend.write_text("", encoding="utf-8")
+            config = HeadlessBlenderConfig(
+                blender_binary=fake_binary,
+                blend_file=fake_blend,
+                runtime_root=runtime,
+            )
+
+            validate_headless_blender_config(config, check_launch=True)
+            self.assertTrue(runtime.exists())
+
+    def test_validate_headless_blender_config_reports_launch_failure(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            fake_binary = root / "blender"
+            fake_blend = root / "scene.blend"
+            fake_binary.write_text(
+                "#!/bin/sh\necho 'symbol lookup error: undefined symbol: vkGetDeviceImageMemoryRequirements' >&2\nexit 127\n",
+                encoding="utf-8",
+            )
+            fake_binary.chmod(0o755)
+            fake_blend.write_text("", encoding="utf-8")
+            config = HeadlessBlenderConfig(
+                blender_binary=fake_binary,
+                blend_file=fake_blend,
+                runtime_root=root / "runtime",
+            )
+
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_headless_blender_config(config, check_launch=True)
+
+        self.assertIn("could not start", str(ctx.exception))
+        self.assertIn("undefined symbol", str(ctx.exception))
+        self.assertIn("BLENDER_BINARY_PATH", str(ctx.exception))
 
     def test_build_headless_render_script_embeds_render_path_and_target(self) -> None:
         script = build_headless_render_script(
@@ -755,6 +799,7 @@ class RenderJobTests(unittest.TestCase):
             command,
             [
                 str(fake_binary),
+                "--factory-startup",
                 "-b",
                 str(fake_blend),
                 "--python",

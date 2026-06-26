@@ -72,6 +72,7 @@ class TryonScriptTest(unittest.TestCase):
         # The script inlines a JSON config consumed by `_TRYON = json.loads(...)`.
         self.assertIn("_TRYON = json.loads(", script)
         self.assertIn("bpy.ops.render.render(write_still=True)", script)
+        self.assertIn("world neutral fallback", script)
         # Decode the embedded config and check the wiring.
         import ast
 

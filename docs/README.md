@@ -1,6 +1,6 @@
 # Fabric-generator-tryon — documentation
 
-This is the integration project: **yarnseamless** (yarn-scan authoring, now ported into Step 1) → **Fabric-generator-tryon** (studio + Blender preview) → **Try-On 3D** (in-browser fabric/garment preview). The shared contract is `yarn_library/<yarn_id>/` on disk plus the Blender file `Codex_ParametricWeave.blend`.
+This is the integration project: **yarnseamless** (yarn-scan authoring, now ported into Step 1) → **Fabric-generator-tryon** (studio + Blender preview) → **Try-On 3D** (headless Blender drape renders). The shared contract is `yarn_library/<yarn_id>/` on disk plus the Blender files `Codex_ParametricWeave.blend` and `Renders/Objects.blend`.
 
 Read in this order:
 
