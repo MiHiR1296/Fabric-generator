@@ -8,7 +8,7 @@ Direct asset bundle:
 
 https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP
 
-The GitHub repo contains the application code, docs, tests, and the current Blender scene. The Drive folder carries local runtime assets that should not live in Git.
+The GitHub repo contains the application code, docs, tests, the current weave Blender scene, and the Try-On object scene at `Renders/Objects.blend`. The Drive folder carries local runtime assets that should not live in Git.
 
 ## Expected Drive Contents
 
@@ -65,6 +65,9 @@ These are local generated outputs and should not be copied to Drive or Git:
 runtime/debug/
 runtime/render_jobs/
 runtime/yarn_assets/
+Renders/*.png
+Renders/*.exr
+Renders/TMPrenders/
 backend/.venv/
 frontend/node_modules/
 *.blend1

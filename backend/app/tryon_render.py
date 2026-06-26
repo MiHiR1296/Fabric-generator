@@ -180,6 +180,51 @@ def _walk(lc):
         for sub in _walk(child):
             yield sub
 
+def _image_is_missing(image):
+    if image is None or getattr(image, "packed_file", None):
+        return False
+    filepath = getattr(image, "filepath", "") or ""
+    if not filepath:
+        return False
+    return not os.path.exists(bpy.path.abspath(filepath))
+
+def _ensure_world_lighting(scene):
+    world = scene.world
+    if world is None:
+        world = bpy.data.worlds.new("TryOn_Neutral_World")
+        scene.world = world
+    world.use_nodes = True
+    nodes = world.node_tree.nodes
+    links = world.node_tree.links
+    bg = None
+    out = None
+    for node in nodes:
+        if node.type == 'BACKGROUND' and bg is None:
+            bg = node
+        elif node.type == 'OUTPUT_WORLD' and out is None:
+            out = node
+    if bg is None:
+        bg = nodes.new('ShaderNodeBackground')
+    if out is None:
+        out = nodes.new('ShaderNodeOutputWorld')
+    if not out.inputs['Surface'].is_linked:
+        links.new(bg.outputs['Background'], out.inputs['Surface'])
+
+    color_input = bg.inputs.get('Color')
+    strength_input = bg.inputs.get('Strength')
+    missing_linked_image = False
+    if color_input is not None and color_input.is_linked:
+        for link in list(color_input.links):
+            image = getattr(link.from_node, 'image', None)
+            if _image_is_missing(image):
+                missing_linked_image = True
+                links.remove(link)
+    if missing_linked_image and color_input is not None:
+        color_input.default_value = (0.78, 0.78, 0.78, 1.0)
+        if strength_input is not None:
+            strength_input.default_value = 0.8
+        _step("world neutral fallback")
+
 try:
     mat_name = _TRYON.get("fabricMaterial") or "Material.001"
     mat = bpy.data.materials.get(mat_name)
@@ -205,6 +250,22 @@ try:
             nnode.image = bpy.data.images.load(_TRYON["fabricNormal"], check_existing=False)
             _step("normal->" + nnode.name)
     elif nmap is not None and 'Strength' in nmap.inputs:
+        links = mat.node_tree.links
+        nnode = _find_image_node(mat, 'Normal', via_normal_map=True) or mat.node_tree.nodes.get('Image Texture.002')
+        if nnode is not None:
+            nnode.image = None
+            _step("normal image cleared")
+        cin = nmap.inputs.get('Color')
+        if cin is not None:
+            for link in list(cin.links):
+                links.remove(link)
+        for node in mat.node_tree.nodes:
+            if node.type == 'BSDF_PRINCIPLED':
+                normal_input = node.inputs.get('Normal')
+                if normal_input is not None:
+                    for link in list(normal_input.links):
+                        links.remove(link)
+                break
         nmap.inputs['Strength'].default_value = 0.0
         _step("normal strength->0")
 
@@ -247,6 +308,7 @@ try:
 
     # --- render settings ---
     sc = bpy.context.scene
+    _ensure_world_lighting(sc)
     sc.render.engine = 'CYCLES'
     try:
         sc.cycles.samples = int(_TRYON["samples"])
@@ -372,7 +434,7 @@ def submit_tryon_render_batch(
     config = _tryon_blender_config()
     # Validate the blend + binary exist up front so submit fails fast with a
     # clear message instead of every job dying in the worker.
-    render_jobs.validate_headless_blender_config(config)
+    render_jobs.validate_headless_blender_config(config, check_launch=True)
 
     res = _clamp(resolution, DEFAULT_RESOLUTION, MIN_RESOLUTION, MAX_RESOLUTION)
     smp = _clamp(samples, DEFAULT_SAMPLES, MIN_SAMPLES, MAX_SAMPLES)

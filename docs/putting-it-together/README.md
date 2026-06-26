@@ -1,6 +1,6 @@
 # Putting it together
 
-The integration project. One workflow across three apps: **yarnseamless** (asset authoring) → **Fabric-generator-tryon** (studio + Blender preview) → **Try-On 3D** (browser-side fabric → garment / furniture).
+The integration project. One workflow across three apps: **yarnseamless** (asset authoring) → **Fabric-generator-tryon** (studio + Blender preview) → **Try-On 3D** (headless Blender drape renders).
 
 This folder is the living record of how we made the three talk to each other. Read it in the order below.
 

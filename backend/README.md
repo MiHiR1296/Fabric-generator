@@ -77,6 +77,7 @@ The service listens on `http://127.0.0.1:8000`.
 
 - Blender binary: `/Applications/Blender.app/Contents/MacOS/Blender`
 - Blend file: `../Codex_ParametricWeave.blend`
+- Try-On blend file: `../Renders/Objects.blend`
 - Runtime root: `../runtime/render_jobs`
 - Live MCP port: `9876` through the Makefile
 
@@ -85,9 +86,19 @@ Optional overrides:
 ```bash
 export BLENDER_BINARY_PATH="/Applications/Blender.app/Contents/MacOS/Blender"
 export WEAVE_BLEND_FILE="/absolute/path/to/Codex_ParametricWeave.blend"
+export TRYON_BLEND_FILE="/absolute/path/to/Renders/Objects.blend"
 export WEAVE_RENDER_ROOT="/absolute/path/to/runtime/render_jobs"
 export BLENDER_PORT=9876
 ```
+
+Headless render endpoints now launch-check the Blender binary with
+`--factory-startup --version` before a job is queued, and render subprocesses
+also use `--factory-startup` so user add-ons do not affect repo workflows. A
+failure mentioning `/usr/local/bin/blender`, `/opt/blender-*`, or `undefined
+symbol` usually means the shell/env override points to a broken Blender install;
+set `BLENDER_BINARY_PATH` to the app binary above. Set
+`BLENDER_SKIP_LAUNCH_CHECK=1` only for local debugging when you want to bypass
+this preflight.
 
 ## Test Command
 

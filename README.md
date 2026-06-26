@@ -1,6 +1,6 @@
 # Fabric Generator Try-On Studio
 
-One repo for the integrated yarn-to-fabric workflow: yarn scan processing, weave draft authoring, Blender preview rendering, and browser-side 3D try-on.
+One repo for the integrated yarn-to-fabric workflow: yarn scan processing, weave draft authoring, Blender preview rendering, and Blender-backed 3D try-on.
 
 The final project handoff lives in [docs/FINAL_HANDOFF.md](docs/FINAL_HANDOFF.md). The current visually approved Blender/material baseline is [docs/CHECKPOINT_2026-05-19.md](docs/CHECKPOINT_2026-05-19.md). Start there when you want the full collaboration summary, feature list, process map, open-item inventory, and exact checkpoint values.
 
@@ -19,7 +19,7 @@ The web app is a four-step studio:
 1. **Yarn Library** - process yarn scans inside the app, split multi-thread scans, stitch multi-fragment yarns, inpaint joins with LaMa, save yarn dossiers, and import ready yarns into the current project.
 2. **Pattern Builder** - create or import weaving drafts, edit threading/tie-up/treadling/drawdown, paint warp and weft colors, and bind draft colors to real scanned yarn assets.
 3. **Render Preview** - push yarn metadata and render settings to Blender, render a scanned-yarn fabric swatch, and export canonical draft or Blender handoff JSON.
-4. **Try On 3D** - tile the rendered fabric on an interactive browser-side 3D preview.
+4. **Try On 3D** - render the fabric draped on selectable objects from Blender's `Renders/Objects.blend` scene.
 
 ## Key Features
 
@@ -45,9 +45,9 @@ runtime/      local generated assets, render jobs, projects, and debug output
 
 ## Large Artifact Policy
 
-Do not commit local generated data, raw scan uploads, virtual environments, or the reconstructed `big-lama.pt` file.
+Do not commit local generated data, raw scan uploads, virtual environments, generated render outputs, or the reconstructed `big-lama.pt` file.
 
-Git LFS is currently disabled for the GitHub repository, so this branch does not rely on LFS. The current Blender scene is about 26 MB and is committed normally. Raw model weights stay external or local.
+Git LFS is currently disabled for the GitHub repository, so this branch does not rely on LFS. The current weave scene (`Codex_ParametricWeave.blend`, about 26 MB) and Try-On scene (`Renders/Objects.blend`, about 24 MB) are committed normally. Raw model weights and generated renders stay external or local.
 
 The Drive folder should contain:
 
@@ -139,6 +139,8 @@ export WEAVE_BLEND_FILE="/absolute/path/to/Codex_ParametricWeave.blend"
 export WEAVE_RENDER_ROOT="/absolute/path/to/runtime/render_jobs"
 export BLENDER_PORT=9876
 ```
+
+The backend checks `BLENDER_BINARY_PATH --version` before submitting headless render jobs. If you see a symbol lookup error from `/usr/local/bin/blender` or `/opt/blender-*`, point `BLENDER_BINARY_PATH` at a working Blender app binary or unset the broken override.
 
 For development against an already open Blender scene:
 

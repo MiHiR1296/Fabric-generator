@@ -32,7 +32,7 @@ The Try-On render swaps images on this material. Stable assumptions:
 
 ## Target catalog
 
-Default in `backend/app/tryon_targets.py`; override file
+Default in `backend/app/tryon_render.py`; override file
 `Renders/tryon_targets.json` (override path via env `TRYON_TARGETS_FILE`).
 A target object:
 

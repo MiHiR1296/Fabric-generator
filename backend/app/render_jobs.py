@@ -73,6 +73,7 @@ DEFAULT_TILE_REPAIR_SEAM_RADIUS = 12
 DEFAULT_TILE_REPAIR_CONTEXT = 640
 DEFAULT_TILE_REPAIR_COLOR_MATCH_STRENGTH = 1.2
 ALLOWED_TILE_COUNTS = {4}
+DEFAULT_BLENDER_LAUNCH_CHECK_TIMEOUT_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
@@ -158,7 +159,59 @@ def _enum_env(name: str, default: str, allowed: set[str]) -> str:
     return value if value in allowed else default
 
 
-def validate_headless_blender_config(config: HeadlessBlenderConfig) -> None:
+def _blender_launch_check_disabled() -> bool:
+    return os.environ.get("BLENDER_SKIP_LAUNCH_CHECK", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _blender_launch_check_timeout() -> float:
+    raw = os.environ.get("BLENDER_LAUNCH_CHECK_TIMEOUT_SECONDS")
+    try:
+        value = float(raw) if raw is not None else DEFAULT_BLENDER_LAUNCH_CHECK_TIMEOUT_SECONDS
+    except (TypeError, ValueError):
+        value = DEFAULT_BLENDER_LAUNCH_CHECK_TIMEOUT_SECONDS
+    return max(1.0, min(120.0, value))
+
+
+def _trim_process_output(stdout: str | None, stderr: str | None, *, limit: int = 1200) -> str:
+    text = "\n".join(part.strip() for part in (stderr, stdout) if part and part.strip())
+    text = " | ".join(line.strip() for line in text.splitlines() if line.strip())
+    return text[:limit] if text else "no output"
+
+
+def ensure_headless_blender_launches(config: HeadlessBlenderConfig) -> None:
+    if _blender_launch_check_disabled():
+        return
+    try:
+        completed = subprocess.run(
+            [str(config.blender_binary), "--factory-startup", "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            text=True,
+            timeout=_blender_launch_check_timeout(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"Blender binary at {config.blender_binary} did not respond to --version within "
+            f"{_blender_launch_check_timeout():g}s. Set BLENDER_BINARY_PATH to a working Blender executable."
+        ) from exc
+    except OSError as exc:
+        raise RuntimeError(
+            f"Blender binary at {config.blender_binary} could not be launched: {exc}. "
+            "Set BLENDER_BINARY_PATH to a working Blender executable."
+        ) from exc
+    if completed.returncode != 0:
+        details = _trim_process_output(completed.stdout, completed.stderr)
+        raise RuntimeError(
+            f"Blender binary at {config.blender_binary} exists but could not start. "
+            "Set BLENDER_BINARY_PATH to a working Blender executable, for example "
+            "/Applications/Blender.app/Contents/MacOS/Blender on macOS, and unset any broken "
+            "/usr/local/bin/blender override. Blender said: "
+            f"{details}"
+        )
+
+
+def validate_headless_blender_config(config: HeadlessBlenderConfig, *, check_launch: bool = False) -> None:
     if not config.blender_binary.exists():
         raise FileNotFoundError(f"Blender binary not found at {config.blender_binary}")
     if not config.blender_binary.is_file():
@@ -167,6 +220,8 @@ def validate_headless_blender_config(config: HeadlessBlenderConfig) -> None:
         raise FileNotFoundError(f"Blend file not found at {config.blend_file}")
     if not config.blend_file.is_file():
         raise FileNotFoundError(f"Blend file path is not a file: {config.blend_file}")
+    if check_launch:
+        ensure_headless_blender_launches(config)
     config.runtime_root.mkdir(parents=True, exist_ok=True)
 
 
@@ -1658,6 +1713,7 @@ def build_headless_render_command(
     validate_headless_blender_config(config)
     return [
         str(config.blender_binary),
+        "--factory-startup",
         "-b",
         str(config.blend_file),
         "--python",
@@ -2163,7 +2219,7 @@ def _run_tile_render_job(
 
     config = load_headless_blender_config()
     try:
-        validate_headless_blender_config(config)
+        validate_headless_blender_config(config, check_launch=not _is_live_render_mode())
         tile_count = int(tile_options["tileCount"])
         columns = int(tile_options["columns"])
         rows = int(tile_options["rows"])
@@ -2359,7 +2415,7 @@ def _create_render_job(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     config = load_headless_blender_config()
-    validate_headless_blender_config(config)
+    validate_headless_blender_config(config, check_launch=not _is_live_render_mode())
 
     render_path = job_dir / "preview.png"
     script_path = job_dir / "render_job.py"
@@ -2640,6 +2696,9 @@ def submit_project_tile_render_job(
     )
     if not ordered_assets:
         raise ValueError("At least one ready yarn asset must be assigned before tile export.")
+
+    if not _is_live_render_mode():
+        validate_headless_blender_config(load_headless_blender_config(), check_launch=True)
 
     options = _normalize_tile_options(tile_options)
     job_id = f"tiles_{uuid.uuid4().hex[:12]}"

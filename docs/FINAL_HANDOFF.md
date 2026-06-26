@@ -9,7 +9,7 @@ We turned the Fabric Generator prototype into a four-step production-shaped stud
 1. Process yarn scans directly inside the app.
 2. Save and import yarn dossiers through a shared `yarn_library/` contract.
 3. Build or import weaving drafts and bind draft colors to real scanned yarns.
-4. Render through Blender and preview the fabric on a browser-side 3D try-on surface.
+4. Render through Blender and preview the fabric draped on selectable 3D objects.
 
 The big product change is that users no longer need to juggle separate yarnseamless, draft-builder, and Blender workflows. The app owns the workflow; Blender is treated as the render/setup engine behind the scenes.
 
@@ -25,7 +25,7 @@ Current checkpoint history: the 2026-05-19 web-to-Blender visual baseline is rec
 | Color binding | Added project-level warp/weft color-to-yarn assignments so draft colors become material slots. |
 | Blender setup | Added live and headless paths that push per-yarn band metadata into `Parametric Weave knotty`. |
 | Rendering | Added material payload generation, direct per-yarn materials, Cycles-safe texture handling, render jobs, and preview polling. |
-| Try-on | Kept the rendered fabric available for the Step 4 three.js preview. |
+| Try-on | Added the Step 4 Blender Try-On scene render flow using `Renders/Objects.blend`. |
 | Documentation | Added architecture, data contract, phase logs, lessons, and this final handoff. |
 
 ## Application Workflow
@@ -58,8 +58,9 @@ Current checkpoint history: the 2026-05-19 web-to-Blender visual baseline is rec
 
 ### Step 4 - Try On 3D
 
-- Use the rendered swatch as a tiled texture in the browser.
-- Preview the fabric in an interactive three.js try-on scene.
+- Use a finished Step 3 render or seamless tile as the fabric source.
+- Render selected objects from `Renders/Objects.blend` one at a time in headless Blender.
+- Poll the shared render-job endpoints and show each finished drape render progressively.
 
 ## State And Data Management
 
@@ -137,7 +138,7 @@ The loader checks:
 4. `backend/vendor/yarn_pipeline/big-lama.pt`
 5. `~/.cache/torch/hub/checkpoints/big-lama.pt`
 
-Git LFS is currently disabled for the GitHub repository, so this branch does not depend on LFS. The current Blender scene is small enough for normal Git. Future heavyweight `.blend` or model artifacts should move to Git LFS only after the repository enables it, or to release/external storage.
+Git LFS is currently disabled for the GitHub repository, so this branch does not depend on LFS. `Codex_ParametricWeave.blend` and `Renders/Objects.blend` are both small enough for normal Git. Future heavyweight `.blend` or model artifacts should move to Git LFS only after the repository enables it, or to release/external storage.
 
 Recommended local model setup:
 

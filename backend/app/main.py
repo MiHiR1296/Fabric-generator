@@ -45,6 +45,7 @@ from .render_jobs import (
     submit_hook_project_render_job,
     submit_render_job,
     sync_hook_project_to_live_blender,
+    validate_headless_blender_config,
 )
 from .yarn_assets import (
     create_yarn_assets,
@@ -196,6 +197,11 @@ if FastAPI is not None:
     @app.get("/api/blender/health")
     async def blender_health():
         headless = load_headless_blender_config()
+        try:
+            validate_headless_blender_config(headless, check_launch=True)
+            blender_launch_error = None
+        except Exception as exc:
+            blender_launch_error = str(exc)
         config = load_blender_socket_config()
         response = send_blender_command("get_scene_info")
         return {
@@ -206,6 +212,8 @@ if FastAPI is not None:
                 "runtime_root": str(headless.runtime_root),
                 "blender_binary_exists": headless.blender_binary.exists(),
                 "blend_file_exists": headless.blend_file.exists(),
+                "blender_launch_ok": blender_launch_error is None,
+                "blender_launch_error": blender_launch_error,
             },
             "bridge": {
                 "host": config.host,
@@ -468,6 +476,8 @@ if FastAPI is not None:
             # Blender binary or Objects.blend missing.
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
