@@ -15,7 +15,9 @@ backend/.pytest_cache/
 backend/**/__pycache__/
 backend/**/*.pyc
 backend/vendor/yarn_pipeline/big-lama.pt
-backend/vendor/yarn_pipeline/model_chunks/
+backend/vendor/yarn_pipeline/.big-lama.pt.tmp
+backend/vendor/yarn_pipeline/model_chunks/*
+!backend/vendor/yarn_pipeline/model_chunks/big-lama.pt.part-*
 
 *.blend1
 *.pre-*.blend

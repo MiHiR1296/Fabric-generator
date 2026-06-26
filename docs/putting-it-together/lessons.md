@@ -275,7 +275,7 @@ For current scan-driven yarns, Arc 2 maps to the outer halo rows. Those rows are
 
 The product needs heavyweight local artifacts: `big-lama.pt`, raw scan uploads, inpaint canvases, detection overlays, Blender autosaves, and render/debug jobs. They are important for development but poisonous in normal Git history.
 
-Keep the raw model outside Git and point the backend at it with `BIG_LAMA_MODEL_PATH` or `LAMA_MODEL`. Keep `runtime/debug/` ignored. Use Git LFS only after the GitHub repository enables it; otherwise use release assets or external storage for any future heavyweight `.blend` / model artifact that truly needs to travel with a branch.
+Keep the reconstructed raw model outside Git and point the backend at it with `BIG_LAMA_MODEL_PATH` or `LAMA_MODEL`, or reconstruct it from tracked sub-100 MB chunks. Keep `runtime/debug/` ignored. Use Git LFS only after the GitHub repository enables it for any future heavyweight artifact that cannot be chunked cleanly.
 
 ### Rule 25 — When V is implicitly stretched, U must compress by the same factor (uniform aspect) or things look squished.
 

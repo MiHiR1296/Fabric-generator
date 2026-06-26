@@ -51,9 +51,18 @@ The loader checks, in order:
 2. `<yarnseamless UI>/big-lama.pt`
 3. `backend/vendor/yarn_pipeline/big-lama.pt`
 4. `~/.cache/torch/hub/checkpoints/big-lama.pt`
+5. tracked chunks in `backend/vendor/yarn_pipeline/model_chunks/`
 
-The old vendored split chunks have been removed from Git. Keep the model in
-Drive, local cache, or an explicit environment path.
+The repo carries the model as split chunks so each Git file stays below
+GitHub's normal file-size limit. On a fresh server, reconstruct the ignored raw
+model once:
+
+```bash
+make backend-setup-lama
+```
+
+The backend will also reconstruct from chunks automatically on first LaMa load
+if the raw model is missing.
 
 Recommended:
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 from PIL import Image
@@ -13,10 +14,24 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.yarnseamless import dual_alpha_pipeline as dap  # noqa: E402
-from app.yarnseamless_routes import _desaturate_background_spill_rgb  # noqa: E402
+from app.yarnseamless_routes import _desaturate_background_spill_rgb, _reconstruct_model_from_chunks  # noqa: E402
 
 
 class YarnseamlessRoutesTests(unittest.TestCase):
+    def test_reconstruct_model_from_chunks_combines_parts(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            chunk_dir = root / "model_chunks"
+            chunk_dir.mkdir()
+            (chunk_dir / "big-lama.pt.part-000").write_bytes(b"big-")
+            (chunk_dir / "big-lama.pt.part-001").write_bytes(b"lama")
+            target = root / "big-lama.pt"
+
+            result = _reconstruct_model_from_chunks(chunk_dir=chunk_dir, target_path=target)
+
+            self.assertEqual(result, target)
+            self.assertEqual(target.read_bytes(), b"big-lama")
+
     def test_background_spill_desaturation_only_touches_low_alpha_card_colour(self) -> None:
         rgb = np.array(
             [
