@@ -13,19 +13,37 @@ import {
   serializeDraft,
   updateRenderSettings,
 } from './domain/draft';
+import {
+  buildHookMaterialBindings,
+  buildHookProject,
+  hookPresetDefinitions,
+  missingHookMaterialBindings,
+  syncHookMaterialBindings,
+} from './domain/hook';
 import { buildFabricProject, deriveColorBindingSlots, syncColorBindings } from './domain/project';
 import { presets } from './domain/presets';
-import type { BlenderRenderJob, ColorBinding, DraftDocument, YarnAsset } from './domain/types';
+import type {
+  BlenderRenderJob,
+  ColorBinding,
+  DraftDocument,
+  FabricStructureType,
+  HookMaterialBinding,
+  HookPatternDocument,
+  YarnAsset,
+} from './domain/types';
 import {
   deleteLibraryYarn,
   deleteYarnAsset,
+  extractHookSyncPayload,
   fetchDraftRenderJob,
   importYarnFromLibrary,
   listYarnAssets,
   listYarnLibrary,
   pushProjectBandmeta,
+  requestHookProjectRender,
   requestProjectRender,
   requestProjectTileRender,
+  syncHookProjectToBlender,
   retryYarnAsset,
   uploadYarnAssets,
   type LibraryYarnEntry,
@@ -53,7 +71,14 @@ function buildLivePushSignature(draft: DraftDocument, colorBindings: ColorBindin
 
 export default function App() {
   const [step, setStep] = useState<WizardStep>(0);
+  const [structureType, setStructureType] = useState<FabricStructureType>('weave');
   const [draft, setDraft] = useState<DraftDocument>(loadDraftFromStorage() || presets[0].document);
+  const [hookPattern, setHookPattern] = useState<HookPatternDocument>(
+    hookPresetDefinitions[0].document,
+  );
+  const [hookMaterialBindings, setHookMaterialBindings] = useState<HookMaterialBinding[]>(
+    () => buildHookMaterialBindings(hookPresetDefinitions[0].document),
+  );
   const [yarnAssets, setYarnAssets] = useState<YarnAsset[]>([]);
   const [libraryYarns, setLibraryYarns] = useState<LibraryYarnEntry[]>([]);
   const [importingYarnId, setImportingYarnId] = useState<string | null>(null);
@@ -84,6 +109,40 @@ export default function App() {
     () => colorBindings.length > 0 && colorBindings.every((b) => Boolean(b.yarnAssetId)),
     [colorBindings],
   );
+
+  const firstReadyYarnAssetId = useMemo(() => {
+    const readyIds = new Set(readyAssets.map((asset) => asset.id));
+    const boundReady = colorBindings.find(
+      (binding) => binding.yarnAssetId && readyIds.has(binding.yarnAssetId),
+    );
+    return boundReady?.yarnAssetId || readyAssets[0]?.id || null;
+  }, [colorBindings, readyAssets]);
+
+  useEffect(() => {
+    setHookMaterialBindings((current) =>
+      syncHookMaterialBindings(hookPattern, current, firstReadyYarnAssetId),
+    );
+  }, [hookPattern, firstReadyYarnAssetId]);
+
+  const missingHookSlots = useMemo(
+    () => missingHookMaterialBindings(hookPattern, hookMaterialBindings),
+    [hookPattern, hookMaterialBindings],
+  );
+
+  function buildSelectedHookProject() {
+    if (missingHookSlots.length) {
+      throw new Error(
+        `Assign hook material slot${missingHookSlots.length === 1 ? '' : 's'} ${missingHookSlots
+          .map((slot) => slot + 1)
+          .join(', ')} before rendering.`,
+      );
+    }
+    return buildHookProject(
+      hookPattern,
+      yarnAssets,
+      hookMaterialBindings,
+    );
+  }
 
   useEffect(() => {
     saveDraftToStorage(draft);
@@ -254,6 +313,7 @@ export default function App() {
   // multiplier depends on zoom/spacing/fillRatio/textureUCalibration.
   const lastPushedSignatureRef = useRef<string | null>(null);
   useEffect(() => {
+    if (structureType !== 'weave') return undefined;
     if (step < 1) return undefined;          // only Pattern Builder onward
     if (!allBindingsAssigned) return undefined;
     const signature = buildLivePushSignature(draft, colorBindings);
@@ -267,12 +327,13 @@ export default function App() {
       });
     }, 300);
     return () => window.clearTimeout(timeoutId);
-  }, [step, allBindingsAssigned, draft, colorBindings]);
+  }, [step, allBindingsAssigned, draft, colorBindings, structureType]);
 
   const hasPalette = draft.warpColors.length > 0 && draft.weftColors.length > 0;
 
   const canAdvance = (() => {
     if (step === 0) return readyAssets.length > 0;
+    if (step === 1 && structureType === 'hook') return readyAssets.length > 0 && missingHookSlots.length === 0;
     if (step === 1) return hasPalette && allBindingsAssigned;
     return false;
   })();
@@ -280,6 +341,10 @@ export default function App() {
   const advanceHint = (() => {
     if (step === 0 && readyAssets.length === 0)
       return 'Upload at least one yarn so the backend can finish processing it.';
+    if (step === 1 && structureType === 'hook' && readyAssets.length === 0)
+      return 'Import or process at least one yarn before rendering hook presets.';
+    if (step === 1 && structureType === 'hook' && missingHookSlots.length > 0)
+      return 'Assign every hook material slot to a yarn asset.';
     if (step === 1 && !hasPalette)
       return 'Set warp and weft colors before continuing to render preview.';
     if (step === 1 && !allBindingsAssigned)
@@ -310,7 +375,12 @@ export default function App() {
           </p>
         </div>
         <div className="fabric-hero__facts">
-          <div className="status-pill status-pill--source">Draft Colors: {slots.length}</div>
+          <div className="status-pill status-pill--source">
+            Workflow: {structureType === 'hook' ? 'Knit / Hook' : 'Weave'}
+          </div>
+          <div className="status-pill status-pill--source">
+            {structureType === 'hook' ? `Hook: ${hookPattern.rows} x ${hookPattern.columns}` : `Draft Colors: ${slots.length}`}
+          </div>
           <div className="status-pill status-pill--online">Ready Yarns: {readyAssets.length}</div>
           <div className={`status-pill status-pill--${renderJob?.status === 'failed' ? 'offline' : 'checking'}`}>
             Render: {renderJob?.status || 'idle'}
@@ -429,12 +499,17 @@ export default function App() {
             yarnAssets={yarnAssets}
             colorBindings={colorBindings}
             setColorBindings={setColorBindings}
+            structureType={structureType}
+            setStructureType={setStructureType}
+            hookPattern={hookPattern}
+            setHookPattern={setHookPattern}
+            hookMaterialBindings={hookMaterialBindings}
+            setHookMaterialBindings={setHookMaterialBindings}
           />
         ) : null}
 
         {step === 2 ? (
           <ColorMappingStep
-            showBindings={false}
             draft={draft}
             yarnAssets={yarnAssets}
             colorBindings={colorBindings}
@@ -447,13 +522,28 @@ export default function App() {
             activePreviewMode={activePreviewMode}
             renderMessage={renderMessage}
             tileMessage={tileMessage}
+            structureType={structureType}
+            showBindings={structureType === 'weave'}
+            title={structureType === 'hook' ? 'Hook Render Preview' : 'Render Preview'}
+            summaryText={
+              structureType === 'hook'
+                ? `Render ${hookPattern.title || 'the selected hook preset'} in Blender.`
+                : 'Render the woven draft in Blender and compare against the drawdown.'
+            }
+            renderDisabled={
+              structureType === 'hook'
+                ? readyAssets.length === 0 || missingHookSlots.length > 0
+                : readyAssets.length === 0 || !allBindingsAssigned
+            }
             onRenderPreview={async () => {
               setActivePreviewMode('render');
               setRenderBusy(true);
               try {
-                const job = await requestProjectRender(
-                  buildFabricProject(normalizeDraft(draft), yarnAssets, colorBindings),
-                );
+                const job = structureType === 'hook'
+                  ? await requestHookProjectRender(buildSelectedHookProject())
+                  : await requestProjectRender(
+                      buildFabricProject(normalizeDraft(draft), yarnAssets, colorBindings),
+                    );
                 setRenderJob(job);
                 setRenderMessage(job.message);
               } catch (error) {
@@ -467,24 +557,40 @@ export default function App() {
             onSendToLiveBlender={async () => {
               setActivePreviewMode('render');
               setLiveBlenderBusy(true);
-              setRenderMessage('Sending the current design draft to live Blender...');
+              setRenderMessage(
+                structureType === 'hook'
+                  ? `Sending ${hookPattern.title || 'the selected hook preset'} to live Blender...`
+                  : 'Sending the current design draft to live Blender...',
+              );
               try {
-                const result = await pushProjectBandmeta(normalizeDraft(draft), colorBindings);
-                lastPushedSignatureRef.current = buildLivePushSignature(draft, colorBindings);
-                const pushed = Number(result?.pushed ?? 0);
-                const materialLabel = pushed === 1 ? 'material slot' : 'material slots';
-                setRenderMessage(
-                  `Sent the current design draft to live Blender (${pushed} ${materialLabel}) on ${result?.target || 'ParametricWeave'}.`,
-                );
+                if (structureType === 'hook') {
+                  const result = await syncHookProjectToBlender(buildSelectedHookProject());
+                  const payload = extractHookSyncPayload(result);
+                  const geometry = payload?.geometry;
+                  const buildMode = payload?.buildSpec?.buildMode || 'generated hook';
+                  setRenderMessage(
+                    `Sent hook preset to live Blender (${payload?.activeCells ?? 0} active cells, ${
+                      geometry?.faces ?? 'generated'
+                    } faces, ${buildMode}) on ${payload?.target || 'ProceduralHook'}.`,
+                  );
+                } else {
+                  const result = await pushProjectBandmeta(normalizeDraft(draft), colorBindings);
+                  lastPushedSignatureRef.current = buildLivePushSignature(draft, colorBindings);
+                  const pushed = Number(result?.pushed ?? 0);
+                  const materialLabel = pushed === 1 ? 'material slot' : 'material slots';
+                  setRenderMessage(
+                    `Sent the current design draft to live Blender (${pushed} ${materialLabel}) on ${result?.target || 'ParametricWeave'}.`,
+                  );
+                }
               } catch (error) {
                 setRenderMessage(
-                  error instanceof Error ? error.message : 'Unable to send the design draft to live Blender.',
+                  error instanceof Error ? error.message : 'Unable to send the design to live Blender.',
                 );
               } finally {
                 setLiveBlenderBusy(false);
               }
             }}
-            onRenderTiles={async (options) => {
+            onRenderTiles={structureType === 'weave' ? async (options) => {
               setActivePreviewMode('tile');
               setTileBusy(true);
               try {
@@ -501,7 +607,7 @@ export default function App() {
               } finally {
                 setTileBusy(false);
               }
-            }}
+            } : undefined}
             onExportCanonical={() => {
               downloadTextFile('fabric-studio-draft.json', serializeDraft(draft));
             }}
@@ -515,7 +621,7 @@ export default function App() {
           />
         ) : null}
 
-        {step === 3 ? <TryOn3DStep renderJob={renderJob} /> : null}
+        {step === 3 ? <TryOn3DStep renderJob={renderJob} tileJob={tileJob} /> : null}
       </main>
 
       {/* Wizard Back/Next footer REMOVED 2026-05-13 per user direction.

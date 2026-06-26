@@ -16,6 +16,10 @@ Read in this order:
 | 8 | [WebUIChanges/](WebUIChanges/) | Wizard / FastAPI surface changes — the three state layers (library / runtime asset / color binding), the sync points between them, and every UI-visible behavior fix logged Symptom / Diagnosis / Fix / Verification. |
 | 9 | [YarnScanProcessing/](YarnScanProcessing/) | 2026-05-29 yarn-scan processing log: robust thread detection, natural RGBA, background spill removal, sub-degree rotation, connected-core bands, tests, and QA metrics. |
 | 10 | [WebUIbands/](WebUIbands/) | Yarn band detection (core + fiber halos) — historical setup, FWHM post-export detector, and later connected-core refinements. |
+| 11 | [AIYarnMetadataPreprocessing/](AIYarnMetadataPreprocessing/) | Experimental, documentation-only AI-generated yarn metadata path: source PNG alpha checks, dense-core/Arc 2 support split, explicit U scale, batch logs, and future UI ingestion runbook. |
+| 12 | [ProceduralHookShapeWorkbench/](../../docs/ProceduralHookShapeWorkbench/) | Current hook shape workbench: freshly reingested Pre-V2 Geometry Nodes anatomy, exposed controls, row/column drivers, half-tube surfacing, and adaptation notes before productionizing hook/knit. |
+| 13 | [TryOn3DRender/](TryOn3DRender/) | Step 4 "Try On 3D" feature: pick objects from `Renders/Objects.blend`, render the generated fabric draped onto each (one at a time, headless), and show a progressive gallery. Plan, data contract, decisions. |
+| 14 | [BlenderLivePreview/](BlenderLivePreview/) | Design + plan for an interactive **Cycles** live-preview session: high-res camera frames returned over the MCP socket as bytes (remote-ready, no shared filesystem), a Cycles speed profile with quality tiers + presets, the session/coalescing data contract, and the remote-security gate. Design only — not yet built. |
 
 External runtime assets are shared here:
 

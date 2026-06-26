@@ -3,9 +3,15 @@ import type {
   BlenderRenderJob,
   FabricProject,
   DraftDocument,
+  HookBlenderSyncPayload,
+  HookBlenderSyncResponse,
+  HookPatternDocument,
+  HookProject,
   ImportResult,
   ParserStatus,
   TileRenderOptions,
+  TryonRenderBatch,
+  TryonTarget,
   YarnAsset,
 } from '../domain/types';
 
@@ -31,6 +37,27 @@ async function parseJson(response: Response) {
     );
   }
   return data;
+}
+
+export function extractHookSyncPayload(result: HookBlenderSyncResponse): HookBlenderSyncPayload | null {
+  const rawPayload = result?.result?.result ?? result;
+  if (typeof rawPayload === 'string') {
+    const statusLine = rawPayload
+      .split('\n')
+      .find((line) => line.trim().startsWith('{"status"'));
+    if (!statusLine) {
+      return null;
+    }
+    try {
+      return JSON.parse(statusLine.trim()) as HookBlenderSyncPayload;
+    } catch {
+      return null;
+    }
+  }
+  if (rawPayload && typeof rawPayload === 'object' && 'status' in rawPayload) {
+    return rawPayload as HookBlenderSyncPayload;
+  }
+  return null;
 }
 
 export async function checkParserStatus(): Promise<ParserStatus> {
@@ -203,6 +230,34 @@ export async function fetchDraftRenderJob(jobId: string): Promise<BlenderRenderJ
   return parseJson(response);
 }
 
+// --- Step 4: Try-On 3D drape renders ---------------------------------------
+
+export async function listTryonTargets(): Promise<{ targets: TryonTarget[]; blendFileExists: boolean }> {
+  const response = await fetch('/api/blender/tryon/targets');
+  return parseJson(response);
+}
+
+// Submit a batch of object renders. `sourceJobId` is a succeeded Step-3 tile or
+// render job; the backend resolves its image and drapes it onto each object.
+// Renders run ONE AT A TIME server-side; poll each jobId via fetchDraftRenderJob.
+export async function requestTryonRender(
+  targetIds: string[],
+  sourceJobId: string,
+  options?: { resolution?: number; samples?: number },
+): Promise<TryonRenderBatch> {
+  const response = await fetch('/api/blender/tryon/render', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      targetIds,
+      sourceJobId,
+      resolution: options?.resolution,
+      samples: options?.samples,
+    }),
+  });
+  return parseJson(response);
+}
+
 // Push the current project setup to the LIVE Blender on MCP 9876. This includes
 // bandMeta (per-yarn Arc 1/Arc 2 V Min/Max + Image Width Px) and render-setting
 // context, so the setup-owned per-material Texture Scale U multiplier can be
@@ -221,6 +276,73 @@ export async function pushProjectBandmeta(
       colorBindings,
       target_object_name: options?.targetObjectName || 'ParametricWeave',
       modifier_name: options?.modifierName || 'Weave',
+    }),
+  });
+  return parseJson(response);
+}
+
+export async function syncHookToBlender(
+  pattern: HookPatternDocument,
+  options?: {
+    targetObjectName?: string;
+    draftObjectName?: string;
+  },
+): Promise<HookBlenderSyncResponse> {
+  const response = await fetch('/api/blender/sync-hook', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      pattern,
+      target_object_name: options?.targetObjectName || 'ProceduralHook',
+      draft_object_name: options?.draftObjectName || 'HookDraft_Live',
+    }),
+  });
+  return parseJson(response);
+}
+
+export async function syncHookProjectToBlender(
+  project: HookProject,
+  options?: {
+    targetObjectName?: string;
+    draftObjectName?: string;
+  },
+): Promise<HookBlenderSyncResponse> {
+  const response = await fetch('/api/blender/sync-hook-project', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      pattern: project.pattern,
+      yarnAssets: project.yarnAssets,
+      materialBindings: project.materialBindings,
+      target_object_name: options?.targetObjectName || 'ProceduralHook',
+      draft_object_name: options?.draftObjectName || 'HookDraft_Live',
+    }),
+  });
+  return parseJson(response);
+}
+
+export async function requestHookProjectRender(
+  project: HookProject,
+  options?: {
+    targetObjectName?: string;
+    draftObjectName?: string;
+  },
+): Promise<BlenderRenderJob> {
+  const response = await fetch('/api/blender/render-hook-project', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      pattern: project.pattern,
+      yarnAssets: project.yarnAssets,
+      materialBindings: project.materialBindings,
+      target_object_name: options?.targetObjectName || 'ProceduralHook',
+      draft_object_name: options?.draftObjectName || 'HookDraft_Live',
     }),
   });
   return parseJson(response);

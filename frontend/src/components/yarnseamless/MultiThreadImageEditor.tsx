@@ -35,7 +35,7 @@ function clearPersisted() {
   try { sessionStorage.removeItem(SS_KEY); } catch {}
 }
 
-export default function MultiThreadImageEditor({ onAssembleDone, onCancel }) {
+export default function MultiThreadImageEditor({ onAssembleDone, onCancel, onAiYarnImported }) {
   const persisted = useRef(readPersisted()).current;
   const [view, setView] = useState(() => persisted?.view || 'upload'); // 'upload' | 'processing' | 'review'
   // null = auto-detect (default); a number forces that count.
@@ -58,6 +58,11 @@ export default function MultiThreadImageEditor({ onAssembleDone, onCancel }) {
   const [bandSource, setBandSource] = useState(() => persisted?.bandSource || 'c'); // 'c' | 'd' | 'none'
   const fileInputRef = useRef(null);
   const fileInput2Ref = useRef(null);
+  const aiFileInputRef = useRef(null);
+  const [aiFiles, setAiFiles] = useState([]);
+  const [aiLabelPrefix, setAiLabelPrefix] = useState('AI Yarn');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiStatus, setAiStatus] = useState('');
 
   // Keep sessionStorage in sync with the bits worth restoring after a
   // tab discard / reload. Don't include data URIs.
@@ -160,6 +165,34 @@ export default function MultiThreadImageEditor({ onAssembleDone, onCancel }) {
       setView('upload');
     } finally {
       setProgressMessage('');
+    }
+  }
+
+  async function runAiImport() {
+    if (!aiFiles.length) {
+      setAiStatus('Choose AI image files first.');
+      return;
+    }
+    setAiBusy(true);
+    setAiStatus('Processing AI yarn metadata...');
+    try {
+      const fd = new FormData();
+      aiFiles.forEach(file => fd.append('files', file));
+      fd.append('dpi', String(Number(dpi) || 1600));
+      fd.append('labelPrefix', aiLabelPrefix.trim() || 'AI Yarn');
+      fd.append('importRuntime', 'true');
+      const r = await fetch('/api/yarn/ai/import', { method: 'POST', body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || data.error || `AI import failed (${r.status})`);
+      const count = data.entries?.length || 0;
+      setAiFiles([]);
+      if (aiFileInputRef.current) aiFileInputRef.current.value = '';
+      setAiStatus(`Imported ${count} AI yarn${count === 1 ? '' : 's'} into the library.`);
+      onAiYarnImported?.(data);
+    } catch (err) {
+      setAiStatus(err.message || 'Unable to import AI yarn images.');
+    } finally {
+      setAiBusy(false);
     }
   }
 
@@ -272,6 +305,19 @@ export default function MultiThreadImageEditor({ onAssembleDone, onCancel }) {
           onFileChange={handleFile}
           onFile2Change={handleFile2}
           onProcess={runProcessing}
+          aiFileInputRef={aiFileInputRef}
+          aiFiles={aiFiles}
+          aiLabelPrefix={aiLabelPrefix}
+          setAiLabelPrefix={setAiLabelPrefix}
+          aiBusy={aiBusy}
+          aiStatus={aiStatus}
+          onPickAi={() => aiFileInputRef.current?.click()}
+          onAiFileChange={e => {
+            const files = Array.from(e.target.files || []);
+            setAiFiles(files);
+            setAiStatus(files.length ? `${files.length} file${files.length === 1 ? '' : 's'} selected.` : '');
+          }}
+          onProcessAi={runAiImport}
         />
       )}
 
@@ -321,6 +367,8 @@ function UploadView({
   dpi, setDpi,
   onPick, onPick2, onClear2,
   onFileChange, onFile2Change, onProcess,
+  aiFileInputRef, aiFiles, aiLabelPrefix, setAiLabelPrefix,
+  aiBusy, aiStatus, onPickAi, onAiFileChange, onProcessAi,
 }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
@@ -395,6 +443,44 @@ function UploadView({
           className="bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium py-2 px-5 rounded">
           {upload2ThumbUrl ? 'Process Both Scans (dual-bg)' : 'Process Scan'}
         </button>
+
+        <div className="border-t border-gray-800 pt-3 flex flex-col gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs uppercase tracking-wide text-gray-500">AI generated yarn</span>
+            <span className="text-xs text-gray-600">PNG + optional JSON</span>
+          </div>
+          <div className="flex gap-2 items-center flex-wrap">
+            <button onClick={onPickAi} disabled={aiBusy}
+              className="bg-sky-700 hover:bg-sky-600 disabled:bg-gray-800 disabled:text-gray-600 text-white text-sm font-medium py-2 px-4 rounded">
+              Choose AI Files
+            </button>
+            <input
+              ref={aiFileInputRef}
+              type="file"
+              accept="image/*,.json"
+              multiple
+              onChange={onAiFileChange}
+              className="hidden"
+            />
+            <span className="text-xs text-gray-400 truncate flex-1 min-w-[160px]">
+              {aiFiles?.length ? aiFiles.map(file => file.name).join(', ') : 'No AI files selected'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <label className="text-xs text-gray-300">Label:</label>
+            <input
+              type="text"
+              value={aiLabelPrefix}
+              onChange={e => setAiLabelPrefix(e.target.value)}
+              className="w-44 bg-gray-800 text-gray-200 text-sm py-1 px-2 rounded border border-gray-700 focus:border-sky-500 focus:outline-none"
+            />
+            <button onClick={onProcessAi} disabled={!aiFiles?.length || aiBusy}
+              className="bg-sky-600 hover:bg-sky-500 disabled:bg-gray-800 disabled:text-gray-600 text-white text-sm font-medium py-2 px-4 rounded">
+              {aiBusy ? 'Processing...' : 'Process AI Yarn'}
+            </button>
+          </div>
+          {aiStatus ? <p className="text-xs text-gray-400">{aiStatus}</p> : null}
+        </div>
       </div>
       <div className="bg-gray-900 border border-gray-800 rounded p-2 min-h-[300px] flex flex-col items-center justify-center gap-2">
         {uploadThumbUrl ? (

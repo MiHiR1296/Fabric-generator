@@ -2,7 +2,14 @@ import { useMemo } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import RenderPanel from './RenderPanel';
 import { deriveColorBindingSlots, missingColorBindings } from '../domain/project';
-import type { BlenderRenderJob, ColorBinding, DraftDocument, TileRenderOptions, YarnAsset } from '../domain/types';
+import type {
+  BlenderRenderJob,
+  ColorBinding,
+  DraftDocument,
+  FabricStructureType,
+  TileRenderOptions,
+  YarnAsset,
+} from '../domain/types';
 
 interface ColorMappingStepProps {
   draft: DraftDocument;
@@ -15,6 +22,7 @@ interface ColorMappingStepProps {
   tileJob?: BlenderRenderJob | null;
   tileBusy?: boolean;
   activePreviewMode?: 'render' | 'tile';
+  structureType?: FabricStructureType;
   renderMessage: string;
   tileMessage?: string;
   onRenderPreview: () => void;
@@ -32,6 +40,9 @@ interface ColorMappingStepProps {
   }) => void;
   showRender?: boolean;
   showBindings?: boolean;
+  renderDisabled?: boolean;
+  title?: string;
+  summaryText?: string;
 }
 
 export default function ColorMappingStep({
@@ -45,6 +56,7 @@ export default function ColorMappingStep({
   tileJob,
   tileBusy,
   activePreviewMode,
+  structureType = 'weave',
   renderMessage,
   tileMessage,
   onRenderPreview,
@@ -55,6 +67,9 @@ export default function ColorMappingStep({
   onApplyRenderSettings,
   showRender = true,
   showBindings = true,
+  renderDisabled,
+  title = 'Render Preview',
+  summaryText = 'Render the woven draft in Blender and compare against the drawdown.',
 }: ColorMappingStepProps) {
   const slots = useMemo(() => deriveColorBindingSlots(draft), [draft]);
   const readyAssets = useMemo(
@@ -162,6 +177,7 @@ export default function ColorMappingStep({
           tileJob={tileJob}
           tileBusy={tileBusy}
           activePreviewMode={activePreviewMode}
+          structureType={structureType}
           onRenderPreview={onRenderPreview}
           onSendToLiveBlender={onSendToLiveBlender}
           onRenderTiles={onRenderTiles}
@@ -169,11 +185,13 @@ export default function ColorMappingStep({
           onExportBlender={onExportBlender}
           onApplyRenderSettings={onApplyRenderSettings}
           stepLabel="Step 3"
-          title="Render Preview"
-          summaryText="Render the woven draft in Blender and compare against the drawdown."
+          title={title}
+          summaryText={summaryText}
           statusMessage={renderMessage}
           tileStatusMessage={tileMessage}
-          renderDisabled={!readyAssets.length || missingBindingsList.length > 0}
+          renderDisabled={
+            renderDisabled ?? (!readyAssets.length || missingBindingsList.length > 0)
+          }
         />
       ) : null}
     </section>

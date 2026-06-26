@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { WEAVE_ZOOM_THREAD_LEVELS } from '../domain/draft';
-import type { BlenderRenderJob, DraftDocument, DraftRenderSettings, TileRenderOptions } from '../domain/types';
+import type {
+  BlenderRenderJob,
+  DraftDocument,
+  DraftRenderSettings,
+  FabricStructureType,
+  TileRenderOptions,
+} from '../domain/types';
 
 // Exposed control surface mirrors v2 (Fabric-generator-codex-fabric-generator-v2/frontend/src/components/RenderPanel.tsx).
 // User-facing controls. Hidden calibration defaults live in buildDefaultRenderSettings.
@@ -54,6 +60,7 @@ interface RenderPanelProps {
   tileJob?: BlenderRenderJob | null;
   tileBusy?: boolean;
   activePreviewMode?: 'render' | 'tile';
+  structureType?: FabricStructureType;
   onRenderPreview: () => void;
   onSendToLiveBlender?: () => void;
   onRenderTiles?: (options: TileRenderOptions) => void;
@@ -77,6 +84,7 @@ export default function RenderPanel({
   tileJob = null,
   tileBusy = false,
   activePreviewMode = 'render',
+  structureType = 'weave',
   onRenderPreview,
   onRenderTiles,
   onExportCanonical,
@@ -135,6 +143,7 @@ export default function RenderPanel({
   const tileRunning =
     tileBusy || tileJob?.status === 'queued' || tileJob?.status === 'running';
   const renderActive = renderRunning || tileRunning || renderDisabled || liveBlenderBusy;
+  const isHookMode = structureType === 'hook';
 
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
@@ -189,7 +198,9 @@ export default function RenderPanel({
             disabled={renderActive}
             data-testid="render-preview-button"
           >
-            {renderRunning ? 'Rendering Preview…' : 'Render Preview'}
+            {renderRunning
+              ? isHookMode ? 'Rendering Hook…' : 'Rendering Preview…'
+              : isHookMode ? 'Render Hook Preview' : 'Render Preview'}
           </button>
           {onSendToLiveBlender ? (
             <button
@@ -198,7 +209,9 @@ export default function RenderPanel({
               disabled={renderActive || liveBlenderBusy}
               data-testid="send-live-blender-button"
             >
-              {liveBlenderBusy ? 'Sending to Blender…' : 'Send to Live Blender'}
+              {liveBlenderBusy
+                ? isHookMode ? 'Sending Hook…' : 'Sending to Blender…'
+                : isHookMode ? 'Send Hook to Live Blender' : 'Send to Live Blender'}
             </button>
           ) : null}
           {onRenderTiles ? (
