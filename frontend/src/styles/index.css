@@ -2294,6 +2294,239 @@ textarea {
     );
 }
 
+.fabric-shell .toolbar__row--mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fabric-shell .hook-pattern-workspace {
+  gap: 0.7rem;
+}
+
+.fabric-shell .hook-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(13rem, 0.8fr) minmax(15rem, 1fr) minmax(18rem, 1.15fr);
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.fabric-shell .hook-control-section {
+  display: grid;
+  align-content: start;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid rgba(232, 184, 74, 0.16);
+  border-radius: 0.5rem;
+  background: rgba(9, 10, 16, 0.38);
+}
+
+.fabric-shell .hook-section-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.fabric-shell .hook-section-heading .button {
+  border-radius: 0.45rem;
+  padding: 0.42rem 0.62rem;
+  white-space: nowrap;
+}
+
+.fabric-shell .hook-section-heading h3,
+.fabric-shell .hook-material-section h2 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
+.fabric-shell .hook-section-heading .eyebrow,
+.fabric-shell .hook-material-section .eyebrow {
+  margin-bottom: 0.1rem;
+  font-size: 0.62rem;
+}
+
+.fabric-shell .hook-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.fabric-shell .hook-control-section .field {
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.fabric-shell .hook-control-section .field span {
+  font-size: 0.72rem;
+}
+
+.fabric-shell .hook-control-section input,
+.fabric-shell .hook-control-section select {
+  min-height: 2.25rem;
+  border-radius: 0.45rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.82rem;
+}
+
+.fabric-shell .hook-book-list,
+.fabric-shell .hook-preset-list {
+  display: grid;
+  gap: 0.4rem;
+  max-height: 15.5rem;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.fabric-shell .hook-book-card {
+  display: flex;
+  min-height: 3.15rem;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.16rem;
+  padding: 0.48rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.45rem;
+  background: rgba(6, 8, 12, 0.6);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fabric-shell .hook-book-card--active,
+.fabric-shell .hook-book-card:hover {
+  border-color: rgba(107, 182, 217, 0.72);
+  background: rgba(107, 182, 217, 0.12);
+}
+
+.fabric-shell .hook-book-card span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.fabric-shell .hook-book-card small {
+  color: rgba(245, 238, 220, 0.68);
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
+.fabric-shell .hook-preset-card {
+  display: flex;
+  min-height: 4.2rem;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.25rem;
+  padding: 0.58rem 0.65rem;
+  border: 1px solid rgba(232, 184, 74, 0.18);
+  border-radius: 0.45rem;
+  background: rgba(10, 12, 18, 0.56);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fabric-shell .hook-preset-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.fabric-shell .hook-preset-card:hover,
+.fabric-shell .hook-preset-card--active {
+  border-color: rgba(232, 184, 74, 0.72);
+  background: rgba(232, 184, 74, 0.12);
+}
+
+.fabric-shell .hook-preset-card span {
+  font-weight: 700;
+  font-size: 0.84rem;
+  line-height: 1.25;
+}
+
+.fabric-shell .hook-preset-card small {
+  color: rgba(245, 238, 220, 0.72);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.fabric-shell .hook-pattern-preview {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  gap: 2px;
+  padding: 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.5rem;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.18)),
+    rgba(8, 9, 14, 0.8);
+}
+
+.fabric-shell .hook-pattern-preview__cell {
+  min-width: 0;
+  min-height: 0;
+  border-radius: 0.2rem;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.fabric-shell .hook-pattern-preview__cell--empty {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.09) 0,
+      rgba(255, 255, 255, 0.09) 1px,
+      transparent 1px,
+      transparent 5px
+    ) !important;
+  opacity: 0.5;
+}
+
+.fabric-shell .hook-import-state {
+  margin: 0;
+  font-size: 0.74rem;
+}
+
+.fabric-shell .hook-material-section {
+  padding: 0.75rem;
+}
+
+.fabric-shell .hook-material-section .board-section__heading {
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.fabric-shell .hook-material-section .color-binding-grid {
+  margin-top: 0;
+}
+
+.fabric-shell .hook-material-section > .muted {
+  margin: 0;
+  font-size: 0.76rem;
+}
+
+@media (max-width: 1180px) {
+  .fabric-shell .hook-workspace-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .fabric-shell .hook-control-section--preview {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .fabric-shell .hook-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fabric-shell .hook-control-section--preview {
+    grid-column: auto;
+  }
+}
+
 /* Step count is shown once in the hero — hide the per-card intro blocks
    (eyebrow + h2 + summary) inside YarnLibrary, PatternBuilder toolbar,
    ColorMapping, and RenderPanel. */

@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { DraftCounts, DraftDocument, ParserStatus, PresetDefinition } from '../domain/types';
+import type {
+  DraftCounts,
+  DraftDocument,
+  FabricStructureType,
+  ParserStatus,
+  PresetDefinition,
+} from '../domain/types';
 
 interface StudioToolbarProps {
   counts: DraftCounts;
@@ -14,6 +20,9 @@ interface StudioToolbarProps {
   onSavePattern?: () => void;
   onImportClick: () => void;
   onReset: () => void;
+  structureType?: FabricStructureType;
+  onStructureTypeChange?: (structureType: FabricStructureType) => void;
+  showDraftControls?: boolean;
   stepLabel?: string;
   title?: string;
   summaryText?: string;
@@ -97,6 +106,9 @@ export default function StudioToolbar({
   onSavePattern,
   onImportClick,
   onReset,
+  structureType = 'weave',
+  onStructureTypeChange,
+  showDraftControls = true,
   stepLabel = 'Step 1',
   title = 'Weaving Draft Studio',
   summaryText = 'Create or load the draft first. Once the structure feels right, move down to the render step.',
@@ -110,7 +122,32 @@ export default function StudioToolbar({
       </div>
 
       <div className="toolbar__controls">
-        <div className="toolbar__row">
+        {onStructureTypeChange ? (
+          <div className="toolbar__row toolbar__row--mode" role="group" aria-label="Pattern workflow">
+            <button
+              type="button"
+              className={`button${structureType === 'weave' ? ' button--accent' : ''}`}
+              aria-pressed={structureType === 'weave'}
+              onClick={() => onStructureTypeChange('weave')}
+              data-testid="workflow-weave-button"
+            >
+              Weave
+            </button>
+            <button
+              type="button"
+              className={`button${structureType === 'hook' ? ' button--accent' : ''}`}
+              aria-pressed={structureType === 'hook'}
+              onClick={() => onStructureTypeChange('hook')}
+              data-testid="workflow-hook-button"
+            >
+              Knit / Hook
+            </button>
+          </div>
+        ) : null}
+
+        {showDraftControls ? (
+        <>
+          <div className="toolbar__row">
           <label className="field">
             <span>Quick Load</span>
             <select
@@ -154,9 +191,9 @@ export default function StudioToolbar({
           <button className="button button--ghost" onClick={onReset} data-testid="reset-draft-button">
             Reset Draft
           </button>
-        </div>
+          </div>
 
-        <div className="toolbar__row toolbar__row--counts">
+          <div className="toolbar__row toolbar__row--counts">
           <CountField
             label="Shafts"
             value={counts.shaftCount}
@@ -200,7 +237,16 @@ export default function StudioToolbar({
           <div className="status-pill status-pill--source">
             Source: {draft.sourceType.toUpperCase()}
           </div>
-        </div>
+          </div>
+        </>
+        ) : (
+          <div className="toolbar__row">
+            <div className={`status-pill status-pill--${parserStatus}`}>
+              {parserLabel(parserStatus)}
+            </div>
+            <div className="status-pill status-pill--source">Source: HOOK PRESET</div>
+          </div>
+        )}
       </div>
     </header>
   );

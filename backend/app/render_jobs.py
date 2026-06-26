@@ -24,6 +24,7 @@ from .fabric_project import (
     save_project_snapshot,
     validate_project_bindings,
 )
+from .hook_sync import build_hook_sync_code, normalize_hook_pattern, used_material_slots
 from .runtime_paths import BLEND_FILE_PATH, PROJECTS_ROOT, RENDER_JOBS_ROOT, YARN_ASSETS_ROOT, ensure_runtime_dirs
 from .tile_inpaint_repair import repair_tile_with_two_pass_inpaint
 from .yarn_assets import (
@@ -1159,6 +1160,423 @@ print({{
 """
 
 
+def build_hook_headless_render_script(
+    pattern: dict[str, Any],
+    *,
+    render_path: str | Path,
+    target_object_name: str = "ProceduralHook",
+    draft_object_name: str = "HookDraft_Live",
+    material_assets: list[dict[str, Any]] | None = None,
+    hook_modifier_name: str = "Hook",
+    render_still: bool = True,
+    render_resolution: int | None = None,
+    render_samples: int | None = None,
+) -> str:
+    normalized_pattern = normalize_hook_pattern(pattern)
+    hook_settings_json = json.dumps(normalized_pattern.get("renderSettings") or {})
+    render_path_json = json.dumps(str(Path(render_path)))
+    target_name_json = json.dumps(target_object_name)
+    modifier_name_json = json.dumps(hook_modifier_name)
+    normalized_material_assets: list[dict[str, Any]] = []
+    for entry in material_assets or []:
+        normalized = dict(entry)
+        for path_key in (
+            "diffuse_path",
+            "alpha_path",
+            "rgba_path",
+            "diffuse_tile_pattern",
+            "alpha_tile_pattern",
+            "rgba_tile_pattern",
+            "pbr_manifest_path",
+            "pbr_normal_height_path",
+            "pbr_roughness_specular_path",
+            "pbr_normal_height_tile_pattern",
+            "pbr_roughness_specular_tile_pattern",
+        ):
+            if normalized.get(path_key) is not None:
+                normalized[path_key] = str(normalized[path_key])
+        for path_list_key in (
+            "diffuse_tile_paths",
+            "alpha_tile_paths",
+            "rgba_tile_paths",
+            "pbr_normal_height_tile_paths",
+            "pbr_roughness_specular_tile_paths",
+        ):
+            if normalized.get(path_list_key):
+                normalized[path_list_key] = [str(path) for path in normalized[path_list_key]]
+        normalized_material_assets.append(normalized)
+    material_assets_json = json.dumps(normalized_material_assets)
+    preview_render_resolution = (
+        min(8192, max(512, int(round(render_resolution))))
+        if render_resolution is not None
+        else _int_env("WEAVE_PREVIEW_RENDER_RESOLUTION", DEFAULT_PREVIEW_RENDER_RESOLUTION, minimum=512, maximum=8192)
+    )
+    preview_render_samples = (
+        min(4096, max(1, int(round(render_samples))))
+        if render_samples is not None
+        else _int_env("WEAVE_PREVIEW_RENDER_SAMPLES", DEFAULT_PREVIEW_RENDER_SAMPLES, minimum=1, maximum=4096)
+    )
+    sync_code = build_hook_sync_code(
+        normalized_pattern,
+        target_object_name=target_object_name,
+        draft_object_name=draft_object_name,
+    )
+    render_action = "bpy.ops.render.render(write_still=True)" if render_still else "print({'render_still': False})"
+    result_status = "rendered" if render_still else "configured"
+
+    return f"""{sync_code}
+
+import bpy
+import json
+import re
+
+{APPLY_METADATA_PY}
+
+_PW_MATERIAL_ASSETS = json.loads({repr(material_assets_json)})
+_PW_HOOK_RENDER_SETTINGS = json.loads({repr(hook_settings_json)})
+_PW_MODIFIER_NAME = {modifier_name_json}
+_PW_PREVIEW_RENDER_RESOLUTION = {repr(preview_render_resolution)}
+_PW_PREVIEW_RENDER_SAMPLES = {repr(preview_render_samples)}
+
+def safe_material_suffix(value, fallback):
+    raw = str(value or fallback or 'asset')
+    cleaned = re.sub(r'[^A-Za-z0-9_]+', '_', raw).strip('_')
+    return cleaned or str(fallback or 'asset')
+
+def ensure_image(name, image_path, colorspace):
+    if not image_path:
+        return None
+    image = bpy.data.images.get(name)
+    if image is None:
+        image = bpy.data.images.load(str(image_path), check_existing=True)
+        image.name = name
+    try:
+        image.colorspace_settings.name = colorspace
+    except Exception:
+        pass
+    return image
+
+def ensure_udim_image(name, image_pattern, tile_count, colorspace):
+    image = bpy.data.images.get(name)
+    if image is not None and getattr(image, 'source', None) != 'TILED':
+        bpy.data.images.remove(image)
+        image = None
+    if image is None:
+        image = bpy.data.images.new(name, width=1, height=1, tiled=True)
+    image.filepath = image_pattern
+    existing = {{tile.number for tile in image.tiles}}
+    for tile_number in range(1001, 1001 + int(tile_count)):
+        if tile_number not in existing:
+            image.tiles.new(tile_number)
+    try:
+        image.colorspace_settings.name = colorspace
+    except Exception:
+        pass
+    try:
+        image.reload()
+    except Exception:
+        pass
+    return image
+
+def configure_texture_node(texture_node, extension='REPEAT'):
+    try:
+        texture_node.extension = extension
+    except Exception:
+        pass
+    try:
+        texture_node.interpolation = {repr(DEFAULT_TEXTURE_INTERPOLATION)}
+    except Exception:
+        pass
+
+def configure_principled(shader):
+    for name, value in (
+        ('Roughness', {repr(DEFAULT_PREVIEW_MATERIAL_ROUGHNESS)}),
+        ('Sheen Weight', {repr(DEFAULT_PREVIEW_MATERIAL_SHEEN)}),
+    ):
+        if name in shader.inputs:
+            shader.inputs[name].default_value = value
+
+def ensure_hook_preview_material(entry, index):
+    suffix = safe_material_suffix(entry.get('id'), index)
+    material_name = 'FabricStudioHookMaterial_' + str(index).zfill(2) + '_' + suffix
+    material = bpy.data.materials.get(material_name)
+    if material is None:
+        material = bpy.data.materials.new(material_name)
+    material.use_nodes = True
+    try:
+        material.blend_method = 'BLEND'
+        material.use_screen_refraction = False
+    except Exception:
+        pass
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+    output = nodes.new('ShaderNodeOutputMaterial')
+    output.location = (500, 0)
+    shader = nodes.new('ShaderNodeBsdfPrincipled')
+    shader.location = (260, 0)
+    configure_principled(shader)
+    links.new(shader.outputs['BSDF'], output.inputs['Surface'])
+
+    use_rgba_tiled = (
+        entry.get('texture_mode') == 'udim_rgba_tiled'
+        and entry.get('rgba_tile_pattern')
+        and int(entry.get('texture_tile_count') or 0) > 1
+    )
+    use_rgba_single = (
+        entry.get('texture_mode') == 'rgba_single'
+        and entry.get('rgba_path')
+    )
+    use_tiled = (
+        entry.get('texture_mode') == 'udim_tiled'
+        and entry.get('diffuse_tile_pattern')
+        and entry.get('alpha_tile_pattern')
+        and int(entry.get('texture_tile_count') or 0) > 1
+    )
+
+    attr = nodes.new('ShaderNodeAttribute')
+    attr.location = (-520, 0)
+    attr.attribute_name = 'uv_scaled'
+    try:
+        attr.attribute_type = 'GEOMETRY'
+    except Exception:
+        pass
+
+    image_node = nodes.new('ShaderNodeTexImage')
+    image_node.name = 'FabricStudioHookDiffuseNode'
+    image_node.location = (-40, 80)
+    alpha_node = None
+
+    if use_rgba_tiled:
+        tile_count = int(entry.get('texture_tile_count') or 1)
+        image_node.image = ensure_udim_image(
+            material_name + '_RGBA_UDIM',
+            entry['rgba_tile_pattern'],
+            tile_count,
+            'sRGB',
+        )
+        configure_texture_node(image_node, 'CLIP')
+    elif use_rgba_single:
+        image_node.image = ensure_image(material_name + '_RGBA', entry['rgba_path'], 'sRGB')
+        configure_texture_node(image_node)
+    elif use_tiled:
+        tile_count = int(entry.get('texture_tile_count') or 1)
+        image_node.image = ensure_udim_image(
+            material_name + '_Diffuse_UDIM',
+            entry['diffuse_tile_pattern'],
+            tile_count,
+            'sRGB',
+        )
+        alpha_node = nodes.new('ShaderNodeTexImage')
+        alpha_node.name = 'FabricStudioHookAlphaNode'
+        alpha_node.location = (-40, -150)
+        alpha_node.image = ensure_udim_image(
+            material_name + '_Alpha_UDIM',
+            entry['alpha_tile_pattern'],
+            tile_count,
+            'Non-Color',
+        )
+        configure_texture_node(image_node, 'CLIP')
+        configure_texture_node(alpha_node, 'CLIP')
+    elif entry.get('diffuse_path') and entry.get('alpha_path'):
+        image_node.image = ensure_image(material_name + '_Diffuse', entry['diffuse_path'], 'sRGB')
+        alpha_node = nodes.new('ShaderNodeTexImage')
+        alpha_node.name = 'FabricStudioHookAlphaNode'
+        alpha_node.location = (-40, -150)
+        alpha_node.image = ensure_image(material_name + '_Alpha', entry['alpha_path'], 'Non-Color')
+        configure_texture_node(image_node)
+        configure_texture_node(alpha_node)
+    elif entry.get('rgba_path'):
+        image_node.image = ensure_image(material_name + '_RGBA', entry['rgba_path'], 'sRGB')
+        configure_texture_node(image_node)
+    else:
+        if 'Base Color' in shader.inputs:
+            shader.inputs['Base Color'].default_value = (0.72, 0.68, 0.54, 1.0)
+        return material
+
+    if use_rgba_tiled or use_tiled:
+        uv_sep = nodes.new('ShaderNodeSeparateXYZ')
+        uv_sep.location = (-320, 0)
+        u_fract = nodes.new('ShaderNodeMath')
+        u_fract.location = (-120, -80)
+        u_fract.operation = 'FRACT'
+        u_tile_scale = nodes.new('ShaderNodeMath')
+        u_tile_scale.location = (80, -80)
+        u_tile_scale.operation = 'MULTIPLY'
+        u_tile_scale.inputs[1].default_value = float(entry.get('texture_tile_count') or 1)
+        tiled_vector = nodes.new('ShaderNodeCombineXYZ')
+        tiled_vector.location = (280, -40)
+        image_node.location = (500, 80)
+        if alpha_node is not None:
+            alpha_node.location = (500, -150)
+        links.new(attr.outputs['Vector'], uv_sep.inputs['Vector'])
+        links.new(uv_sep.outputs['X'], u_fract.inputs[0])
+        links.new(u_fract.outputs[0], u_tile_scale.inputs[0])
+        links.new(u_tile_scale.outputs[0], tiled_vector.inputs['X'])
+        links.new(uv_sep.outputs['Y'], tiled_vector.inputs['Y'])
+        links.new(uv_sep.outputs['Z'], tiled_vector.inputs['Z'])
+        links.new(tiled_vector.outputs['Vector'], image_node.inputs['Vector'])
+        if alpha_node is not None:
+            links.new(tiled_vector.outputs['Vector'], alpha_node.inputs['Vector'])
+    else:
+        mapping = nodes.new('ShaderNodeMapping')
+        mapping.location = (-260, 0)
+        links.new(attr.outputs['Vector'], mapping.inputs['Vector'])
+        links.new(mapping.outputs['Vector'], image_node.inputs['Vector'])
+        if alpha_node is not None:
+            links.new(mapping.outputs['Vector'], alpha_node.inputs['Vector'])
+
+    links.new(image_node.outputs['Color'], shader.inputs['Base Color'])
+    if 'Alpha' in shader.inputs:
+        if use_rgba_tiled or use_rgba_single or alpha_node is None:
+            links.new(image_node.outputs['Alpha'], shader.inputs['Alpha'])
+        else:
+            links.new(alpha_node.outputs['Color'], shader.inputs['Alpha'])
+    return material
+
+def find_hook_material_adapter(target_obj):
+    for name in ('Hook Material UV', 'Hook Material UV Adapter'):
+        modifier = target_obj.modifiers.get(name)
+        if modifier is not None and modifier.type == 'NODES' and modifier.node_group is not None:
+            return modifier
+    return None
+
+def clear_unused_material_metadata(modifier, start_index):
+    node_group = getattr(modifier, 'node_group', None)
+    if modifier is None or node_group is None:
+        return 0
+    cleared = 0
+    for index in range(max(1, int(start_index)), _MAX_MATERIAL_SLOTS + 1):
+        if _pw_set_socket(modifier, node_group, 'Material ' + str(index), None):
+            cleared += 1
+        for suffix, _key, default in _PER_MATERIAL_SOCKETS:
+            if _pw_set_socket(modifier, node_group, 'Material ' + str(index) + ' ' + suffix, float(default)):
+                cleared += 1
+    return cleared
+
+def configure_hook_material_modifier(modifier, preview_materials, material_assets, hook_draft, columns):
+    node_group = getattr(modifier, 'node_group', None)
+    if modifier is None or node_group is None:
+        return None
+    for socket_name, value in (
+        ('Draft Object', hook_draft),
+        ('Draft Columns', int(columns)),
+        ('Columns', int(columns)),
+    ):
+        _pw_set_socket(modifier, node_group, socket_name, value)
+    metadata = _pw_apply_modifier_material_metadata(modifier, material_assets)
+    metadata['cleared_unused'] = clear_unused_material_metadata(modifier, len(preview_materials) + 1)
+    try:
+        node_group.interface_update(bpy.context)
+    except Exception:
+        pass
+    try:
+        node_group.update_tag()
+        modifier.id_data.update_tag()
+    except Exception:
+        pass
+    return metadata
+
+scene = bpy.context.scene
+try:
+    scene.render.engine = 'CYCLES'
+except Exception:
+    pass
+scene.render.use_file_extension = True
+scene.render.image_settings.file_format = 'PNG'
+scene.render.filepath = {render_path_json}
+scene.render.resolution_x = int(_PW_PREVIEW_RENDER_RESOLUTION)
+scene.render.resolution_y = int(_PW_PREVIEW_RENDER_RESOLUTION)
+scene.render.resolution_percentage = 100
+if getattr(scene, 'cycles', None) is not None:
+    try:
+        scene.cycles.samples = int(_PW_PREVIEW_RENDER_SAMPLES)
+    except Exception:
+        pass
+    try:
+        scene.cycles.use_denoising = True
+    except Exception:
+        pass
+
+target_obj = bpy.data.objects.get({target_name_json})
+if target_obj is None:
+    raise RuntimeError('Hook target object not found')
+target_obj.hide_render = False
+target_obj.hide_viewport = False
+preview_materials = [
+    ensure_hook_preview_material(entry, index)
+    for index, entry in enumerate(_PW_MATERIAL_ASSETS, start=1)
+]
+if not preview_materials:
+    preview_materials = [ensure_hook_preview_material({{}}, 1)]
+if target_obj.data is not None and hasattr(target_obj.data, 'materials'):
+    target_obj.data.materials.clear()
+    for preview_material in preview_materials:
+        target_obj.data.materials.append(preview_material)
+
+hook_mod = target_obj.modifiers.get(_PW_MODIFIER_NAME)
+hook_group = hook_mod.node_group if hook_mod is not None and getattr(hook_mod, 'node_group', None) else None
+hook_draft_obj = bpy.data.objects.get({json.dumps(draft_object_name)})
+material_adapter_mod = find_hook_material_adapter(target_obj)
+material_adapter_summary = configure_hook_material_modifier(
+    material_adapter_mod,
+    preview_materials,
+    _PW_MATERIAL_ASSETS,
+    hook_draft_obj,
+    int(pattern.get('columns') or 1),
+)
+metadata_summary = {{
+    'materialAdapter': material_adapter_summary,
+    'shapeModifier': None,
+    'materialAdapterName': material_adapter_mod.name if material_adapter_mod is not None else None,
+}}
+if hook_mod is not None and hook_group is not None:
+    for index, material in enumerate(preview_materials, start=1):
+        _pw_set_socket(hook_mod, hook_group, 'Material ' + str(index), material)
+    for index in range(len(preview_materials) + 1, 17):
+        _pw_set_socket(hook_mod, hook_group, 'Material ' + str(index), None)
+    if material_adapter_mod is None:
+        metadata_summary['shapeModifier'] = _pw_apply_modifier_material_metadata(hook_mod, _PW_MATERIAL_ASSETS)
+        metadata_summary['shapeModifier']['cleared_unused'] = clear_unused_material_metadata(
+            hook_mod,
+            len(preview_materials) + 1,
+        )
+    for socket_name, key in (
+        ('Pattern Scale', 'hookScale'),
+        ('Leg Width', 'legWidth'),
+        ('Loop Height', 'loopHeight'),
+        ('Handle Scale', 'handleScale'),
+        ('Leg Z Offset', 'legZOffset'),
+        ('Half Tube Radius', 'tubeRadius'),
+        ('Curve Resolution', 'curveResolution'),
+        ('Tube Resolution', 'tubeResolution'),
+        ('Texture Scale U', 'textureScaleU'),
+        ('Texture Scale V', 'textureScaleV'),
+        ('Texture Offset V', 'textureOffsetV'),
+        ('Texture Side Flatten', 'textureSideFlatten'),
+        ('Arc 1 V Padding', 'arc1VPadding'),
+        ('Seed', 'seed'),
+    ):
+        if key in _PW_HOOK_RENDER_SETTINGS:
+            _pw_set_socket(hook_mod, hook_group, socket_name, _PW_HOOK_RENDER_SETTINGS[key])
+
+bpy.context.view_layer.update()
+print({{
+    'hook_preview_setup': {{
+        'target': target_obj.name,
+        'materials': len(preview_materials),
+        'metadata': metadata_summary,
+        'resolution': scene.render.resolution_x,
+    }}
+}})
+{render_action}
+print({{
+    'status': {json.dumps(result_status)},
+    'render_path': scene.render.filepath,
+}})
+"""
+
+
 def build_project_material_payloads(ordered_assets: list[Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     atlas_entries: list[dict[str, Any]] = []
     material_assets: list[dict[str, Any]] = []
@@ -2084,6 +2502,116 @@ def submit_project_render_job(
         script_text,
         payload,
     )
+
+
+def _normalize_hook_material_bindings(value: Any) -> dict[int, str]:
+    bindings: dict[int, str] = {}
+    for entry in value or []:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            slot = int(round(float(entry.get("materialSlot"))))
+        except (TypeError, ValueError):
+            continue
+        if slot < 0 or slot >= MAX_DIRECT_PREVIEW_MATERIALS:
+            continue
+        yarn_asset_id = entry.get("yarnAssetId")
+        if yarn_asset_id:
+            bindings[slot] = str(yarn_asset_id)
+    return bindings
+
+
+def _ordered_hook_assets(pattern: dict[str, Any], material_bindings: Any) -> list[Any]:
+    used_slots = used_material_slots(pattern)
+    if not used_slots:
+        raise ValueError("Hook pattern has no active material slots.")
+    bindings = _normalize_hook_material_bindings(material_bindings)
+    lookup = get_ready_yarn_assets_lookup()
+    slot_assets: dict[int, Any] = {}
+    for slot in used_slots:
+        asset_id = bindings.get(slot)
+        if not asset_id:
+            raise ValueError(f"Hook material slot {slot + 1} is not assigned to a ready yarn asset.")
+        asset = lookup.get(asset_id)
+        if asset is None:
+            raise ValueError(f"Hook material slot {slot + 1} references a yarn asset that is not ready: {asset_id}")
+        slot_assets[slot] = asset
+
+    first_asset = slot_assets[used_slots[0]]
+    max_slot = max(used_slots)
+    return [slot_assets.get(slot, first_asset) for slot in range(max_slot + 1)]
+
+
+def submit_hook_project_render_job(
+    project_payload: dict[str, Any],
+    *,
+    target_object_name: str = "ProceduralHook",
+    draft_object_name: str = "HookDraft_Live",
+) -> dict[str, Any]:
+    ensure_runtime_dirs()
+    pattern = project_payload.get("pattern")
+    if not isinstance(pattern, dict):
+        raise ValueError("render-hook-project requires a hook pattern object.")
+
+    normalized_pattern = normalize_hook_pattern(pattern)
+    ordered_assets = _ordered_hook_assets(normalized_pattern, project_payload.get("materialBindings"))
+    if not ordered_assets:
+        raise ValueError("At least one ready yarn asset must be assigned before rendering.")
+
+    job_id = uuid.uuid4().hex[:12]
+    job_dir = DEFAULT_RUNTIME_ROOT / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    _atlas_entries, material_assets = build_project_material_payloads(ordered_assets)
+
+    script_text = build_hook_headless_render_script(
+        normalized_pattern,
+        render_path=job_dir / "preview.png",
+        target_object_name=target_object_name,
+        draft_object_name=draft_object_name,
+        material_assets=material_assets,
+    )
+    payload = {
+        "version": 1,
+        "pattern": normalized_pattern,
+        "materialBindings": project_payload.get("materialBindings") or [],
+        "materialAssets": material_assets,
+    }
+    draft_title = str(normalized_pattern.get("title") or "Hook Pattern")
+
+    return _create_render_job(
+        draft_title,
+        target_object_name,
+        draft_object_name,
+        job_dir,
+        script_text,
+        payload,
+    )
+
+
+def sync_hook_project_to_live_blender(
+    project_payload: dict[str, Any],
+    *,
+    target_object_name: str = "ProceduralHook",
+    draft_object_name: str = "HookDraft_Live",
+) -> dict[str, Any]:
+    pattern = project_payload.get("pattern")
+    if not isinstance(pattern, dict):
+        raise ValueError("sync-hook-project requires a hook pattern object.")
+
+    normalized_pattern = normalize_hook_pattern(pattern)
+    ordered_assets = _ordered_hook_assets(normalized_pattern, project_payload.get("materialBindings"))
+    if not ordered_assets:
+        raise ValueError("At least one ready yarn asset must be assigned before live sync.")
+    _atlas_entries, material_assets = build_project_material_payloads(ordered_assets)
+    script_text = build_hook_headless_render_script(
+        normalized_pattern,
+        render_path=DEFAULT_RUNTIME_ROOT / "hook_live_sync_preview.png",
+        target_object_name=target_object_name,
+        draft_object_name=draft_object_name,
+        material_assets=material_assets,
+        render_still=False,
+    )
+    return send_blender_command("execute_code", {"code": script_text})
 
 
 def submit_project_tile_render_job(

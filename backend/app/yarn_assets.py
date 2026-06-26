@@ -479,9 +479,9 @@ def ensure_cycles_tiled_texture_set(
             return None
 
         tile_count = (width + max_dimension - 1) // max_dimension
-        # UDIMs run 1001..1010 across U before advancing to the next V row. Keep
-        # this yarn-strip path horizontal so the shader can stay simple.
-        if tile_count < 2 or tile_count > 10:
+        # Render material generation loads UDIMs sequentially and can drive
+        # up to 12 strip tiles through the same tiled-vector path.
+        if tile_count < 2 or tile_count > 12:
             return None
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -535,7 +535,7 @@ def ensure_cycles_tiled_rgba_texture_set(
             return None
 
         tile_count = (width + max_dimension - 1) // max_dimension
-        if tile_count < 2 or tile_count > 10:
+        if tile_count < 2 or tile_count > 12:
             return None
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -760,6 +760,33 @@ def import_yarn_from_library(yarn_id: str) -> dict:
         raise
 
     raise FileNotFoundError(f"rgb.png/alpha.png or rgba.png missing for {yarn_id}")
+
+
+def sync_imported_yarn_band_meta(library_yarn_id: str, metadata: dict) -> list[str]:
+    """Refresh bandMeta on already-imported runtime assets.
+
+    Library metadata can be regenerated without changing the source RGBA or PBR
+    maps. This keeps runtime asset IDs stable while updating the values that
+    the UI and Blender live-push consume.
+    """
+    if not library_yarn_id:
+        return []
+    load_yarn_assets()
+    band_meta = _build_band_meta_from_library(metadata)
+    updated: list[str] = []
+    with _LOCK:
+        matches = [
+            asset
+            for asset in _ASSETS.values()
+            if (asset.bandMeta or {}).get("library_yarn_id") == library_yarn_id
+        ]
+        for asset in matches:
+            asset.bandMeta = band_meta
+            asset.updatedAt = _utc_now()
+            _refresh_asset_urls(asset)
+            _persist_asset(asset)
+            updated.append(asset.id)
+    return updated
 
 
 def _asset_rgba_path_for_pbr(asset: YarnAsset) -> Path:

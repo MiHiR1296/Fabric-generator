@@ -235,7 +235,7 @@ def _tile_image_set(
             raise ValueError(f"PBR map height exceeds Cycles tile cap: {source_path.name}")
 
         tile_count = math.ceil(width / max_dimension)
-        if tile_count < 2 or tile_count > 10:
+        if tile_count < 2 or tile_count > 12:
             raise ValueError(f"PBR map needs unsupported UDIM tile count {tile_count}: {source_path.name}")
 
         output_dir.mkdir(parents=True, exist_ok=True)

@@ -40,6 +40,7 @@ from app.render_jobs import (  # noqa: E402
     build_headless_render_script,
     get_tile_source_image_path,
     load_headless_blender_config,
+    submit_hook_project_render_job,
     submit_project_render_job,
     _job_snapshot,
     _next_multiple,
@@ -910,6 +911,131 @@ class RenderJobTests(unittest.TestCase):
                         },
                     ],
                 )
+
+    def test_submit_hook_project_render_job_preserves_material_slot_alignment(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            runtime_root = root / "render_jobs"
+            yarn_root = root / "yarn_assets"
+            captured: dict[str, object] = {}
+
+            def fake_create_render_job(
+                draft_title,
+                target_object_name,
+                draft_object_name,
+                job_dir,
+                script_text,
+                payload,
+            ):
+                captured["draft_title"] = draft_title
+                captured["target_object_name"] = target_object_name
+                captured["draft_object_name"] = draft_object_name
+                captured["job_dir"] = job_dir
+                captured["script_text"] = script_text
+                captured["payload"] = payload
+                return {
+                    "id": job_dir.name,
+                    "status": "queued",
+                    "message": "queued",
+                    "draftTitle": draft_title,
+                    "targetObjectName": target_object_name,
+                    "draftObjectName": draft_object_name,
+                    "createdAt": "2026-06-18T00:00:00Z",
+                    "imageUrl": None,
+                    "logTail": [],
+                }
+
+            class FakeUuid:
+                hex = "hookjob123456789"
+
+            assets_lookup = {
+                "asset-a": YarnAsset(
+                    id="asset-a",
+                    label="Hook A",
+                    status="ready",
+                    sourceFilename="source.png",
+                    sourceUrl="/api/yarn/assets/asset-a/files/source.png",
+                    diffuseFilename="processed/a.png",
+                    diffuseUrl="/api/yarn/assets/asset-a/files/processed/a.png",
+                    alphaFilename="processed/a-alpha.png",
+                    alphaUrl="/api/yarn/assets/asset-a/files/processed/a-alpha.png",
+                ),
+                "asset-b": YarnAsset(
+                    id="asset-b",
+                    label="Hook B",
+                    status="ready",
+                    sourceFilename="source.png",
+                    sourceUrl="/api/yarn/assets/asset-b/files/source.png",
+                    diffuseFilename="processed/b.png",
+                    diffuseUrl="/api/yarn/assets/asset-b/files/processed/b.png",
+                    alphaFilename="processed/b-alpha.png",
+                    alphaUrl="/api/yarn/assets/asset-b/files/processed/b-alpha.png",
+                ),
+            }
+            for asset, color in (
+                (assets_lookup["asset-a"], (160, 130, 80)),
+                (assets_lookup["asset-b"], (60, 90, 140)),
+            ):
+                asset_dir = yarn_root / asset.id
+                processed_dir = asset_dir / "processed"
+                processed_dir.mkdir(parents=True, exist_ok=True)
+                source_path = asset_dir / asset.sourceFilename
+                Image.new("RGBA", (16, 8), (*color, 255)).save(source_path)
+                Image.new("RGB", (16, 8), color).save(asset_dir / asset.diffuseFilename)
+                Image.new("L", (16, 8), 255).save(asset_dir / asset.alphaFilename)
+                _attach_pbr(asset, asset_dir, source_path)
+
+            hook_payload = {
+                "pattern": {
+                    "title": "Sparse Hook",
+                    "rows": 1,
+                    "columns": 3,
+                    "stitchCodes": [[1, 0, 1]],
+                    "chainIds": [[0, 1, 2]],
+                    "chains": [
+                        {"id": 0, "materialSlot": 0},
+                        {"id": 2, "materialSlot": 2},
+                    ],
+                },
+                "materialBindings": [
+                    {"materialSlot": 0, "yarnAssetId": "asset-a"},
+                    {"materialSlot": 2, "yarnAssetId": "asset-b"},
+                ],
+            }
+
+            with patch("app.render_jobs.DEFAULT_RUNTIME_ROOT", runtime_root), patch(
+                "app.render_jobs.YARN_ASSETS_ROOT",
+                yarn_root,
+            ), patch(
+                "app.render_jobs.ensure_runtime_dirs",
+                lambda: None,
+            ), patch(
+                "app.render_jobs.get_ready_yarn_assets_lookup",
+                return_value=assets_lookup,
+            ), patch(
+                "app.render_jobs._create_render_job",
+                side_effect=fake_create_render_job,
+            ), patch("app.render_jobs.uuid.uuid4", return_value=FakeUuid()):
+                snapshot = submit_hook_project_render_job(hook_payload)
+
+            self.assertEqual(snapshot["id"], "hookjob12345")
+            self.assertEqual(captured["draft_title"], "Sparse Hook")
+            self.assertEqual(captured["target_object_name"], "ProceduralHook")
+            self.assertEqual(captured["draft_object_name"], "HookDraft_Live")
+            self.assertEqual(len(captured["payload"]["materialAssets"]), 3)
+            self.assertEqual(captured["payload"]["materialAssets"][0]["id"], "asset-a")
+            self.assertEqual(captured["payload"]["materialAssets"][2]["id"], "asset-b")
+            self.assertIn("HookDraft_Live", captured["script_text"])
+            self.assertIn("FabricStudioHookMaterial", captured["script_text"])
+            self.assertIn("_pw_apply_modifier_material_metadata", captured["script_text"])
+            self.assertIn("find_hook_material_adapter", captured["script_text"])
+            self.assertIn("configure_hook_material_modifier", captured["script_text"])
+            self.assertIn("ensure_udim_image", captured["script_text"])
+            self.assertIn("texture_tile_count", captured["script_text"])
+            self.assertIn("Image Width Px", captured["script_text"])
+            self.assertIn("Arc 2 V Min", captured["script_text"])
+            self.assertIn("cleared_unused", captured["script_text"])
+            compile(captured["script_text"], "<hook-render-job>", "exec")
 
 
 if __name__ == "__main__":

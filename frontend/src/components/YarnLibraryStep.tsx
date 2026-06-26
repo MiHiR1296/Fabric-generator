@@ -168,6 +168,10 @@ export default function YarnLibraryStep({
           <MultiThreadImageEditor
             onAssembleDone={(frags: any[]) => setFragments(frags)}
             onCancel={() => { /* no parent-level cancel in wizard mode */ }}
+            onAiYarnImported={() => {
+              onRefreshLibrary?.();
+              onRefresh();
+            }}
           />
         ) : (
           <MultiFragmentEditor

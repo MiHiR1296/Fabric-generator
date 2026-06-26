@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
+import uuid
 
 try:
     from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -25,6 +27,12 @@ from .text_parser import parse_text_payload
 from .blender_live import build_material_asset_entry, push_bandmeta_to_live_blender
 from .blender_sync import load_blender_socket_config, send_blender_command, sync_draft_to_blender
 from .fabric_project import normalize_color_bindings, validate_project_bindings
+from .hook_sync import sync_hook_to_blender
+from .ai_yarn_metadata import (
+    refresh_all_existing_ai_yarns,
+    refresh_existing_ai_yarn_metadata,
+    save_ai_yarn_to_library,
+)
 from .render_jobs import (
     build_headless_render_script,
     build_project_material_payloads,
@@ -34,7 +42,9 @@ from .render_jobs import (
     load_headless_blender_config,
     submit_project_render_job,
     submit_project_tile_render_job,
+    submit_hook_project_render_job,
     submit_render_job,
+    sync_hook_project_to_live_blender,
 )
 from .yarn_assets import (
     create_yarn_assets,
@@ -51,6 +61,15 @@ from .yarn_assets import (
     migrate_pbr_assets,
     regenerate_asset_pbr,
     retry_yarn_asset,
+    sync_imported_yarn_band_meta,
+)
+from .runtime_paths import RUNTIME_ROOT, YARN_LIBRARY_ROOT
+from .tryon_render import (
+    get_tryon_batch,
+    public_targets as list_tryon_targets,
+    resolve_source_image,
+    submit_tryon_render_batch,
+    tryon_blend_file,
 )
 from .yarn_pbr import PbrPreflightError
 
@@ -77,6 +96,12 @@ if FastAPI is not None:
         draft_object_name: str = "WebDraft_Live"
 
 
+    class HookSyncRequest(BaseModel):
+        pattern: dict
+        target_object_name: str = "ProceduralHook"
+        draft_object_name: str = "HookDraft_Live"
+
+
     class BlenderRenderRequest(BaseModel):
         draft: dict
         target_object_name: str = "ParametricWeave"
@@ -89,6 +114,14 @@ if FastAPI is not None:
         colorBindings: list[dict] = []
         target_object_name: str = "ParametricWeave"
         draft_object_name: str = "WebDraft_Live"
+
+
+    class HookProjectRenderRequest(BaseModel):
+        pattern: dict
+        yarnAssets: list[dict] = []
+        materialBindings: list[dict] = []
+        target_object_name: str = "ProceduralHook"
+        draft_object_name: str = "HookDraft_Live"
 
 
     class ProjectTileRenderRequest(ProjectRenderRequest):
@@ -111,12 +144,48 @@ if FastAPI is not None:
         modifier_name: str = "Weave"
 
 
+    class TryonRenderRequest(BaseModel):
+        targetIds: list[str] = []
+        sourceJobId: str
+        resolution: Optional[int] = None
+        samples: Optional[int] = None
+
+
     class PbrMigrationRequest(BaseModel):
         assetIds: Optional[list[str]] = None
 
 
+    class AiYarnRefreshRequest(BaseModel):
+        yarnIds: list[str] = []
+
+
     def _pbr_preflight_response(exc: PbrPreflightError):
         return JSONResponse(status_code=409, content=exc.to_response())
+
+
+    def _is_image_upload(filename: str) -> bool:
+        return Path(filename).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
+
+
+    def _is_json_upload(filename: str) -> bool:
+        return Path(filename).suffix.lower() == ".json"
+
+
+    def _minimal_ai_measurements(image_path: Path, dpi: float) -> dict:
+        from PIL import Image
+
+        with Image.open(image_path) as image:
+            width, height = image.size
+        return {
+            "dpi": dpi,
+            "image_size_px": [width, height],
+            "orientation": "horizontal",
+            "length": {
+                "px": width,
+                "mm": round(width / dpi * 25.4, 4) if dpi > 0 else None,
+                "description": "Left-to-right of the AI source image.",
+            },
+        }
 
 
     @app.get("/api/parser/health")
@@ -172,6 +241,19 @@ if FastAPI is not None:
         return response
 
 
+    @app.post("/api/blender/sync-hook")
+    async def sync_hook(request: HookSyncRequest):
+        try:
+            response = sync_hook_to_blender(
+                request.pattern,
+                target_object_name=request.target_object_name,
+                draft_object_name=request.draft_object_name,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return response
+
+
     @app.post("/api/blender/render-draft")
     async def render_draft(request: BlenderRenderRequest):
         try:
@@ -192,6 +274,42 @@ if FastAPI is not None:
                     "draft": request.draft,
                     "yarnAssets": request.yarnAssets,
                     "colorBindings": request.colorBindings,
+                },
+                target_object_name=request.target_object_name,
+                draft_object_name=request.draft_object_name,
+            )
+        except PbrPreflightError as exc:
+            return _pbr_preflight_response(exc)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+    @app.post("/api/blender/render-hook-project")
+    async def render_hook_project(request: HookProjectRenderRequest):
+        try:
+            return submit_hook_project_render_job(
+                {
+                    "pattern": request.pattern,
+                    "yarnAssets": request.yarnAssets,
+                    "materialBindings": request.materialBindings,
+                },
+                target_object_name=request.target_object_name,
+                draft_object_name=request.draft_object_name,
+            )
+        except PbrPreflightError as exc:
+            return _pbr_preflight_response(exc)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+    @app.post("/api/blender/sync-hook-project")
+    async def sync_hook_project(request: HookProjectRenderRequest):
+        try:
+            return sync_hook_project_to_live_blender(
+                {
+                    "pattern": request.pattern,
+                    "yarnAssets": request.yarnAssets,
+                    "materialBindings": request.materialBindings,
                 },
                 target_object_name=request.target_object_name,
                 draft_object_name=request.draft_object_name,
@@ -323,6 +441,44 @@ if FastAPI is not None:
         return FileResponse(image_path, media_type="image/png", filename=f"{job_id}.png")
 
 
+    @app.get("/api/blender/tryon/targets")
+    async def tryon_targets():
+        return {
+            "targets": list_tryon_targets(),
+            "blendFileExists": tryon_blend_file().exists(),
+        }
+
+
+    @app.post("/api/blender/tryon/render")
+    async def tryon_render(request: TryonRenderRequest):
+        if not request.targetIds:
+            raise HTTPException(status_code=400, detail="Select at least one object to render.")
+        try:
+            source_image = resolve_source_image(request.sourceJobId)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            return submit_tryon_render_batch(
+                request.targetIds,
+                source_image_path=source_image,
+                resolution=request.resolution,
+                samples=request.samples,
+            )
+        except FileNotFoundError as exc:
+            # Blender binary or Objects.blend missing.
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+    @app.get("/api/blender/tryon/batches/{batch_id}")
+    async def tryon_batch(batch_id: str):
+        snapshot = get_tryon_batch(batch_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="Try-On batch not found.")
+        return snapshot
+
+
     @app.get("/api/blender/render-jobs/{job_id}/tile-sources/{source_index}")
     async def render_job_tile_source(job_id: str, source_index: int):
         image_path = get_tile_source_image_path(job_id, source_index)
@@ -348,6 +504,136 @@ if FastAPI is not None:
     @app.get("/api/yarn/library")
     async def yarn_library_list():
         return {"yarns": list_library_yarns()}
+
+
+    @app.post("/api/yarn/ai/import")
+    async def yarn_ai_import(
+        files: list[UploadFile] = File(...),
+        dpi: float = Form(1600.0),
+        labelPrefix: str = Form("AI Yarn"),
+        importRuntime: bool = Form(True),
+    ):
+        if not files:
+            raise HTTPException(status_code=400, detail="Upload at least one AI yarn image.")
+        session_dir = RUNTIME_ROOT / "ai_yarn_uploads" / uuid.uuid4().hex[:12]
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        saved_paths: list[Path] = []
+        for index, upload in enumerate(files):
+            source_name = Path(upload.filename or f"upload-{index}").name
+            if not source_name:
+                source_name = f"upload-{index}"
+            destination = session_dir / f"{index:02d}_{source_name}"
+            payload = await upload.read()
+            destination.write_bytes(payload)
+            saved_paths.append(destination)
+
+        image_paths = [path for path in saved_paths if _is_image_upload(path.name)]
+        json_paths = [path for path in saved_paths if _is_json_upload(path.name)]
+        if not image_paths:
+            raise HTTPException(status_code=400, detail="Upload at least one image file.")
+
+        json_by_stem = {path.stem: path for path in json_paths}
+        single_json = json_paths[0] if len(json_paths) == 1 else None
+        imported_assets = []
+        entries = []
+
+        for index, image_path in enumerate(image_paths, start=1):
+            measurement_path = json_by_stem.get(image_path.stem)
+            if measurement_path is None and single_json is not None and len(image_paths) == 1:
+                measurement_path = single_json
+            measurements = None
+            if measurement_path is None:
+                measurements = _minimal_ai_measurements(image_path, dpi)
+
+            label = labelPrefix.strip() or "AI Yarn"
+            if len(image_paths) > 1:
+                label = f"{label} {index:02d}"
+
+            try:
+                saved = save_ai_yarn_to_library(
+                    image_path,
+                    measurements_path=measurement_path,
+                    measurements=measurements,
+                    label=label,
+                    library_root=YARN_LIBRARY_ROOT,
+                    sync_runtime=False,
+                    external_corrected_dir=session_dir / "corrected_metadata",
+                )
+                asset = import_yarn_from_library(saved["id"]) if importRuntime else None
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            metadata = saved.get("metadata") or {}
+            blender = metadata.get("blender") or {}
+            entry = {
+                "id": saved.get("id"),
+                "label": saved.get("label"),
+                "libraryPath": saved.get("libraryPath"),
+                "metadataPath": saved.get("metadataPath"),
+                "externalCorrectedMetadataPath": saved.get("externalCorrectedMetadataPath"),
+                "runtimeAssetId": asset.get("id") if asset else None,
+                "width": metadata.get("width"),
+                "bands_px": metadata.get("bands_px"),
+                "textureScaleU": blender.get("texture_scale_u"),
+                "textureScaleUStrategy": blender.get("texture_scale_u_strategy"),
+            }
+            entries.append(entry)
+            if asset:
+                imported_assets.append(asset)
+
+        return {
+            "ok": True,
+            "sessionDir": str(session_dir),
+            "entries": entries,
+            "assets": imported_assets,
+        }
+
+
+    @app.post("/api/yarn/ai/refresh-u-scale")
+    async def yarn_ai_refresh_u_scale(request: AiYarnRefreshRequest):
+        try:
+            if request.yarnIds:
+                results = [
+                    refresh_existing_ai_yarn_metadata(
+                        yarn_id,
+                        library_root=YARN_LIBRARY_ROOT,
+                        sync_runtime=False,
+                    )
+                    for yarn_id in request.yarnIds
+                ]
+            else:
+                payload = refresh_all_existing_ai_yarns(
+                    library_root=YARN_LIBRARY_ROOT,
+                    sync_runtime=False,
+                )
+                results = list(payload.get("results") or [])
+        except (FileNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        summaries = []
+        for result in results:
+            metadata = result.get("metadata") or {}
+            updated_runtime_ids = sync_imported_yarn_band_meta(result.get("id"), metadata)
+            summaries.append({
+                "id": result.get("id"),
+                "label": result.get("label"),
+                "metadataPath": result.get("metadataPath"),
+                "externalCorrectedMetadataPath": result.get("externalCorrectedMetadataPath"),
+                "updatedRuntimeAssetIds": updated_runtime_ids,
+                "previousTextureScaleU": result.get("previousTextureScaleU"),
+                "textureScaleU": result.get("textureScaleU"),
+                "textureScaleUStrategy": result.get("textureScaleUStrategy"),
+                "width": metadata.get("width"),
+                "bands_px": metadata.get("bands_px"),
+            })
+        return {
+            "ok": True,
+            "count": len(summaries),
+            "results": summaries,
+        }
 
 
     @app.get("/api/yarn/library/{yarn_id}/files/{filename:path}")
