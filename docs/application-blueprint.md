@@ -43,7 +43,7 @@ Current deliverables:
 - Headless Blender preview flow:
   - draft sent to service
   - service creates render job
-  - Blender runs headlessly against `Weave_GUIConnection.blend`
+  - Blender runs headlessly against `Codex_ParametricWeave.blend`
   - preview PNG is returned to the browser
 - Test coverage for domain logic and parser / render bridge
 
@@ -508,7 +508,7 @@ Flow:
 1. frontend posts the draft to `/api/blender/render-draft`
 2. service writes job files under `services/draft-parser/runtime/render-jobs/<job_id>/`
 3. service writes a Blender Python script for that draft
-4. Blender runs headlessly against `Weave_GUIConnection.blend`
+4. Blender runs headlessly against `Codex_ParametricWeave.blend`
 5. service exposes job state and preview image URL
 6. frontend polls until the render succeeds or fails
 

@@ -136,7 +136,6 @@ The loader checks:
 3. `<yarnseamless UI>/big-lama.pt`
 4. `backend/vendor/yarn_pipeline/big-lama.pt`
 5. `~/.cache/torch/hub/checkpoints/big-lama.pt`
-6. vendored chunk reconstruction when chunk files are present
 
 Git LFS is currently disabled for the GitHub repository, so this branch does not depend on LFS. The current Blender scene is small enough for normal Git. Future heavyweight `.blend` or model artifacts should move to Git LFS only after the repository enables it, or to release/external storage.
 

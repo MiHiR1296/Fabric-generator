@@ -80,8 +80,9 @@ Failure modes the caller should handle:
     Any Exception from inpaint  — LaMa/seamless stage failure
 
 Required local assets:
-    The bundled big-lama weights are stored in repo-safe chunks and are
-    reconstructed to big-lama.pt automatically when seamless_converter loads.
+    Provide big-lama.pt through BIG_LAMA_MODEL_PATH / LAMA_MODEL, or place it
+    in one of the documented local model locations. Model weights are not
+    tracked in Git.
 """
 import argparse
 import json

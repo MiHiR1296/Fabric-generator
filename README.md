@@ -75,7 +75,9 @@ The LaMa model loader searches these locations in order:
 2. `../big-lama.pt` from this repo, usually `<yarnseamless UI>/big-lama.pt`
 3. `backend/vendor/yarn_pipeline/big-lama.pt`
 4. `~/.cache/torch/hub/checkpoints/big-lama.pt`
-5. vendored chunk reconstruction if chunk files are available
+
+The old vendored split chunks have been removed from Git. Keep model weights in
+Drive, local cache, or an explicit environment path.
 
 Recommended local setup for the raw model:
 

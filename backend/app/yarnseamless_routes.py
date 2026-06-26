@@ -27,7 +27,7 @@ lifespan hook in `main.py`. Fallback chain for the LaMa weights:
   2. `<yarnseamless UI>/big-lama.pt`              (local shared artifact)
   3. `backend/vendor/yarn_pipeline/big-lama.pt`   (local reconstruction target)
   4. `~/.cache/torch/hub/checkpoints/big-lama.pt`
-  5. `seamless_converter.ensure_bundled_model_path()` if chunk files exist
+  5. optional local chunk reconstruction if chunk files are present outside Git
 """
 from __future__ import annotations
 
@@ -132,7 +132,8 @@ def ensure_model_loaded() -> None:
         try:
             from seamless_converter import ensure_bundled_model_path  # type: ignore
             reconstructed = ensure_bundled_model_path()
-            MODEL_PATH = Path(reconstructed)
+            if reconstructed:
+                MODEL_PATH = Path(reconstructed)
         except Exception as e:  # pragma: no cover
             print(f"[lama] vendor reconstruct failed: {e}")
             traceback.print_exc()
@@ -142,8 +143,7 @@ def ensure_model_loaded() -> None:
             "big-lama.pt not found. Set BIG_LAMA_MODEL_PATH or LAMA_MODEL, or place "
             "the file at <yarnseamless UI>/big-lama.pt, "
             "backend/vendor/yarn_pipeline/big-lama.pt, or "
-            "~/.cache/torch/hub/checkpoints/big-lama.pt. Vendor chunk "
-            "reconstruction is also attempted when chunk files are present."
+            "~/.cache/torch/hub/checkpoints/big-lama.pt."
         )
 
     if torch.backends.mps.is_available():

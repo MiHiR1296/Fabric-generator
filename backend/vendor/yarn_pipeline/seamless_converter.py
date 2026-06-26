@@ -22,13 +22,13 @@ def resolve_configured_model_path() -> Optional[str]:
     return None
 
 
-def ensure_bundled_model_path() -> str:
+def ensure_bundled_model_path() -> Optional[str]:
     if DEFAULT_MODEL_PATH.exists():
         return str(DEFAULT_MODEL_PATH)
 
     chunk_paths = sorted(MODEL_CHUNK_DIR.glob(f"{MODEL_CHUNK_PREFIX}*"))
     if not chunk_paths:
-        return str(DEFAULT_MODEL_PATH)
+        return None
 
     DEFAULT_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     with DEFAULT_MODEL_PATH.open("wb") as destination:
@@ -38,8 +38,9 @@ def ensure_bundled_model_path() -> str:
     return str(DEFAULT_MODEL_PATH)
 
 
-# Use bundled weights file if no LAMA_MODEL env var is set
-os.environ.setdefault("LAMA_MODEL", resolve_configured_model_path() or ensure_bundled_model_path())
+configured_model_path = resolve_configured_model_path() or ensure_bundled_model_path()
+if configured_model_path:
+    os.environ.setdefault("LAMA_MODEL", configured_model_path)
 
 import argparse
 import numpy as np
@@ -65,6 +66,8 @@ def get_lama_model():
             device = torch.device("cpu")
         # Load model on CPU first (the .pt was saved from CUDA), then move to device
         model_path = os.environ.get("LAMA_MODEL")
+        if not model_path:
+            raise FileNotFoundError("big-lama.pt not found. Set BIG_LAMA_MODEL_PATH or LAMA_MODEL.")
         model = torch.jit.load(model_path, map_location="cpu")
         model.eval()
         model.to(device)
