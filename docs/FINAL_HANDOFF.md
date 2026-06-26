@@ -128,7 +128,9 @@ FabricGenerator_ExternalAssets_2026-05-16/
     big-lama.pt
 ```
 
-The raw `big-lama.pt` model should not be committed.
+The reconstructed raw `big-lama.pt` model should not be committed. The repo
+does carry split chunks under `backend/vendor/yarn_pipeline/model_chunks/` so a
+fresh server can run `make backend-setup-lama`.
 
 The loader checks:
 
@@ -137,6 +139,7 @@ The loader checks:
 3. `<yarnseamless UI>/big-lama.pt`
 4. `backend/vendor/yarn_pipeline/big-lama.pt`
 5. `~/.cache/torch/hub/checkpoints/big-lama.pt`
+6. tracked chunks in `backend/vendor/yarn_pipeline/model_chunks/`
 
 Git LFS is currently disabled for the GitHub repository, so this branch does not depend on LFS. `Codex_ParametricWeave.blend` and `Renders/Objects.blend` are both small enough for normal Git. Future heavyweight `.blend` or model artifacts should move to Git LFS only after the repository enables it, or to release/external storage.
 
@@ -144,6 +147,12 @@ Recommended local model setup:
 
 ```bash
 export BIG_LAMA_MODEL_PATH="/absolute/path/to/big-lama.pt"
+```
+
+Recommended server setup from a fresh clone:
+
+```bash
+make backend-setup-lama
 ```
 
 Recommended local placement:

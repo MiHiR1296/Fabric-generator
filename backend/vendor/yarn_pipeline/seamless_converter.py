@@ -67,7 +67,10 @@ def get_lama_model():
         # Load model on CPU first (the .pt was saved from CUDA), then move to device
         model_path = os.environ.get("LAMA_MODEL")
         if not model_path:
-            raise FileNotFoundError("big-lama.pt not found. Set BIG_LAMA_MODEL_PATH or LAMA_MODEL.")
+            raise FileNotFoundError(
+                "big-lama.pt not found. Set BIG_LAMA_MODEL_PATH or LAMA_MODEL, "
+                "or run `make backend-setup-lama` from the repository root."
+            )
         model = torch.jit.load(model_path, map_location="cpu")
         model.eval()
         model.to(device)

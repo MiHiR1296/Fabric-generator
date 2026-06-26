@@ -8,7 +8,7 @@ Direct asset bundle:
 
 https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP
 
-The GitHub repo contains the application code, docs, tests, the current weave Blender scene, and the Try-On object scene at `Renders/Objects.blend`. The Drive folder carries local runtime assets that should not live in Git.
+The GitHub repo contains the application code, docs, tests, the current weave Blender scene, the Try-On object scene at `Renders/Objects.blend`, and split chunks for the LaMa model. The Drive folder carries optional local runtime assets and backups that should not live in Git.
 
 ## Expected Drive Contents
 
@@ -44,6 +44,12 @@ If the assets live somewhere else, set:
 ```bash
 export YARN_LIBRARY_ROOT="/absolute/path/to/yarn_library"
 export BIG_LAMA_MODEL_PATH="/absolute/path/to/big-lama.pt"
+```
+
+If you do not download the raw Drive model, reconstruct it from the repo chunks:
+
+```bash
+make backend-setup-lama
 ```
 
 Then run:

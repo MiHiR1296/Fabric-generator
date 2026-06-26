@@ -95,6 +95,9 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 device: torch.device | None = None
 model: Any = None
 MODEL_PATH: Path | None = None
+VENDOR_MODEL_PATH = PROJECT_ROOT / "backend" / "vendor" / "yarn_pipeline" / "big-lama.pt"
+MODEL_CHUNK_DIR = PROJECT_ROOT / "backend" / "vendor" / "yarn_pipeline" / "model_chunks"
+MODEL_CHUNK_PREFIX = "big-lama.pt.part-"
 
 
 def _resolve_model_path() -> Path | None:
@@ -108,13 +111,34 @@ def _resolve_model_path() -> Path | None:
 
     candidates: list[Path] = [
         PROJECT_ROOT.parent / "big-lama.pt",
-        PROJECT_ROOT / "backend" / "vendor" / "yarn_pipeline" / "big-lama.pt",
+        VENDOR_MODEL_PATH,
         Path.home() / ".cache" / "torch" / "hub" / "checkpoints" / "big-lama.pt",
     ]
     for c in candidates:
         if c.exists() and c.is_file():
             return c
     return None
+
+
+def _reconstruct_model_from_chunks(
+    chunk_dir: Path = MODEL_CHUNK_DIR,
+    target_path: Path = VENDOR_MODEL_PATH,
+) -> Path | None:
+    """Rebuild the ignored raw model from tracked split chunks, if present."""
+    if target_path.exists() and target_path.is_file():
+        return target_path
+    chunk_paths = sorted(chunk_dir.glob(f"{MODEL_CHUNK_PREFIX}*"))
+    if not chunk_paths:
+        return None
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target_path.with_name(f".{target_path.name}.tmp")
+    with temp_path.open("wb") as destination:
+        for chunk_path in chunk_paths:
+            with chunk_path.open("rb") as source:
+                shutil.copyfileobj(source, destination)
+    temp_path.replace(target_path)
+    return target_path
 
 
 def ensure_model_loaded() -> None:
@@ -124,6 +148,9 @@ def ensure_model_loaded() -> None:
         return
 
     MODEL_PATH = _resolve_model_path()
+    if MODEL_PATH is None:
+        MODEL_PATH = _reconstruct_model_from_chunks()
+
     if MODEL_PATH is None:
         # Last resort: ask the vendor seamless_converter to reconstruct from chunks.
         vendor_root = PROJECT_ROOT / "backend" / "vendor" / "yarn_pipeline"
@@ -143,7 +170,8 @@ def ensure_model_loaded() -> None:
             "big-lama.pt not found. Set BIG_LAMA_MODEL_PATH or LAMA_MODEL, or place "
             "the file at <yarnseamless UI>/big-lama.pt, "
             "backend/vendor/yarn_pipeline/big-lama.pt, or "
-            "~/.cache/torch/hub/checkpoints/big-lama.pt."
+            "~/.cache/torch/hub/checkpoints/big-lama.pt. If this is a fresh clone, "
+            "run `make backend-setup-lama` to reconstruct it from tracked chunks."
         )
 
     if torch.backends.mps.is_available():

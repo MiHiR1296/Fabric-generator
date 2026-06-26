@@ -46,7 +46,7 @@ https://drive.google.com/drive/folders/1z3Ucq0O4ETbsYhVzkTka9l_xxtMeQAsP
 | **Phase 3f** — modifier panel reorganization + dead socket removal (5 legacy globals removed; Material Slots + V-Band Mapping panels consolidated) | ✓ done |
 | **Phase 3g** — pin Sub Strand Enable + add `BLENDER_LIVE_RENDER` dev-mode env var (render jobs route to the open Blender session over MCP) | ✓ done |
 | **Phase 10u / Checkpoint 2026-05-19** — visually approved direct web-to-Blender material baseline; `Spacing = 0.026`, `Arc 1 V Padding = 0.008`, `Texture Offset V = 0`, `Sub Texture Scale V = 1`, `Sub Texture Offset V = 0`, root `Texture Scale U = 1`; current auto `Material N Texture Scale U` derives from the material core band times the graph core fraction | ✓ done |
-| **Publish prep** — final handoff doc, debug ignores, external model env-path support, LFS-disabled fallback documented | ✓ done |
+| **Publish prep** — final handoff doc, debug ignores, model chunk packaging, external model env-path support, LFS-disabled fallback documented | ✓ done |
 | **Yarn scan processing repair** — segmentation-first thread detection, natural RGBA export, full-resolution RGBA UDIM tiles, red/background chroma removal from fringe, mandatory sub-degree thread rotation, connected-core red bands | ✓ done |
 | **2026-06-05 material/padding update** — current generated RGBA yarn materials use the diffuse/RGBA alpha channel directly, with alpha remap opt-in only; `Arc 1 V Padding` default is now `0.02` | ✓ done |
 
@@ -69,8 +69,6 @@ In rough priority order — the **bigger** items first.
 - **Texture World Width BU socket** still doesn't exist on the .blend. Producer publishes `bandMeta.blender.texture_world_width_m`; consumer falls back to legacy `Material N Image Width Px` ÷ `Scanner Pixels Per BU` to derive the same value. Adding the socket would simplify the math and remove a pixel-level intermediate from the wire format. Documented in [putting-it-together/data_contract.md](putting-it-together/data_contract.md).
 
 - **Live-render UI toggle**. Currently `BLENDER_LIVE_RENDER` is a backend env var (`make backend-dev-live`). A dev-only checkbox in Step 3 would let multiple devs share a backend without restarting.
-
-- **Large model artifact migration**. The raw `big-lama.pt` stays out of Git and can be supplied through `BIG_LAMA_MODEL_PATH` / `LAMA_MODEL`. The old split chunks have been removed from the repository baseline; keep weights in Drive, local cache, release assets, or LFS if the repository enables it later.
 
 ### Smaller cleanups
 

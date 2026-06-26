@@ -47,7 +47,7 @@ runtime/      local generated assets, render jobs, projects, and debug output
 
 Do not commit local generated data, raw scan uploads, virtual environments, generated render outputs, or the reconstructed `big-lama.pt` file.
 
-Git LFS is currently disabled for the GitHub repository, so this branch does not rely on LFS. The current weave scene (`Codex_ParametricWeave.blend`, about 26 MB) and Try-On scene (`Renders/Objects.blend`, about 24 MB) are committed normally. Raw model weights and generated renders stay external or local.
+Git LFS is currently disabled for the GitHub repository, so this branch does not rely on LFS. The current weave scene (`Codex_ParametricWeave.blend`, about 26 MB), Try-On scene (`Renders/Objects.blend`, about 24 MB), and split LaMa model chunks are committed normally. The reconstructed raw model and generated renders stay local.
 
 The Drive folder should contain:
 
@@ -75,9 +75,15 @@ The LaMa model loader searches these locations in order:
 2. `../big-lama.pt` from this repo, usually `<yarnseamless UI>/big-lama.pt`
 3. `backend/vendor/yarn_pipeline/big-lama.pt`
 4. `~/.cache/torch/hub/checkpoints/big-lama.pt`
+5. tracked chunks in `backend/vendor/yarn_pipeline/model_chunks/`
 
-The old vendored split chunks have been removed from Git. Keep model weights in
-Drive, local cache, or an explicit environment path.
+The repo includes split model chunks under
+`backend/vendor/yarn_pipeline/model_chunks/`. A fresh server can reconstruct the
+ignored raw model with:
+
+```bash
+make backend-setup-lama
+```
 
 Recommended local setup for the raw model:
 

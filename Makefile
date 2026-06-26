@@ -1,4 +1,4 @@
-.PHONY: frontend-install frontend-dev backend-install backend-dev backend-dev-live backend-test frontend-test frontend-e2e
+.PHONY: frontend-install frontend-dev backend-install backend-setup-lama backend-dev backend-dev-live backend-test frontend-test frontend-e2e
 
 frontend-install:
 	cd frontend && npm install
@@ -8,6 +8,9 @@ frontend-dev:
 
 backend-install:
 	cd backend && python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+
+backend-setup-lama:
+	python3 scripts/reconstruct_lama_model.py
 
 backend-dev:
 	cd backend && . .venv/bin/activate && BLENDER_PORT=$${BLENDER_PORT:-9876} python -m app.main
